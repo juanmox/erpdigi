@@ -7,7 +7,6 @@ export const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL es requerido'),
   JWT_SECRET: z.string().min(1, 'JWT_SECRET es requerido'),
-  JWT_REFRESH_SECRET: z.string().min(1, 'JWT_REFRESH_SECRET es requerido'),
 });
 
 export type Env = z.infer<typeof envSchema>;

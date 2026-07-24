@@ -1,2 +1,161 @@
 // Schema `core`: empresas, usuarios, roles/permisos, monedas, auditoria, refresh_tokens.
-// Modelos se agregan en la Fase 1 del plan (ver plan de arquitectura).
+// Convenciones: nombres de tabla/columna en snake_case (via @@map/@map), igual que recetas.
+
+model Empresa {
+  idEmpresa       Int      @id @default(autoincrement()) @map("id_empresa")
+  codigo          String   @unique
+  razonSocial     String   @map("razon_social")
+  nombreComercial String?  @map("nombre_comercial")
+  nit             String?
+  idMonedaBase    Int      @map("id_moneda_base")
+  monedaBase      Moneda   @relation(fields: [idMonedaBase], references: [idMoneda])
+  activo          Boolean  @default(true)
+  creadoEn        DateTime @default(now()) @map("creado_en")
+  actualizadoEn   DateTime @updatedAt @map("actualizado_en")
+
+  usuarioEmpresaRoles UsuarioEmpresaRol[]
+  auditorias          Auditoria[]
+
+  @@map("empresas")
+  @@schema("core")
+}
+
+model Usuario {
+  idUsuario      Int       @id @default(autoincrement()) @map("id_usuario")
+  email          String    @unique
+  passwordHash   String    @map("password_hash")
+  nombreCompleto String    @map("nombre_completo")
+  activo         Boolean   @default(true)
+  mfaHabilitado  Boolean   @default(false) @map("mfa_habilitado")
+  mfaSecret      String?   @map("mfa_secret")
+  ultimoLoginEn  DateTime? @map("ultimo_login_en")
+  creadoEn       DateTime  @default(now()) @map("creado_en")
+
+  empresaRoles  UsuarioEmpresaRol[]
+  refreshTokens RefreshToken[]
+  auditorias    Auditoria[]
+
+  @@map("usuarios")
+  @@schema("core")
+}
+
+model Rol {
+  idRol        Int     @id @default(autoincrement()) @map("id_rol")
+  codigo       String  @unique
+  nombre       String
+  descripcion  String?
+  esRolSistema Boolean @default(false) @map("es_rol_sistema")
+
+  permisos            RolPermiso[]
+  usuarioEmpresaRoles UsuarioEmpresaRol[]
+
+  @@map("roles")
+  @@schema("core")
+}
+
+model Permiso {
+  idPermiso   Int     @id @default(autoincrement()) @map("id_permiso")
+  codigo      String  @unique
+  descripcion String?
+
+  roles RolPermiso[]
+
+  @@map("permisos")
+  @@schema("core")
+}
+
+model RolPermiso {
+  idRol     Int @map("id_rol")
+  idPermiso Int @map("id_permiso")
+
+  rol     Rol     @relation(fields: [idRol], references: [idRol], onDelete: Cascade)
+  permiso Permiso @relation(fields: [idPermiso], references: [idPermiso], onDelete: Cascade)
+
+  @@id([idRol, idPermiso])
+  @@map("rol_permisos")
+  @@schema("core")
+}
+
+model UsuarioEmpresaRol {
+  idUsuarioEmpresaRol Int     @id @default(autoincrement()) @map("id_usuario_empresa_rol")
+  idUsuario           Int     @map("id_usuario")
+  idEmpresa           Int     @map("id_empresa")
+  idRol               Int     @map("id_rol")
+  activo              Boolean @default(true)
+
+  usuario Usuario @relation(fields: [idUsuario], references: [idUsuario], onDelete: Cascade)
+  empresa Empresa @relation(fields: [idEmpresa], references: [idEmpresa], onDelete: Cascade)
+  rol     Rol     @relation(fields: [idRol], references: [idRol], onDelete: Cascade)
+
+  @@unique([idUsuario, idEmpresa, idRol])
+  @@map("usuario_empresa_rol")
+  @@schema("core")
+}
+
+model Moneda {
+  idMoneda  Int    @id @default(autoincrement()) @map("id_moneda")
+  codigoIso String @unique @map("codigo_iso") @db.Char(3)
+  nombre    String
+  simbolo   String
+  decimales Int    @default(2)
+
+  empresas         Empresa[]
+  tasasComoOrigen  TasaCambio[] @relation("monedaOrigen")
+  tasasComoDestino TasaCambio[] @relation("monedaDestino")
+
+  @@map("monedas")
+  @@schema("core")
+}
+
+model TasaCambio {
+  idTasaCambio    Int      @id @default(autoincrement()) @map("id_tasa_cambio")
+  idMonedaOrigen  Int      @map("id_moneda_origen")
+  idMonedaDestino Int      @map("id_moneda_destino")
+  fecha           DateTime @db.Date
+  tasa            Decimal  @db.Decimal(18, 6)
+  fuente          String
+  creadoEn        DateTime @default(now()) @map("creado_en")
+
+  monedaOrigen  Moneda @relation("monedaOrigen", fields: [idMonedaOrigen], references: [idMoneda])
+  monedaDestino Moneda @relation("monedaDestino", fields: [idMonedaDestino], references: [idMoneda])
+
+  @@unique([idMonedaOrigen, idMonedaDestino, fecha])
+  @@map("tasas_cambio")
+  @@schema("core")
+}
+
+model Auditoria {
+  idAuditoria     Int      @id @default(autoincrement()) @map("id_auditoria")
+  idEmpresa       Int?     @map("id_empresa")
+  idUsuario       Int?     @map("id_usuario")
+  entidad         String
+  idEntidad       String   @map("id_entidad")
+  accion          String
+  datosAnteriores Json?    @map("datos_anteriores")
+  datosNuevos     Json?    @map("datos_nuevos")
+  ipOrigen        String?  @map("ip_origen")
+  userAgent       String?  @map("user_agent")
+  creadoEn        DateTime @default(now()) @map("creado_en")
+
+  empresa Empresa? @relation(fields: [idEmpresa], references: [idEmpresa])
+  usuario Usuario? @relation(fields: [idUsuario], references: [idUsuario])
+
+  @@map("auditoria")
+  @@schema("core")
+}
+
+model RefreshToken {
+  idRefreshToken Int      @id @default(autoincrement()) @map("id_refresh_token")
+  idUsuario      Int      @map("id_usuario")
+  tokenHash      String   @unique @map("token_hash")
+  expiraEn       DateTime @map("expira_en")
+  revocado       Boolean  @default(false)
+  creadoEn       DateTime @default(now()) @map("creado_en")
+  ipOrigen       String?  @map("ip_origen")
+  userAgent      String?  @map("user_agent")
+
+  usuario Usuario @relation(fields: [idUsuario], references: [idUsuario], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+  @@schema("core")
+}
