@@ -1,0 +1,2 @@
+// Schema `core`: empresas, usuarios, roles/permisos, monedas, auditoria, refresh_tokens.
+// Modelos se agregan en la Fase 1 del plan (ver plan de arquitectura).

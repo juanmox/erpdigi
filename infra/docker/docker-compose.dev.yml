@@ -1,0 +1,29 @@
+# Uso exclusivo de DESARROLLO LOCAL. Producción sigue con PM2 + git pull,
+# igual que 01_erp — ver plan de arquitectura, decisión de infraestructura.
+#
+# Puerto 5433 (no 5432): esta máquina ya tiene un Postgres nativo escuchando en
+# 5432 fuera de Docker; usar 5433 evita chocar con él.
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: digitexsa
+      POSTGRES_PASSWORD: digitexsa_dev
+      POSTGRES_DB: digitexsa_erp_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - digitexsa_erp_pgdata:/var/lib/postgresql
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - digitexsa_erp_redisdata:/data
+
+volumes:
+  digitexsa_erp_pgdata:
+  digitexsa_erp_redisdata:

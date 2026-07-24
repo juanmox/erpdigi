@@ -1,0 +1,9 @@
+{
+  "name": "@digitexsa-erp/config",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "prettier.config.js",
+    "tsconfig.base.json"
+  ]
+}
