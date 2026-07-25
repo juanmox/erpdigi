@@ -10,6 +10,11 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
 import { EmpresasModule } from './modules/empresas/empresas.module';
 import { MonedasModule } from './modules/monedas/monedas.module';
+import { CotizacionesModule } from './modules/recetas-cotizaciones/cotizaciones.module';
+import { InsumosModule } from './modules/recetas-insumos/insumos.module';
+import { ProductosModule } from './modules/recetas-productos/productos.module';
+import { ReferenciasModule } from './modules/recetas-referencias/referencias.module';
+import { TipoCambioModule } from './modules/recetas-tipo-cambio/tipo-cambio.module';
 import { RolesPermisosModule } from './modules/roles-permisos/roles-permisos.module';
 import { UsuariosModule } from './modules/usuarios/usuarios.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -27,6 +32,11 @@ import { PrismaModule } from './prisma/prisma.module';
     UsuariosModule,
     RolesPermisosModule,
     MonedasModule,
+    TipoCambioModule,
+    ReferenciasModule,
+    InsumosModule,
+    ProductosModule,
+    CotizacionesModule,
   ],
   controllers: [AppController],
   providers: [

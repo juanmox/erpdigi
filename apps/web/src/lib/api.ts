@@ -49,3 +49,22 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
+
+/** Para descargas protegidas (export/plantillas Excel) — un <a href> normal no manda el Bearer token. */
+export async function descargarArchivo(path: string, nombreArchivo: string): Promise<void> {
+  const res = await rawFetch(path, { method: 'GET' })
+  if (!res.ok) {
+    const cuerpo = await res.json().catch(() => ({}) as Record<string, unknown>)
+    const mensaje = typeof cuerpo.message === 'string' ? cuerpo.message : `Error ${res.status}`
+    throw new ApiError(res.status, mensaje)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = nombreArchivo
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}

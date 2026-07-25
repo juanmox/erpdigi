@@ -3,6 +3,8 @@ import { Shell } from '@/app/shell'
 import { AuthProvider, useAuth } from '@/features/auth/auth-context'
 import { LoginPage } from '@/features/auth/login-page'
 import { SeleccionarEmpresa } from '@/features/auth/seleccionar-empresa'
+import { CatalogoPage } from '@/features/catalogo/catalogo-page'
+import { CotizacionPage } from '@/features/recetas/cotizacion-page'
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
   const { autenticado, cargando, requiereSeleccionEmpresa } = useAuth()
@@ -45,7 +47,10 @@ function App() {
                 <Shell />
               </RutaProtegida>
             }
-          />
+          >
+            <Route index element={<CotizacionPage />} />
+            <Route path="catalogo" element={<CatalogoPage />} />
+          </Route>
         </Routes>
       </BrowserRouter>
     </AuthProvider>

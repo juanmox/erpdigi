@@ -1,8 +1,9 @@
-datasource db {
-  provider = "postgresql"
-  schemas  = ["core"]
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["views"]
 }
 
-generator client {
-  provider = "prisma-client-js"
+datasource db {
+  provider = "postgresql"
+  schemas  = ["core", "recetas"]
 }

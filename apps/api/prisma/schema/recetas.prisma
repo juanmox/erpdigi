@@ -1,0 +1,191 @@
+model AreaUso {
+  idArea          Int              @id @default(autoincrement()) @map("id_area")
+  nombre          String           @unique @db.VarChar(60)
+  productoInsumos ProductoInsumo[]
+
+  @@map("areas_uso")
+  @@schema("recetas")
+}
+
+model CategoriaInsumo {
+  idCategoria Int      @id @default(autoincrement()) @map("id_categoria")
+  nombre      String   @unique @db.VarChar(60)
+  orden       Int      @default(0)
+  insumos     Insumo[]
+
+  @@map("categorias_insumo")
+  @@schema("recetas")
+}
+
+model Cliente {
+  idCliente Int        @id @default(autoincrement()) @map("id_cliente")
+  codigo    String     @unique @db.VarChar(20)
+  nombre    String     @db.VarChar(150)
+  productos Producto[]
+
+  @@map("clientes")
+  @@schema("recetas")
+}
+
+/// Snapshot de cabecera de un producto congelado al momento de cotizar.
+model CotizacionDetalle {
+  idDetalle      Int                       @id @default(autoincrement()) @map("id_detalle")
+  idCotizacion   Int                       @map("id_cotizacion")
+  idProducto     Int?                      @map("id_producto")
+  codigoProducto String                    @map("codigo_producto") @db.VarChar(40)
+  descripcion    String                    @db.VarChar(250)
+  cantidad       Decimal                   @db.Decimal(14, 2)
+  costoUnitario  Decimal                   @map("costo_unitario") @db.Decimal(16, 6)
+  costoTotal     Decimal                   @map("costo_total") @db.Decimal(16, 4)
+  desarrollo     String?                   @db.VarChar(40)
+  patron         String?                   @db.VarChar(60)
+  tamano         String?                   @db.VarChar(60)
+  deporte        String?                   @db.VarChar(60)
+  cliente        String?                   @db.VarChar(150)
+  precioVenta    Decimal?                  @map("precio_venta") @db.Decimal(12, 2)
+  cotizacion     Cotizacion                @relation(fields: [idCotizacion], references: [idCotizacion], onDelete: Cascade, onUpdate: NoAction)
+  producto       Producto?                 @relation(fields: [idProducto], references: [idProducto], onDelete: NoAction, onUpdate: NoAction)
+  insumos        CotizacionDetalleInsumo[]
+
+  @@index([idCotizacion], map: "idx_detalle_cotizacion")
+  @@map("cotizacion_detalle")
+  @@schema("recetas")
+}
+
+/// Snapshot de una línea de insumo (o de la fila sintética de mano de obra) dentro de una cotización.
+model CotizacionDetalleInsumo {
+  idCdi          Int               @id @default(autoincrement()) @map("id_cdi")
+  idDetalle      Int               @map("id_detalle")
+  idInsumo       Int?              @map("id_insumo")
+  codigo         String?           @db.VarChar(30)
+  descripcion    String            @db.VarChar(250)
+  categoria      String            @db.VarChar(60)
+  ordenCategoria Int               @default(0) @map("orden_categoria")
+  unidad         String?           @db.VarChar(40)
+  area           String?           @db.VarChar(60)
+  consumo        Decimal           @db.Decimal(14, 6)
+  costoPromedio  Decimal           @map("costo_promedio") @db.Decimal(14, 6)
+  costoTotal     Decimal           @map("costo_total") @db.Decimal(16, 6)
+  esManoObra     Boolean           @default(false) @map("es_mano_obra")
+  detalle        CotizacionDetalle @relation(fields: [idDetalle], references: [idDetalle], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([idDetalle], map: "idx_cdi_detalle")
+  @@map("cotizacion_detalle_insumo")
+  @@schema("recetas")
+}
+
+model Cotizacion {
+  idCotizacion  Int                 @id @default(autoincrement()) @map("id_cotizacion")
+  folio         String?             @unique @db.VarChar(20)
+  fechaCreacion DateTime            @default(now()) @map("fecha_creacion") @db.Timestamptz(6)
+  totalCantidad Decimal             @default(0) @map("total_cantidad") @db.Decimal(14, 2)
+  totalCosto    Decimal             @default(0) @map("total_costo") @db.Decimal(16, 4)
+  notas         String?
+  moneda        String              @default("GTQ") @db.VarChar(3)
+  tasaCambio    Decimal?            @map("tasa_cambio") @db.Decimal(12, 6)
+  detalle       CotizacionDetalle[]
+
+  @@map("cotizaciones")
+  @@schema("recetas")
+}
+
+model Deporte {
+  idDeporte Int    @id @default(autoincrement()) @map("id_deporte")
+  nombre    String @unique @db.VarChar(60)
+
+  @@map("deportes")
+  @@schema("recetas")
+}
+
+model Insumo {
+  idInsumo        Int              @id @default(autoincrement()) @map("id_insumo")
+  codigo          String           @unique @db.VarChar(30)
+  descripcion     String           @db.VarChar(250)
+  idCategoria     Int              @map("id_categoria")
+  idUnidad        Int              @map("id_unidad")
+  costoPromedio   Decimal          @default(0) @map("costo_promedio") @db.Decimal(14, 6)
+  activo          Boolean          @default(true)
+  categoria       CategoriaInsumo  @relation(fields: [idCategoria], references: [idCategoria], onDelete: NoAction, onUpdate: NoAction)
+  unidad          UnidadMedida     @relation(fields: [idUnidad], references: [idUnidad], onDelete: NoAction, onUpdate: NoAction)
+  productoInsumos ProductoInsumo[]
+
+  @@map("insumos")
+  @@schema("recetas")
+}
+
+/// Línea de receta (producto <-> insumo). Única tabla maestra con borrado físico permitido.
+model ProductoInsumo {
+  idProductoInsumo Int      @id @default(autoincrement()) @map("id_producto_insumo")
+  idProducto       Int      @map("id_producto")
+  idInsumo         Int      @map("id_insumo")
+  consumo          Decimal  @default(0) @db.Decimal(14, 6)
+  idArea           Int?     @map("id_area")
+  area             AreaUso? @relation(fields: [idArea], references: [idArea], onDelete: NoAction, onUpdate: NoAction)
+  insumo           Insumo   @relation(fields: [idInsumo], references: [idInsumo], onDelete: NoAction, onUpdate: NoAction)
+  producto         Producto @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([idProducto, idInsumo, idArea])
+  @@index([idProducto], map: "idx_prodins_producto")
+  @@map("producto_insumos")
+  @@schema("recetas")
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model Producto {
+  idProducto          Int                 @id @default(autoincrement()) @map("id_producto")
+  codigo              String              @unique @db.VarChar(40)
+  desarrollo          String?             @db.VarChar(40)
+  patron              String?             @db.VarChar(60)
+  descripcion         String              @db.VarChar(250)
+  tamano              String?             @db.VarChar(60)
+  deporte             String?             @db.VarChar(60)
+  idCliente           Int?                @map("id_cliente")
+  precioVenta         Decimal             @default(0) @map("precio_venta") @db.Decimal(12, 2)
+  minutosMo           Decimal             @default(0) @map("minutos_mo") @db.Decimal(10, 2)
+  costoMoMinuto       Decimal             @default(0.33) @map("costo_mo_minuto") @db.Decimal(10, 4)
+  activo              Boolean             @default(true)
+  creadoEn            DateTime            @default(now()) @map("creado_en") @db.Timestamptz(6)
+  detalleCotizaciones CotizacionDetalle[]
+  productoInsumos     ProductoInsumo[]
+  cliente             Cliente?            @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([idCliente], map: "idx_prod_cliente")
+  @@index([codigo(ops: raw("gin_trgm_ops"))], map: "idx_prod_codigo_trgm", type: Gin)
+  @@index([desarrollo], map: "idx_prod_desarrollo")
+  @@index([descripcion(ops: raw("gin_trgm_ops"))], map: "idx_prod_desc_trgm", type: Gin)
+  @@index([patron], map: "idx_prod_patron")
+  @@index([tamano], map: "idx_prod_tamano")
+  @@map("productos")
+  @@schema("recetas")
+}
+
+model Talla {
+  idTalla Int    @id @default(autoincrement()) @map("id_talla")
+  nombre  String @unique @db.VarChar(10)
+  orden   Int    @default(0)
+
+  @@map("tallas")
+  @@schema("recetas")
+}
+
+model UnidadMedida {
+  idUnidad Int      @id @default(autoincrement()) @map("id_unidad")
+  nombre   String   @unique @db.VarChar(40)
+  insumos  Insumo[]
+
+  @@map("unidades_medida")
+  @@schema("recetas")
+}
+
+/// Vista de solo lectura: costo_unitario = Σ(consumo×costo_promedio) + minutos_mo×costo_mo_minuto.
+view ProductoCosto {
+  idProducto    Int?     @map("id_producto")
+  codigo        String?  @db.VarChar(40)
+  descripcion   String?  @db.VarChar(250)
+  costoInsumos  Decimal? @map("costo_insumos") @db.Decimal
+  costoManoObra Decimal? @map("costo_mano_obra") @db.Decimal
+  costoUnitario Decimal? @map("costo_unitario") @db.Decimal
+
+  @@map("v_producto_costo")
+  @@schema("recetas")
+}
