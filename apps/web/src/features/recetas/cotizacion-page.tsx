@@ -41,7 +41,13 @@ export function CotizacionPage() {
     setTextoBusqueda(v)
     setProdSeleccionado(null)
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => setQ(v), 250)
+    if (v.trim() === '') {
+      // Sin esto, al borrar el campo el filtro anterior (q) queda vigente por 250ms más:
+      // el buscador se ve vacío pero la lista sigue acotada a la búsqueda ya cerrada.
+      setQ('')
+    } else {
+      debounceRef.current = setTimeout(() => setQ(v), 250)
+    }
   }
 
   const filtrosActivos = useMemo(
@@ -107,6 +113,7 @@ export function CotizacionPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     setProdSeleccionado(p)
     setTextoBusqueda(`${p.codigo} — ${p.descripcion}`)
+    setQ('')
   }
 
   function agregarProducto() {
