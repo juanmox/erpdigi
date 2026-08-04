@@ -4,12 +4,15 @@ import { ImportPreviewDialog } from '@/components/shared/import-preview-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
 import { formatGTQ } from '@digitexsa-erp/shared-utils'
 import { catalogoApi } from '../api'
 import type { FilaPreviewPrecio, InsumoCatalogo } from '../types'
+
+const SIN_FILTRO = '__todos__'
 
 export function TabPrecios() {
   const { tienePermiso } = useAuth()
@@ -21,17 +24,38 @@ export function TabPrecios() {
     queryKey: ['catalogo', 'insumos', 'activos'],
     queryFn: () => catalogoApi.listarInsumos('activos'),
   })
+  const { data: categorias } = useQuery({
+    queryKey: ['catalogo', 'categorias-insumo'],
+    queryFn: () => catalogoApi.categoriasInsumo(),
+  })
+  const { data: unidades } = useQuery({
+    queryKey: ['catalogo', 'unidades-medida'],
+    queryFn: () => catalogoApi.unidadesMedida(),
+  })
 
+  const [busqueda, setBusqueda] = useState('')
+  const [idCategoria, setIdCategoria] = useState(SIN_FILTRO)
+  const [idUnidad, setIdUnidad] = useState(SIN_FILTRO)
   const [cambios, setCambios] = useState<Map<number, number>>(new Map())
   const [guardando, setGuardando] = useState(false)
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
   const [dialogoAbierto, setDialogoAbierto] = useState(false)
 
+  const insumosFiltrados = useMemo(() => {
+    const texto = busqueda.trim().toLowerCase()
+    return (insumos ?? []).filter((i) => {
+      if (texto && !i.codigo.toLowerCase().includes(texto) && !i.descripcion.toLowerCase().includes(texto)) return false
+      if (idCategoria !== SIN_FILTRO && String(i.idCategoria) !== idCategoria) return false
+      if (idUnidad !== SIN_FILTRO && String(i.idUnidad) !== idUnidad) return false
+      return true
+    })
+  }, [insumos, busqueda, idCategoria, idUnidad])
+
   const grupos = useMemo(() => {
     const g: Record<string, InsumoCatalogo[]> = {}
-    for (const i of insumos ?? []) (g[i.categoria] ??= []).push(i)
+    for (const i of insumosFiltrados) (g[i.categoria] ??= []).push(i)
     return g
-  }, [insumos])
+  }, [insumosFiltrados])
 
   function onCambiarPrecio(idInsumo: number, valor: string) {
     setCambios((prev) => {
@@ -64,7 +88,7 @@ export function TabPrecios() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-muted-foreground text-sm">
-          {insumos?.length ?? 0} insumos activos
+          {insumosFiltrados.length} de {insumos?.length ?? 0} insumos activos
           {cambios.size > 0 && <span> · {cambios.size} cambio(s) sin guardar</span>}
         </p>
         <div className="flex gap-2">
@@ -82,6 +106,41 @@ export function TabPrecios() {
             </Button>
           )}
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="Buscar por código o descripción…"
+          className="h-8 max-w-xs"
+        />
+        <Select value={idCategoria} onValueChange={setIdCategoria}>
+          <SelectTrigger size="sm" className="w-44">
+            <SelectValue placeholder="Categoría" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={SIN_FILTRO}>Todas las categorías</SelectItem>
+            {categorias?.map((c) => (
+              <SelectItem key={c.idCategoria} value={String(c.idCategoria)}>
+                {c.nombre}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={idUnidad} onValueChange={setIdUnidad}>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue placeholder="Unidad" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={SIN_FILTRO}>Todas las unidades</SelectItem>
+            {unidades?.map((u) => (
+              <SelectItem key={u.idUnidad} value={String(u.idUnidad)}>
+                {u.nombre}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {mensaje && (
