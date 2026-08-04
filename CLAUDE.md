@@ -100,38 +100,56 @@ Desde la raíz del repo (Turborepo resuelve el grafo de dependencias entre paque
   `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` opcionales.
 
 ## Despliegue a producción
-Decidido con el usuario (2026-08-03): **mismo servidor físico que `01_erp`** (Ubuntu interno,
-`192.168.2.13`, sin dominio público ni SSL — solo red interna, por ahora) y **misma base de
-datos** (`erpdb`) — un solo Postgres para todo el ERP, no una base separada por sistema. Es la
-misma filosofía que ya usa `01_erp` ("compartiendo la misma base para permitir JOINs y un solo
-backup") y la misma que ya sigue este repo con schemas por dominio (`core`, `recetas`, y los que
-se agreguen) — **no hace falta ningún cambio de arquitectura**, solo desplegar sobre lo que ya
-existe.
+✅ **Primer despliegue real hecho el 2026-08-04**, en el mismo servidor físico que `01_erp`
+(Ubuntu interno, hostname `backend-erp-test`, `192.168.2.13`, sin dominio público ni SSL — solo
+red interna) y la misma base de datos (`erpdb`) — un solo Postgres para todo el ERP, coexistiendo
+con `01_erp` (`erpapp`, puerto `3000`) y otra app no relacionada (`biosac-rrhh`, puerto `8081`) ya
+corriendo ahí. Repo en GitHub privado: `github.com/juanmox/erpdigi` (deploy key de solo lectura en
+el servidor, no la llave personal del usuario). Checkout del servidor en
+`/home/erpadmin/digitexsa-erp`.
 
-- **Un solo proceso PM2** (`digitexsa-api`, ver `ecosystem.config.js` en la raíz) — el frontend
-  (`apps/web`) no necesita proceso propio, se sirve como estáticos vía Nginx directo desde
-  `apps/web/dist/` (build de Vite, `base: '/erp'` ya configurado para esto). Referencia de la
-  config de Nginx a agregar junto a la que ya proxea `01_erp` a `:3000`:
-  `infra/nginx/digitexsa-erp.conf.example`.
-- **Deploy**: `scripts/deploy.sh` — mismo espíritu que el `git pull` + `pm2 restart` de `01_erp`,
-  con los pasos extra que este monorepo sí necesita: `pnpm install`, `prisma migrate deploy`,
-  build de `api` y `web`, luego `pm2 restart digitexsa-api`.
-- **Migraciones seguras sobre la base compartida**: solo existe una migración de Prisma hasta
-  ahora (`20260723234653_init_core`) y **no toca el schema `recetas`** — ese schema se introspectó
-  con `prisma db pull` y Prisma no lo gestiona por migraciones, así que `prisma migrate deploy`
-  nunca va a intentar recrear ni tocar las tablas de `recetas` que ya usa `01_erp` en producción.
-  Igual, antes del primer `migrate deploy` contra la base real, hacer un backup de `erpdb` — es la
-  primera vez que corre ahí.
-- **`.env` de producción**: copiar `apps/api/.env.example`, usar un `JWT_SECRET` propio (no el de
-  dev), un usuario de Postgres propio de la app nueva (no reusar `erpadmin` de `01_erp`), un
-  `PORT` libre (sugerido `4001`, ya que `01_erp` ocupa `3000`), y **`COOKIE_SECURE=false`
-  obligatorio** mientras no haya HTTPS — si se deja que siga a `NODE_ENV=production` por defecto,
-  el cookie de refresh token se marca `Secure` y el navegador nunca lo reenvía por HTTP plano,
-  rompiendo el login en producción.
-- **Datos de prueba**: antes de dar por lista la migración, limpiar cualquier dato de prueba que
-  haya quedado en la base compartida durante desarrollo (ej. insumos `TEST-PW-*` ya borrados el
-  2026-08-03 — revisar si hay más con otros prefijos, como `TEST-001`, encontrado pero no borrado
-  a propósito por no estar confirmado con el usuario).
+- **Un solo proceso PM2** (`digitexsa-api`, puerto `4001`, ver `ecosystem.config.js` en la raíz) —
+  el frontend no tiene proceso propio, Nginx lo sirve directo desde `apps/web/dist/`. Nginx
+  no usaba ningún prefijo de ruta para `01_erp` (proxea *todo* `:80` a `:3000`) — la config nueva
+  agrega `location /erp/api/` y `location /erp/` **dentro del mismo server block**, más
+  específicas que el catch-all `/` de `01_erp`, así que ambos conviven sin pisarse. Config real
+  vive en `/etc/nginx/sites-available/erpapp` en el servidor (con backup fechado antes del
+  cambio); `infra/nginx/digitexsa-erp.conf.example` en el repo es solo la referencia.
+- **Node**: el servidor tenía Node 22 del sistema (este repo pide `>=24`) — se instaló Node 24 vía
+  `nvm` **para el usuario `erpadmin`, sin sudo**, sin tocar el Node del sistema por si algo más lo
+  usa. `pnpm` se activa con `corepack prepare pnpm@11.17.0 --activate` (ya viene con Node ≥16.9).
+- **Deploy de rutina**: `scripts/deploy.sh` (`git pull` → `pnpm install` → `prisma migrate deploy`
+  → build de `api`/`web` → `pm2 restart digitexsa-api`) — pero antes de que ese script sirva hay
+  que activar nvm en la sesión (`export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"`), no está
+  metido en el script todavía.
+- **Gotchas reales encontrados en este primer deploy** (ya corregidos donde aplicaba):
+  1. No había ningún paso que corriera `prisma generate` tras `pnpm install` → build fallaba con
+     120 errores de TS. Corregido con `"postinstall": "prisma generate"` en `apps/api/package.json`.
+  2. `nest build` genera `dist/src/main.js`, no `dist/main.js` (el `tsconfig.json` no fija
+     `rootDir` porque también compila `prisma.config.ts`/`prisma/seed.ts`, fuera de `src/`) —
+     corregido en `ecosystem.config.js` y en el script `start:prod`.
+  3. Primera corrida de `prisma migrate deploy` contra `erpdb` (que ya tenía el schema `recetas`
+     con datos reales) tiró `P3005` (base no vacía). Se resolvió aplicando el SQL de la migración
+     a mano (`psql -f migration.sql`, solo crea el schema `core`, nunca toca `recetas`) y después
+     `prisma migrate resolve --applied <nombre>` para dejar el historial de Prisma consistente de
+     cara a la próxima migración real.
+  4. El rol de Postgres nuevo (`digitexsa_erp`) necesitó `GRANT CREATE, USAGE ON SCHEMA public`
+     además de los grants sobre `recetas` — la tabla `_prisma_migrations` vive en `public` por
+     default.
+  5. `/home/erpadmin` tenía permisos `750` — bloqueaba que `www-data` (usuario de Nginx) leyera
+     los estáticos de `apps/web/dist/`, tiraba 500. Se resolvió con `chmod o+x /home/erpadmin`
+     (el dueño de su propio home no necesita sudo para esto).
+- **Postgres — rol dedicado**: `digitexsa_erp` (no reusar `erpadmin`, el rol que ya usa `01_erp`),
+  con permisos de lectura/escritura sobre `recetas` (compartido con `01_erp`) y `CREATE` sobre la
+  base para el schema `core` nuevo. Antes del primer `migrate deploy`/aplicar SQL contra la base
+  real se hizo `pg_dump --schema=recetas` de respaldo (queda en el home de `erpadmin` en el
+  servidor) — recomendable repetirlo antes de cualquier migración futura que si toque `recetas`.
+- **`COOKIE_SECURE=false` es obligatorio** en el `.env` de producción mientras no haya HTTPS — si
+  se deja que el cookie de refresh token siga a `NODE_ENV=production` por defecto, se marca
+  `Secure` y el navegador nunca lo reenvía por HTTP plano, rompiendo el login.
+- **Datos de prueba**: insumos `TEST-PW-*` ya borrados de la base compartida el 2026-08-03 (no
+  llegaron a estar en producción, se limpiaron en local antes del primer deploy). Queda pendiente
+  un `TEST-001` en local, no confirmado con el usuario todavía — no tocar sin confirmar.
 
 ## Arquitectura
 Monolito modular pragmático (sin CQRS, sin DDD táctico pesado, sin microservicios — equipo de
