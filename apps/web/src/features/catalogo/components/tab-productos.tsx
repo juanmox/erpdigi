@@ -142,7 +142,7 @@ export function TabProductos() {
             {productos.map((p) => (
               <TableRow key={p.idProducto}>
                 <TableCell className="font-medium">{p.codigo}</TableCell>
-                <TableCell>{p.descripcion}</TableCell>
+                <TableCell className="whitespace-normal">{p.descripcion}</TableCell>
                 <TableCell>{p.clienteNombre ?? '—'}</TableCell>
                 <TableCell>{p.tamano ?? '—'}</TableCell>
                 <TableCell>{p.deporte ?? '—'}</TableCell>
@@ -189,7 +189,7 @@ export function TabProductos() {
         onDescargarPlantilla={() => catalogoApi.plantillaAltaProductos()}
         columnas={[
           { key: 'codigo', header: 'Código', render: (f) => f.codigo },
-          { key: 'descripcion', header: 'Descripción', render: (f) => f.descripcion },
+          { key: 'descripcion', header: 'Descripción', className: 'whitespace-normal', render: (f) => f.descripcion },
           { key: 'cliente', header: 'Cliente', render: (f) => f.clienteCodigo ?? '—' },
           { key: 'talla', header: 'Talla', render: (f) => f.tamano ?? '—' },
           { key: 'deporte', header: 'Deporte', render: (f) => f.deporte ?? '—' },

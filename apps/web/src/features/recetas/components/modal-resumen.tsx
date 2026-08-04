@@ -74,7 +74,7 @@ export function ModalResumen({ resumen, onClose }: ModalResumenProps) {
                   </TableRow>
                   {filas.map((i) => (
                     <TableRow key={i.codigo}>
-                      <TableCell>
+                      <TableCell className="whitespace-normal">
                         {i.codigo} — {i.descripcion}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">

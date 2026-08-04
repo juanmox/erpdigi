@@ -88,7 +88,7 @@ export function CardReceta({ receta, moneda, tasa }: CardRecetaProps) {
                   </TableRow>
                   {filas.map((i) => (
                     <TableRow key={`${i.codigo}-${i.area}`}>
-                      <TableCell>
+                      <TableCell className="whitespace-normal">
                         {i.codigo && <span className="font-medium">{i.codigo}</span>} {i.descripcion}
                       </TableCell>
                       <TableCell>
@@ -107,7 +107,7 @@ export function CardReceta({ receta, moneda, tasa }: CardRecetaProps) {
                 </TableCell>
               </TableRow>
               <TableRow>
-                <TableCell>{manoObra.descripcion}</TableCell>
+                <TableCell className="whitespace-normal">{manoObra.descripcion}</TableCell>
                 <TableCell>
                   {manoObra.consumo} {manoObra.unidad}
                 </TableCell>

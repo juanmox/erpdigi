@@ -162,7 +162,7 @@ export function ModalImportRecetas({ open, onOpenChange, onAplicado }: ModalImpo
                             />
                           </TableCell>
                           <TableCell className="font-medium">{p.codigo}</TableCell>
-                          <TableCell>{p.descripcion}</TableCell>
+                          <TableCell className="whitespace-normal">{p.descripcion}</TableCell>
                           <TableCell>{p.error ?? (p.yaExiste ? 'Ya existe (no se crea)' : 'Nuevo')}</TableCell>
                         </TableRow>
                       ))}
@@ -200,7 +200,7 @@ export function ModalImportRecetas({ open, onOpenChange, onAplicado }: ModalImpo
                           <TableCell className="font-medium">
                             {r.productoCodigo} {r.productoNuevo && <span className="text-muted-foreground">(nuevo)</span>}
                           </TableCell>
-                          <TableCell>{r.insumoCodigo}</TableCell>
+                          <TableCell className="whitespace-normal">{r.insumoCodigo}</TableCell>
                           <TableCell>{r.consumo ?? '—'}</TableCell>
                           <TableCell>{r.area ?? '—'}</TableCell>
                           <TableCell>{r.error ?? 'OK'}</TableCell>

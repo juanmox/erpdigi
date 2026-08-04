@@ -163,7 +163,7 @@ export function ModalReceta({ producto, open, onOpenChange }: ModalRecetaProps) 
                     const editando = idEditando === l.idProductoInsumo
                     return (
                       <TableRow key={l.idProductoInsumo}>
-                        <TableCell>
+                        <TableCell className="whitespace-normal">
                           <span className="font-medium">{l.codigo}</span> {l.descripcion}
                         </TableCell>
                         <TableCell>
