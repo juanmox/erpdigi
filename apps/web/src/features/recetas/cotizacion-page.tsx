@@ -218,8 +218,8 @@ export function CotizacionPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+        <div className="space-y-4 lg:col-span-3">
           <Card className="overflow-visible">
             <CardHeader>
               <CardTitle className="text-base">Buscar producto</CardTitle>
@@ -341,7 +341,7 @@ export function CotizacionPage() {
           {receta && <CardReceta receta={receta} moneda={moneda} tasa={tasa} />}
         </div>
 
-        <div>
+        <div className="lg:col-span-2">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Productos acumulados</CardTitle>

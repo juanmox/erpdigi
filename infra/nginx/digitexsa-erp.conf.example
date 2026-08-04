@@ -1,0 +1,24 @@
+# Referencia de config de Nginx para el ERP nuevo — NO se aplica sola, es para pegar/adaptar
+# a mano en el server block real del servidor (192.168.2.13), junto al que ya proxea 01_erp
+# a :3000. Mismo patrón que 01_erp (ver 01_erp/CLAUDE.md): red interna, sin dominio público,
+# sin SSL — por eso no hay bloque `listen 443`/certificados acá.
+#
+# Reemplazar <RUTA_AL_REPO> por la ruta real donde queda el checkout de digitexsa-erp en el
+# servidor (ej. /home/deploy/digitexsa-erp), y <PUERTO_API> por el PORT elegido en
+# apps/api/.env (sugerido 4001, para no chocar con el :3000 de 01_erp).
+
+# Dentro del `server { listen 80; ... }` que ya existe en el servidor:
+
+location /erp/api/ {
+    proxy_pass         http://127.0.0.1:<PUERTO_API>;
+    proxy_http_version 1.1;
+    proxy_set_header    Host              $host;
+    proxy_set_header    X-Real-IP         $remote_addr;
+    proxy_set_header    X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header    X-Forwarded-Proto $scheme;
+}
+
+location /erp/ {
+    alias <RUTA_AL_REPO>/apps/web/dist/;
+    try_files $uri $uri/ /erp/index.html;
+}

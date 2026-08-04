@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,6 +9,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { AsignarRolDto } from './dto/asignar-rol.dto';
 import { CrearUsuarioDto } from './dto/crear-usuario.dto';
+import { EstablecerPasswordDto } from './dto/establecer-password.dto';
+
+const PERMISO_ADMINISTRAR_USUARIOS = 'plataforma.usuarios.administrar';
 
 const RONDAS_BCRYPT = 12;
 
@@ -113,12 +117,28 @@ export class UsuariosService {
     return this.obtener(idUsuario);
   }
 
+  private async rolOtorgaAdministrarUsuarios(idRol: number): Promise<boolean> {
+    const rolPermiso = await this.prisma.rolPermiso.findFirst({
+      where: { idRol, permiso: { codigo: PERMISO_ADMINISTRAR_USUARIOS } },
+    });
+    return rolPermiso !== null;
+  }
+
   async quitarRol(
     idUsuario: number,
     idEmpresa: number,
     idRol: number,
     idUsuarioActor: number,
   ) {
+    if (
+      idUsuario === idUsuarioActor &&
+      (await this.rolOtorgaAdministrarUsuarios(idRol))
+    ) {
+      throw new ForbiddenException(
+        'No podés quitarte tu propio rol de administrador',
+      );
+    }
+
     await this.prisma.usuarioEmpresaRol.updateMany({
       where: { idUsuario, idEmpresa, idRol },
       data: { activo: false },
@@ -137,6 +157,9 @@ export class UsuariosService {
   }
 
   async desactivar(idUsuario: number, idUsuarioActor: number) {
+    if (idUsuario === idUsuarioActor) {
+      throw new ForbiddenException('No podés desactivar tu propia cuenta');
+    }
     await this.obtener(idUsuario);
     const usuario = await this.prisma.usuario.update({
       where: { idUsuario },
@@ -149,6 +172,56 @@ export class UsuariosService {
       idEntidad: String(idUsuario),
       accion: 'UPDATE',
       datosNuevos: { activo: usuario.activo },
+    });
+
+    return this.obtener(idUsuario);
+  }
+
+  async activar(idUsuario: number, idUsuarioActor: number) {
+    await this.obtener(idUsuario);
+    const usuario = await this.prisma.usuario.update({
+      where: { idUsuario },
+      data: { activo: true },
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      entidad: 'usuarios',
+      idEntidad: String(idUsuario),
+      accion: 'UPDATE',
+      datosNuevos: { activo: usuario.activo },
+    });
+
+    return this.obtener(idUsuario);
+  }
+
+  async establecerPassword(
+    idUsuario: number,
+    dto: EstablecerPasswordDto,
+    idUsuarioActor: number,
+  ) {
+    await this.obtener(idUsuario);
+    const passwordHash = await bcrypt.hash(dto.password, RONDAS_BCRYPT);
+    await this.prisma.usuario.update({
+      where: { idUsuario },
+      data: { passwordHash },
+    });
+
+    // Revoca todas las sesiones activas de ese usuario — mismo patrón que la
+    // detección de robo de refresh token en auth.service.ts. Si el propio admin
+    // se resetea la contraseña, esto también revoca su sesión actual; el
+    // frontend maneja ese caso cerrando sesión explícitamente.
+    await this.prisma.refreshToken.updateMany({
+      where: { idUsuario, revocado: false },
+      data: { revocado: true },
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      entidad: 'usuarios',
+      idEntidad: String(idUsuario),
+      accion: 'UPDATE',
+      datosNuevos: { evento: 'password_reestablecida' },
     });
 
     return this.obtener(idUsuario);

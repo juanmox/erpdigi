@@ -23,3 +23,16 @@ export function formatFechaGuatemala(fecha: Date): string {
 export function formatFechaHoraGuatemala(fecha: Date): string {
   return formatterFechaHora.format(fecha)
 }
+
+const formatterFechaLarga = new Intl.DateTimeFormat('es-GT', {
+  timeZone: ZONA_HORARIA_GUATEMALA,
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+})
+
+/** Ej: "martes, 22 de julio" — para encabezados, no para datos tabulares. */
+export function formatFechaLargaGuatemala(fecha: Date): string {
+  const texto = formatterFechaLarga.format(fecha)
+  return texto.charAt(0).toUpperCase() + texto.slice(1)
+}

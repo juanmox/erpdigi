@@ -23,6 +23,26 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
+
+  /* Paleta de marca Digitexsa — usada por la navegación (sidebar) y el panel de
+     inicio. Separada de --primary/--secondary para no afectar el resto de la UI
+     (Cotización, Catálogo) hasta que se confirme la dirección de marca definitiva. */
+  --accent-brand: #203080;
+  --accent-brand-strong: #172461;
+  --accent-brand-soft: #e8eaf6;
+  --ink: #171b2e;
+  --ink-muted: #565f78;
+  --ink-faint: #8992a8;
+  --surface-paper: #f5f6fa;
+  --good: #2e7d5c;
+  --good-soft: #e3f2ec;
+
+  /* Acento cálido "Dorado Varsity" — elegido por el usuario para el login, ver
+     CLAUDE.md. Secundario a --accent-brand (el azul corporativo sigue siendo la
+     acción primaria); el dorado marca logo, foco de campos y detalles. */
+  --accent-warm: #c08a25;
+  --accent-warm-strong: #96691a;
+  --accent-warm-soft: #f6ecd6;
 }
 
 .dark {
@@ -44,6 +64,20 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+
+  --accent-brand: #6b7fe0;
+  --accent-brand-strong: #8b9cf0;
+  --accent-brand-soft: #232c52;
+  --ink: #e7e9f2;
+  --ink-muted: #a2a8be;
+  --ink-faint: #6b7288;
+  --surface-paper: #0e1120;
+  --good: #4fae83;
+  --good-soft: #16302a;
+
+  --accent-warm: #e0b563;
+  --accent-warm-strong: #f0cf8f;
+  --accent-warm-soft: #3a2c12;
 }
 
 @theme inline {
@@ -69,6 +103,20 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  --color-accent-brand: var(--accent-brand);
+  --color-accent-brand-strong: var(--accent-brand-strong);
+  --color-accent-brand-soft: var(--accent-brand-soft);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-surface-paper: var(--surface-paper);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+
+  --color-accent-warm: var(--accent-warm);
+  --color-accent-warm-strong: var(--accent-warm-strong);
+  --color-accent-warm-soft: var(--accent-warm-soft);
 }
 
 @layer base {

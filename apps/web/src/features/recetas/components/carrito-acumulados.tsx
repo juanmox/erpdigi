@@ -23,7 +23,6 @@ export function CarritoAcumulados({ items, moneda, tasa, onQuitar }: CarritoAcum
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>#</TableHead>
           <TableHead>Producto</TableHead>
           <TableHead className="text-right">Cant.</TableHead>
           <TableHead className="text-right">Subtotal</TableHead>
@@ -31,19 +30,18 @@ export function CarritoAcumulados({ items, moneda, tasa, onQuitar }: CarritoAcum
         </TableRow>
       </TableHeader>
       <TableBody>
-        {items.map((item, idx) => {
+        {items.map((item) => {
           const subtotal = item.cantidad * item.costoUnitario
           return (
             <TableRow key={item.codigo}>
-              <TableCell>{idx + 1}</TableCell>
-              <TableCell>
+              <TableCell className="whitespace-normal">
                 <div className="font-medium">{item.codigo}</div>
                 <div className="text-muted-foreground text-xs">{item.descripcion}</div>
               </TableCell>
               <TableCell className="text-right tabular-nums">{item.cantidad}</TableCell>
               <TableCell className="text-right tabular-nums">
                 <div>{formatMonto(subtotal, moneda, tasa)}</div>
-                <div className="text-muted-foreground text-xs">
+                <div className="text-muted-foreground text-xs whitespace-nowrap">
                   {textoPctCostoMargen(item.costoUnitario, item.precioVenta, tasa)}
                 </div>
               </TableCell>
@@ -58,9 +56,7 @@ export function CarritoAcumulados({ items, moneda, tasa, onQuitar }: CarritoAcum
       </TableBody>
       <TableFooter>
         <TableRow>
-          <TableCell colSpan={2} className="font-semibold">
-            Total
-          </TableCell>
+          <TableCell className="font-semibold">Total</TableCell>
           <TableCell className="text-right font-semibold tabular-nums">{totalCantidad}</TableCell>
           <TableCell className="text-right font-semibold tabular-nums">{formatMonto(totalCosto, moneda, tasa)}</TableCell>
           <TableCell />

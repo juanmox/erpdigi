@@ -1,59 +1,38 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { Outlet } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
 import { useAuth } from '@/features/auth/auth-context'
+import { Sidebar } from './sidebar'
+
+function inicialesDe(nombre: string | undefined): string {
+  if (!nombre) return '??'
+  const partes = nombre.trim().split(/\s+/)
+  const iniciales = partes.length > 1 ? partes[0][0] + partes[partes.length - 1][0] : partes[0].slice(0, 2)
+  return iniciales.toUpperCase()
+}
 
 export function Shell() {
-  const { usuario, empresasDisponibles, idEmpresa, roles, logout, tienePermiso } = useAuth()
-  const empresaActual = empresasDisponibles.find((e) => e.idEmpresa === idEmpresa)
-  const puedeGestionar =
-    tienePermiso('recetas.insumos.editar') || tienePermiso('recetas.productos.editar') || tienePermiso('recetas.importar')
+  const { usuario, roles, logout } = useAuth()
 
   return (
-    <div className="flex min-h-svh flex-col">
-      <header className="flex items-center justify-between border-b px-6 py-3">
-        <div className="flex items-center gap-6">
-          <div>
-            <p className="font-semibold">Digitexsa ERP</p>
-            {empresaActual && (
-              <p className="text-muted-foreground text-xs">{empresaActual.nombreComercial ?? empresaActual.codigo}</p>
-            )}
+    <div className="flex min-h-svh bg-surface-paper">
+      <Sidebar />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center justify-end gap-3 border-b border-border px-6 py-2.5 lg:px-9">
+          <div className="text-right leading-tight">
+            <p className="text-[13px] font-semibold text-ink">{usuario?.nombreCompleto}</p>
+            <p className="text-[11.5px] text-ink-faint">{roles.join(', ')}</p>
           </div>
-          <nav className="flex gap-4 text-sm">
-            <NavLink
-              to="/"
-              end
-              className={({ isActive }) =>
-                cn('hover:text-primary', isActive ? 'text-primary font-medium' : 'text-muted-foreground')
-              }
-            >
-              Cotización
-            </NavLink>
-            {puedeGestionar && (
-              <NavLink
-                to="/catalogo"
-                className={({ isActive }) =>
-                  cn('hover:text-primary', isActive ? 'text-primary font-medium' : 'text-muted-foreground')
-                }
-              >
-                Gestión de datos
-              </NavLink>
-            )}
-          </nav>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right text-sm">
-            <p>{usuario?.nombreCompleto}</p>
-            <p className="text-muted-foreground text-xs">{roles.join(', ')}</p>
+          <div className="flex size-[34px] shrink-0 items-center justify-center rounded-full border border-border bg-accent-brand-soft text-[12.5px] font-bold text-accent-brand-strong">
+            {inicialesDe(usuario?.nombreCompleto)}
           </div>
           <Button variant="outline" size="sm" onClick={() => logout()}>
             Cerrar sesión
           </Button>
-        </div>
-      </header>
-      <main className="flex-1">
-        <Outlet />
-      </main>
+        </header>
+        <main className="flex-1">
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }
