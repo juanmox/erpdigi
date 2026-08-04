@@ -15,7 +15,10 @@ module.exports = {
     {
       name: 'digitexsa-api',
       cwd: './apps/api',
-      script: 'dist/main.js',
+      // nest build preserva la carpeta src/ dentro de dist/ (tsconfig no fija rootDir
+      // porque también compila prisma.config.ts y prisma/seed.ts, fuera de src/) —
+      // el entrypoint real es dist/src/main.js, no dist/main.js.
+      script: 'dist/src/main.js',
       env: {
         NODE_ENV: 'production',
       },
