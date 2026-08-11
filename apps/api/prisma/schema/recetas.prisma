@@ -23,6 +23,12 @@ model Cliente {
   nombre    String     @db.VarChar(150)
   productos Producto[]
 
+  /// Relaciones inversas del módulo Costeo Real (costeo.prisma) — costeo
+  /// referencia este catálogo por FK, no lo duplica (ver docs/02).
+  lineasProductoCosteo    LineaProducto[]
+  ordenesProduccionCosteo OrdenProduccion[]
+  ordenesFacturacionCosteo OrdenFacturacion[]
+
   @@map("clientes")
   @@schema("recetas")
 }
@@ -109,6 +115,13 @@ model Insumo {
   unidad          UnidadMedida     @relation(fields: [idUnidad], references: [idUnidad], onDelete: NoAction, onUpdate: NoAction)
   productoInsumos ProductoInsumo[]
 
+  /// Relaciones inversas del módulo Costeo Real (costeo.prisma) — costeo
+  /// referencia este catálogo por FK, no lo duplica (ver docs/02, decisión D1).
+  reposicionesTelaCosteo        Reposicion[]
+  costosCosteo                  InsumoCosto[]
+  ofInsumoCosteo                OfInsumo[]
+  plantillaInsumoDetalleCosteo  PlantillaInsumoDetalle[]
+
   @@map("insumos")
   @@schema("recetas")
 }
@@ -149,6 +162,11 @@ model Producto {
   productoInsumos     ProductoInsumo[]
   cliente             Cliente?            @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
 
+  /// Relaciones inversas del módulo Costeo Real (costeo.prisma).
+  consumosEstandarCosteo  ConsumoEstandar[]
+  lineasProduccionCosteo  LineaProduccion[]
+  consumosPapelCosteo     ConsumoPapel[]
+
   @@index([idCliente], map: "idx_prod_cliente")
   @@index([codigo(ops: raw("gin_trgm_ops"))], map: "idx_prod_codigo_trgm", type: Gin)
   @@index([desarrollo], map: "idx_prod_desarrollo")
@@ -160,9 +178,16 @@ model Producto {
 }
 
 model Talla {
-  idTalla Int    @id @default(autoincrement()) @map("id_talla")
-  nombre  String @unique @db.VarChar(10)
-  orden   Int    @default(0)
+  idTalla Int     @id @default(autoincrement()) @map("id_talla")
+  nombre  String  @unique @db.VarChar(10)
+  orden   Int     @default(0)
+  /// Agregado para el módulo Costeo Real — YOUTH·ADULT·WOMEN·MEN·LADIES_FIT·PANT·NUMERICA·COMBINADA·AJUSTADA (ver docs/02-MODELO-ER-PROPUESTO.md)
+  grupo   String? @db.VarChar(20)
+
+  /// Relaciones inversas del módulo Costeo Real (costeo.prisma).
+  consumosEstandarCosteo      ConsumoEstandar[]
+  lineaProduccionTallasCosteo LineaProduccionTalla[]
+  consumosPapelCosteo         ConsumoPapel[]
 
   @@map("tallas")
   @@schema("recetas")

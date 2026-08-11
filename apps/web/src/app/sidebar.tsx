@@ -63,6 +63,7 @@ export function Sidebar() {
     { to: '/', codigo: 'IN', etiqueta: 'Inicio', end: true },
     { to: moduloRecetas.ruta!, codigo: moduloRecetas.codigo, etiqueta: moduloRecetas.nombre },
     ...(puedeGestionar ? [{ to: '/catalogo', codigo: 'GD', etiqueta: 'Gestión de datos' }] : []),
+    ...(tienePermiso('costeo.rollo.ver') ? [{ to: '/costeo/rollos', codigo: 'CR', etiqueta: 'Gestión de Rollos' }] : []),
     ...(tienePermiso('plataforma.usuarios.administrar') ? [{ to: '/usuarios', codigo: 'US', etiqueta: 'Usuarios' }] : []),
   ]
 

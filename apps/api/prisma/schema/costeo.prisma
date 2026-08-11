@@ -1,0 +1,504 @@
+// ============================================================
+// COSTEO REAL — costeo real de producción por Orden de Producción/Facturación.
+// Fuente: PROMPT_CLAUDE_CODE.md + ANEXO_A_Hallazgos.md + ANEXO_B_Catalogos.md,
+// ajustado según docs/00-VALIDACION-SUPUESTOS.md, docs/01-COBERTURA-PRODUCTOS.md
+// y docs/02-MODELO-ER-PROPUESTO.md.
+//
+// Decisiones confirmadas por el usuario (no se repiten aquí, ver docs/02):
+// - D1: no se crean costeo.insumo / categoria_insumo / unidad_medida — se
+//   reutilizan recetas.Insumo / CategoriaInsumo / UnidadMedida.
+// - No se crea costeo.talla — se reutiliza recetas.Talla (se le agregó el
+//   campo `grupo` en recetas.prisma).
+// - No existe maestro de empleados hoy (S7): costeo.Empleado es PROVISIONAL,
+//   pensado para reemplazarse por el maestro real cuando exista RRHH (Fase 4).
+//
+// Varias columnas de la base real NO están modeladas aquí a propósito porque
+// Prisma no expresa columnas GENERATED ALWAYS AS ... STORED, EXCLUDE USING
+// gist, ni tipos range (daterange/tstzrange): esas se agregan a mano en la
+// migración SQL. Cada caso lleva un comentario "// + SQL:" señalando qué le
+// falta a este modelo respecto a la tabla real.
+// ============================================================
+
+// ── Catálogo nuevo: línea de producto por cliente ──────────────────────
+model LineaProducto {
+  idLineaProducto Int     @id @default(autoincrement()) @map("id_linea_producto")
+  idCliente       Int     @map("id_cliente")
+  nombre          String  @db.VarChar(80)
+  activo          Boolean @default(true)
+
+  cliente           Cliente             @relation(fields: [idCliente], references: [idCliente])
+  ordenesProduccion OrdenProduccion[]
+  plantillasInsumo  PlantillaInsumo[]
+
+  @@unique([idCliente, nombre])
+  @@map("linea_producto")
+  @@schema("costeo")
+}
+
+// ── Equipos ──────────────────────────────────────────────────────────
+model Impresora {
+  idImpresora        Int     @id @default(autoincrement()) @map("id_impresora")
+  codigo              String  @unique @db.VarChar(20)
+  descripcion         String? @db.VarChar(120)
+  marcaModelo         String? @map("marca_modelo") @db.VarChar(60)
+  anchoPulgadas       Decimal? @map("ancho_pulgadas") @db.Decimal(6, 2)
+  idTipoPapelDefault  Int?    @map("id_tipo_papel_default")
+  activo              Boolean @default(true)
+
+  tipoPapelDefault TipoPapel?       @relation(fields: [idTipoPapelDefault], references: [idTipoPapel])
+  montajes         MontajeRollo[]
+  lineasProduccion LineaProduccion[]
+  reposiciones     Reposicion[]
+  consumosPapel    ConsumoPapel[]
+
+  @@map("impresora")
+  @@schema("costeo")
+}
+
+model Calandra {
+  idCalandra Int     @id @default(autoincrement()) @map("id_calandra")
+  codigo     String  @unique @db.VarChar(20)
+  activo     Boolean @default(true)
+
+  reposiciones Reposicion[]
+
+  @@map("calandra")
+  @@schema("costeo")
+}
+
+model TipoPapel {
+  idTipoPapel    Int      @id @default(autoincrement()) @map("id_tipo_papel")
+  codigo         String   @unique @db.VarChar(40)
+  nombre         String   @db.VarChar(80)
+  gramaje        Decimal? @db.Decimal(6, 2)
+  anchoPulgadas  Decimal? @map("ancho_pulgadas") @db.Decimal(6, 2)
+  activo         Boolean  @default(true)
+
+  impresorasDefault Impresora[]
+  rollos            RolloPapel[]
+  lineasProduccion  LineaProduccion[]
+  consumosPapel     ConsumoPapel[]
+  reposiciones      Reposicion[]
+
+  @@map("tipo_papel")
+  @@schema("costeo")
+}
+
+// ── Organización y calidad ───────────────────────────────────────────
+model Departamento {
+  idDepartamento Int     @id @default(autoincrement()) @map("id_departamento")
+  codigo         String  @unique @db.VarChar(30)
+  nombre         String  @db.VarChar(60)
+  activo         Boolean @default(true)
+
+  reposiciones Reposicion[]
+
+  @@map("departamento")
+  @@schema("costeo")
+}
+
+/// categoria: MATERIAL·PROCESO·EQUIPO·HUMANO·EXTERNO (CHECK en migración)
+/// imputableA: INTERNO·CLIENTE·PROVEEDOR (CHECK en migración)
+model Defecto {
+  idDefecto   Int     @id @default(autoincrement()) @map("id_defecto")
+  codigo      String  @unique @db.VarChar(40)
+  nombre      String  @db.VarChar(80)
+  categoria   String? @db.VarChar(20)
+  imputableA  String? @map("imputable_a") @db.VarChar(20)
+  activo      Boolean @default(true)
+
+  reposiciones Reposicion[]
+
+  @@map("defecto")
+  @@schema("costeo")
+}
+
+// ── Empleado (PROVISIONAL — ver nota S7 arriba) ─────────────────────
+model Empleado {
+  idEmpleado Int     @id @default(autoincrement()) @map("id_empleado")
+  codigo     String? @unique @db.VarChar(20)
+  nombres    String  @db.VarChar(150)
+  puesto     String? @db.VarChar(80)
+  activo     Boolean @default(true)
+
+  reposiciones Reposicion[]
+
+  @@map("empleado")
+  @@schema("costeo")
+}
+
+// ── Consumo estándar de papel versionado (SCD2) ─────────────────────
+// + SQL: columna `yardas` GENERATED ALWAYS AS (pulgadas_papel / 36.0) STORED
+// + SQL: columna `vigencia` daterange GENERATED ALWAYS AS (...) STORED
+// + SQL: EXCLUDE USING gist (producto_id WITH =, talla_id WITH =, vigencia WITH &&)
+model ConsumoEstandar {
+  idConsumoEstandar Int       @id @default(autoincrement()) @map("id_consumo_estandar")
+  idProducto        Int       @map("id_producto")
+  idTalla           Int       @map("id_talla")
+  pulgadasPapel     Decimal   @map("pulgadas_papel") @db.Decimal(10, 4)
+  vigenteDesde      DateTime  @map("vigente_desde") @db.Date
+  vigenteHasta      DateTime? @map("vigente_hasta") @db.Date
+  creadoEn          DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor         Int       @map("creado_por")
+
+  producto      Producto       @relation(fields: [idProducto], references: [idProducto])
+  talla         Talla          @relation(fields: [idTalla], references: [idTalla])
+  consumosPapel ConsumoPapel[]
+
+  @@map("consumo_estandar")
+  @@schema("costeo")
+}
+
+// ── Órdenes ──────────────────────────────────────────────────────────
+// + SQL: columna `codigo` GENERATED ALWAYS AS (lpad(anio,2,'0')||'OP'||lpad(correlativo,6,'0')) STORED
+model OrdenProduccion {
+  idOrdenProduccion Int       @id @default(autoincrement()) @map("id_orden_produccion")
+  anio              Int       @db.SmallInt
+  correlativo       Int
+  idCliente         Int?      @map("id_cliente")
+  idLineaProducto   Int?      @map("id_linea_producto")
+  ordenCompra       String?   @map("orden_compra") @db.VarChar(40)
+  desarrollo        String?   @db.VarChar(40)
+  fechaRecibido     DateTime? @map("fecha_recibido") @db.Date
+  fechaCompromiso   DateTime? @map("fecha_compromiso") @db.Date
+  estatus           String    @default("ABIERTO") @db.VarChar(20)
+  creadoEn          DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor         Int       @map("creado_por")
+
+  cliente          Cliente?          @relation(fields: [idCliente], references: [idCliente])
+  lineaProducto    LineaProducto?    @relation(fields: [idLineaProducto], references: [idLineaProducto])
+  ofOp             OfOp[]
+  lineasProduccion LineaProduccion[]
+  consumosPapel    ConsumoPapel[]
+  reposiciones     Reposicion[]
+
+  @@unique([anio, correlativo])
+  @@map("orden_produccion")
+  @@schema("costeo")
+}
+
+model TipoServicio {
+  idTipoServicio Int    @id @default(autoincrement()) @map("id_tipo_servicio")
+  codigo         String @unique @db.VarChar(30)
+  nombre         String @db.VarChar(60)
+
+  ordenesFacturacion OrdenFacturacion[]
+  plantillasInsumo   PlantillaInsumo[]
+
+  @@map("tipo_servicio")
+  @@schema("costeo")
+}
+
+// + SQL: columna `codigo` GENERATED ALWAYS AS (lpad(anio,2,'0')||'OF'||lpad(correlativo,6,'0')) STORED
+model OrdenFacturacion {
+  idOrdenFacturacion Int       @id @default(autoincrement()) @map("id_orden_facturacion")
+  anio               Int       @db.SmallInt
+  correlativo        Int
+  fecha              DateTime  @db.Date
+  numeroFactura      String?   @map("numero_factura") @db.VarChar(30)
+  idCliente          Int       @map("id_cliente")
+  idTipoServicio     Int       @map("id_tipo_servicio")
+  cantidadFacturada  Int?      @map("cantidad_facturada")
+  ventaTotal         Decimal?  @map("venta_total") @db.Decimal(14, 4)
+  // ⚠️ S6 confirmado: capturados, no calculados. MOD ya tiene fórmula en
+  // recetas (minutos_mo × costo_mo_minuto) pero GF/FIJOS no — por ahora los
+  // 3 se capturan igual, se revisita cuando GF/FIJOS también tengan cálculo.
+  modValor           Decimal?  @map("mod_valor") @db.Decimal(14, 4)
+  gfValor            Decimal?  @map("gf_valor") @db.Decimal(14, 4)
+  fijosValor         Decimal?  @map("fijos_valor") @db.Decimal(14, 4)
+  cerradaEn          DateTime? @map("cerrada_en") @db.Timestamptz(3)
+  creadoEn           DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor          Int       @map("creado_por")
+
+  cliente      Cliente      @relation(fields: [idCliente], references: [idCliente])
+  tipoServicio TipoServicio @relation(fields: [idTipoServicio], references: [idTipoServicio])
+  ofOp         OfOp[]
+  ofInsumo     OfInsumo[]
+
+  @@unique([anio, correlativo])
+  @@map("orden_facturacion")
+  @@schema("costeo")
+}
+
+model OfOp {
+  idOrdenFacturacion Int @map("id_orden_facturacion")
+  idOrdenProduccion  Int @map("id_orden_produccion")
+
+  ordenFacturacion OrdenFacturacion @relation(fields: [idOrdenFacturacion], references: [idOrdenFacturacion], onDelete: Cascade)
+  ordenProduccion  OrdenProduccion  @relation(fields: [idOrdenProduccion], references: [idOrdenProduccion])
+
+  @@id([idOrdenFacturacion, idOrdenProduccion])
+  @@map("of_op")
+  @@schema("costeo")
+}
+
+// ── Rollos de papel ──────────────────────────────────────────────────
+model FacturaPapel {
+  idFacturaPapel Int      @id @default(autoincrement()) @map("id_factura_papel")
+  numeroFactura  String   @unique @map("numero_factura") @db.VarChar(30)
+  fecha          DateTime @db.Date
+  totalRollos    Int      @map("total_rollos")
+  creadoEn       DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor      Int      @map("creado_por")
+
+  rollos RolloPapel[]
+
+  @@map("factura_papel")
+  @@schema("costeo")
+}
+
+model RolloPapel {
+  idRolloPapel     Int      @id @default(autoincrement()) @map("id_rollo_papel")
+  idFacturaPapel   Int      @map("id_factura_papel")
+  secuencia        Int
+  idTipoPapel      Int      @map("id_tipo_papel")
+  yardasIniciales  Decimal? @map("yardas_iniciales") @db.Decimal(12, 4)
+  costoUnitario    Decimal? @map("costo_unitario") @db.Decimal(12, 6)
+  /// EN_BODEGA·MONTADO·AGOTADO·DESCARTADO (CHECK en migración)
+  estado           String   @default("EN_BODEGA") @db.VarChar(20)
+  creadoEn         DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+
+  facturaPapel FacturaPapel   @relation(fields: [idFacturaPapel], references: [idFacturaPapel])
+  tipoPapel    TipoPapel      @relation(fields: [idTipoPapel], references: [idTipoPapel])
+  montajes     MontajeRollo[]
+
+  @@unique([idFacturaPapel, secuencia])
+  @@map("rollo_papel")
+  @@schema("costeo")
+}
+
+// + SQL: columna `vigencia` tstzrange GENERATED ALWAYS AS (...) STORED
+// + SQL: EXCLUDE USING gist (impresora_id WITH =, vigencia WITH &&)
+model MontajeRollo {
+  idMontajeRollo Int       @id @default(autoincrement()) @map("id_montaje_rollo")
+  idRolloPapel   Int       @map("id_rollo_papel")
+  idImpresora    Int       @map("id_impresora")
+  montadoEn      DateTime  @map("montado_en") @db.Timestamptz(3)
+  desmontadoEn   DateTime? @map("desmontado_en") @db.Timestamptz(3)
+  yardasFinales  Decimal?  @map("yardas_finales") @db.Decimal(12, 4)
+  creadoPor      Int       @map("creado_por")
+  creadoEn       DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+
+  rolloPapel    RolloPapel     @relation(fields: [idRolloPapel], references: [idRolloPapel])
+  impresora     Impresora      @relation(fields: [idImpresora], references: [idImpresora])
+  consumosPapel ConsumoPapel[]
+
+  @@map("montaje_rollo")
+  @@schema("costeo")
+}
+
+// ── Hechos: consumo de papel y reposiciones ─────────────────────────
+model LineaProduccion {
+  idLineaProduccion  Int       @id @default(autoincrement()) @map("id_linea_produccion")
+  codigoLine         String    @unique @map("codigo_line") @db.VarChar(40)
+  idOrdenProduccion  Int       @map("id_orden_produccion")
+  idProducto         Int       @map("id_producto")
+  idImpresora        Int?      @map("id_impresora")
+  idTipoPapel        Int?      @map("id_tipo_papel")
+  enguiamientoYd     Decimal   @default(0) @map("enguiamiento_yd") @db.Decimal(10, 4)
+  consumoEnBlanco    Boolean   @default(false) @map("consumo_en_blanco")
+  factorEnBlanco     Decimal   @default(0.6) @map("factor_en_blanco") @db.Decimal(6, 4)
+  fechaData          DateTime? @map("fecha_data") @db.Date
+  fechaRecibido      DateTime? @map("fecha_recibido") @db.Date
+  fechaCliente       DateTime? @map("fecha_cliente") @db.Date
+  fechaEntregar      DateTime? @map("fecha_entregar") @db.Date
+  estatus            String    @default("ABIERTO") @db.VarChar(20)
+  procesadaEn        DateTime? @map("procesada_en") @db.Timestamptz(3)
+  creadoEn           DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor          Int       @map("creado_por")
+
+  ordenProduccion OrdenProduccion        @relation(fields: [idOrdenProduccion], references: [idOrdenProduccion])
+  producto        Producto               @relation(fields: [idProducto], references: [idProducto])
+  impresora       Impresora?             @relation(fields: [idImpresora], references: [idImpresora])
+  tipoPapel       TipoPapel?             @relation(fields: [idTipoPapel], references: [idTipoPapel])
+  tallas          LineaProduccionTalla[]
+  consumosPapel   ConsumoPapel[]
+
+  @@map("linea_produccion")
+  @@schema("costeo")
+}
+
+model LineaProduccionTalla {
+  idLineaProduccionTalla Int @id @default(autoincrement()) @map("id_linea_produccion_talla")
+  idLineaProduccion      Int @map("id_linea_produccion")
+  idTalla                Int @map("id_talla")
+  cantidad               Int
+
+  lineaProduccion LineaProduccion @relation(fields: [idLineaProduccion], references: [idLineaProduccion], onDelete: Cascade)
+  talla           Talla           @relation(fields: [idTalla], references: [idTalla])
+
+  @@unique([idLineaProduccion, idTalla])
+  @@map("linea_produccion_talla")
+  @@schema("costeo")
+}
+
+/// origen: PRODUCCION·REPOSICION (CHECK en migración, junto con la regla de
+/// que PRODUCCION exige linea_produccion_id y REPOSICION exige reposicion_id)
+// + SQL: UNIQUE INDEX parcial (linea_produccion_id, talla_id) WHERE origen='PRODUCCION' AND anulado_en IS NULL
+model ConsumoPapel {
+  idConsumoPapel      Int       @id @default(autoincrement()) @map("id_consumo_papel")
+  fecha               DateTime  @db.Timestamptz(3)
+  origen              String    @db.VarChar(20)
+  idOrdenProduccion   Int       @map("id_orden_produccion")
+  idLineaProduccion   Int?      @map("id_linea_produccion")
+  idReposicion        Int?      @map("id_reposicion")
+  idProducto          Int?      @map("id_producto")
+  idTalla             Int?      @map("id_talla")
+  idImpresora         Int       @map("id_impresora")
+  idMontajeRollo      Int?      @map("id_montaje_rollo")
+  idTipoPapel         Int       @map("id_tipo_papel")
+  cantidad            Int?
+  idConsumoEstandar   Int?      @map("id_consumo_estandar")
+  enguiamientoYd      Decimal   @default(0) @map("enguiamiento_yd") @db.Decimal(12, 4)
+  enBlancoYd          Decimal   @default(0) @map("en_blanco_yd") @db.Decimal(12, 4)
+  consumoYd           Decimal   @map("consumo_yd") @db.Decimal(12, 4)
+  observacion         String?
+  creadoEn            DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor           Int       @map("creado_por")
+  anuladoEn           DateTime? @map("anulado_en") @db.Timestamptz(3)
+  anuladoPor          Int?      @map("anulado_por")
+  motivoAnulacion     String?   @map("motivo_anulacion")
+
+  ordenProduccion OrdenProduccion  @relation(fields: [idOrdenProduccion], references: [idOrdenProduccion])
+  lineaProduccion LineaProduccion? @relation(fields: [idLineaProduccion], references: [idLineaProduccion])
+  reposicion      Reposicion?      @relation(fields: [idReposicion], references: [idReposicion])
+  producto        Producto?        @relation(fields: [idProducto], references: [idProducto])
+  talla           Talla?           @relation(fields: [idTalla], references: [idTalla])
+  impresora       Impresora        @relation(fields: [idImpresora], references: [idImpresora])
+  montajeRollo    MontajeRollo?    @relation(fields: [idMontajeRollo], references: [idMontajeRollo])
+  tipoPapel       TipoPapel        @relation(fields: [idTipoPapel], references: [idTipoPapel])
+  consumoEstandar ConsumoEstandar? @relation(fields: [idConsumoEstandar], references: [idConsumoEstandar])
+
+  @@index([idOrdenProduccion])
+  @@index([fecha(sort: Desc)])
+  @@index([idMontajeRollo])
+  @@map("consumo_papel")
+  @@schema("costeo")
+}
+
+model Reposicion {
+  idReposicion      Int       @id @default(autoincrement()) @map("id_reposicion")
+  fecha             DateTime  @db.Timestamptz(3)
+  idOrdenProduccion Int       @map("id_orden_produccion")
+  numeroRepo        Int       @map("numero_repo") @db.SmallInt
+  // + SQL: columna `codigo_repo` GENERATED ALWAYS AS ('R'||lpad(numero_repo,2,'0')) STORED
+  idDepartamento    Int       @map("id_departamento")
+  idEmpleado        Int?      @map("id_empleado")
+  idDefecto         Int       @map("id_defecto")
+  bodegaSac         String?   @map("bodega_sac") @db.VarChar(20)
+  idImpresora       Int?      @map("id_impresora")
+  idCalandra        Int?      @map("id_calandra")
+  idMontajeRollo    Int?      @map("id_montaje_rollo")
+  idTipoPapel       Int?      @map("id_tipo_papel")
+  yardasPapel       Decimal   @default(0) @map("yardas_papel") @db.Decimal(12, 4)
+  idInsumoTela      Int?      @map("id_insumo_tela")
+  yardasTela        Decimal   @default(0) @map("yardas_tela") @db.Decimal(12, 4)
+  creadoEn          DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor         Int       @map("creado_por")
+  anuladoEn         DateTime? @map("anulado_en") @db.Timestamptz(3)
+  anuladoPor        Int?      @map("anulado_por")
+  motivoAnulacion   String?   @map("motivo_anulacion")
+
+  ordenProduccion OrdenProduccion @relation(fields: [idOrdenProduccion], references: [idOrdenProduccion])
+  departamento    Departamento    @relation(fields: [idDepartamento], references: [idDepartamento])
+  empleado        Empleado?       @relation(fields: [idEmpleado], references: [idEmpleado])
+  defecto         Defecto         @relation(fields: [idDefecto], references: [idDefecto])
+  impresora       Impresora?      @relation(fields: [idImpresora], references: [idImpresora])
+  calandra        Calandra?       @relation(fields: [idCalandra], references: [idCalandra])
+  tipoPapel       TipoPapel?      @relation(fields: [idTipoPapel], references: [idTipoPapel])
+  insumoTela      Insumo?         @relation(fields: [idInsumoTela], references: [idInsumo])
+  consumosPapel   ConsumoPapel[]
+
+  @@index([idOrdenProduccion])
+  @@index([fecha(sort: Desc)])
+  @@index([idDefecto])
+  @@map("reposicion")
+  @@schema("costeo")
+}
+
+// ── Costo de insumos versionado + asignación a OF ───────────────────
+// + SQL: EXCLUDE USING gist (insumo_id WITH =, vigencia WITH &&)
+model InsumoCosto {
+  idInsumoCosto  Int       @id @default(autoincrement()) @map("id_insumo_costo")
+  idInsumo       Int       @map("id_insumo")
+  costoUnitario  Decimal   @map("costo_unitario") @db.Decimal(14, 6)
+  vigenteDesde   DateTime  @map("vigente_desde") @db.Date
+  vigenteHasta   DateTime? @map("vigente_hasta") @db.Date
+  creadoEn       DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor      Int       @map("creado_por")
+
+  insumo   Insumo     @relation(fields: [idInsumo], references: [idInsumo])
+  ofInsumo OfInsumo[]
+
+  @@map("insumo_costo")
+  @@schema("costeo")
+}
+
+// + SQL: columna `costo_total` GENERATED ALWAYS AS (cantidad * costo_unitario) STORED
+model OfInsumo {
+  idOfInsumo         Int      @id @default(autoincrement()) @map("id_of_insumo")
+  idOrdenFacturacion Int      @map("id_orden_facturacion")
+  idInsumo           Int      @map("id_insumo")
+  cantidad           Decimal  @db.Decimal(14, 4)
+  idInsumoCosto      Int      @map("id_insumo_costo")
+  costoUnitario      Decimal  @map("costo_unitario") @db.Decimal(14, 6)
+  nota               String?
+  creadoEn           DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor          Int      @map("creado_por")
+
+  ordenFacturacion OrdenFacturacion @relation(fields: [idOrdenFacturacion], references: [idOrdenFacturacion], onDelete: Cascade)
+  insumo           Insumo           @relation(fields: [idInsumo], references: [idInsumo])
+  insumoCosto      InsumoCosto      @relation(fields: [idInsumoCosto], references: [idInsumoCosto])
+
+  @@unique([idOrdenFacturacion, idInsumo])
+  @@map("of_insumo")
+  @@schema("costeo")
+}
+
+model PlantillaInsumo {
+  idPlantillaInsumo Int     @id @default(autoincrement()) @map("id_plantilla_insumo")
+  nombre            String  @db.VarChar(100)
+  idTipoServicio    Int?    @map("id_tipo_servicio")
+  idLineaProducto   Int?    @map("id_linea_producto")
+  activa            Boolean @default(true)
+
+  tipoServicio  TipoServicio?             @relation(fields: [idTipoServicio], references: [idTipoServicio])
+  lineaProducto LineaProducto?            @relation(fields: [idLineaProducto], references: [idLineaProducto])
+  detalle       PlantillaInsumoDetalle[]
+
+  @@map("plantilla_insumo")
+  @@schema("costeo")
+}
+
+model PlantillaInsumoDetalle {
+  idPlantillaInsumo Int @map("id_plantilla_insumo")
+  idInsumo           Int @map("id_insumo")
+  orden              Int @default(0)
+
+  plantillaInsumo PlantillaInsumo @relation(fields: [idPlantillaInsumo], references: [idPlantillaInsumo], onDelete: Cascade)
+  insumo          Insumo          @relation(fields: [idInsumo], references: [idInsumo])
+
+  @@id([idPlantillaInsumo, idInsumo])
+  @@map("plantilla_insumo_detalle")
+  @@schema("costeo")
+}
+
+// ── Sincronización a Google Sheets (Transactional Outbox) ───────────
+model SyncOutbox {
+  idSyncOutbox Int       @id @default(autoincrement()) @map("id_sync_outbox")
+  destino      String    @db.VarChar(40)
+  entidad      String    @db.VarChar(40)
+  entidadId    BigInt    @map("entidad_id")
+  /// INSERT·UPDATE·DELETE (CHECK en migración)
+  operacion    String    @db.VarChar(10)
+  payload      Json
+  /// PENDIENTE·PROCESANDO·OK·ERROR (CHECK en migración)
+  estado       String    @default("PENDIENTE") @db.VarChar(15)
+  intentos     Int       @default(0) @db.SmallInt
+  ultimoError  String?   @map("ultimo_error")
+  creadoEn     DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+  procesadoEn  DateTime? @map("procesado_en") @db.Timestamptz(3)
+
+  @@map("sync_outbox")
+  @@schema("costeo")
+}

@@ -52,6 +52,112 @@ de acá (de ahí este archivo) — dos tareas de UI aprobadas conceptualmente:
    real contra el backend (usuario admin del seed) llega al panel de inicio sin errores nuevos en
    consola, y el layout responsive (imagen oculta, solo formulario) se probó en viewport móvil.
 
+## Costeo Real — módulo nuevo en construcción (Fase 3 adelantada)
+Especificación completa en `PROMPT_CLAUDE_CODE.md` (830+ líneas, no se repite aquí), con hallazgos
+forenses del sistema legacy en `ANEXO_A_Hallazgos.md` y catálogos semilla en `ANEXO_B_Catalogos.md`
+(ruta externa: `C:\Users\PETER\Documents\Jmox\Claude\Formas de recolección de info Costos\`). El
+prompt exige trabajar por fases y **detenerse a esperar validación del usuario al terminar cada
+una** — no avanzar por iniciativa propia.
+
+- **F0 (validación de supuestos)** — ✅ completada. `docs/00-VALIDACION-SUPUESTOS.md` (respuestas
+  S1-S7 contra datos reales, más hallazgos propios no cubiertos por ANEXO_A),
+  `docs/01-COBERTURA-PRODUCTOS.md` (solo 4/475 productos legacy existen hoy en `recetas` — bloqueante
+  de secuencia, no de diseño) y `docs/02-MODELO-ER-PROPUESTO.md` (decisiones D1-D4). Decisiones ya
+  confirmadas por el usuario: reusar `recetas.insumos` y `recetas.tallas` (no crear catálogos
+  paralelos en `costeo`), no dar de alta productos masivamente (conforme se vaya necesitando), MOD/GF/FIJOS
+  se capturan externamente por ahora (sin fórmula), no existe maestro de empleados todavía
+  (`costeo.Empleado` es provisional, para reemplazar cuando exista RRHH en Fase 4).
+- **F1 (schema + migraciones + seeds + RBAC)** — ✅ completada en local, pendiente de validación del
+  usuario antes de F2. Detalle:
+  - `apps/api/prisma/schema/costeo.prisma` — 22 modelos nuevos. Deliberadamente NO modela columnas
+    `GENERATED ALWAYS AS ... STORED`, tipos `daterange`/`tstzrange`, ni `EXCLUDE USING gist` (Prisma
+    no los expresa) — cada omisión lleva un comentario `// + SQL:`.
+  - `apps/api/prisma/migrations/20260810224449_init_costeo/migration.sql` — base generada con
+    `prisma migrate diff --from-config-datasource --to-schema ./prisma/schema --script` (nunca
+    `migrate dev`, mismo criterio que con `recetas`) + bloque manual grande al final con: FKs de
+    auditoría hacia `core.usuarios` (las columnas `creado_por`/`anulado_por` son `Int` planos sin
+    `@relation` en Prisma a propósito, para no ensuciar `core.Usuario` con ~12 arrays inversos),
+    columnas generadas (`orden_produccion.codigo`, `orden_facturacion.codigo`,
+    `reposicion.codigo_repo`, `consumo_estandar.yardas`, `of_insumo.costo_total`), versionado SCD2
+    con `EXCLUDE USING gist` sobre columnas `vigencia` generadas (`consumo_estandar`, `insumo_costo`,
+    `montaje_rollo` — requiere `CREATE EXTENSION btree_gist`), CHECK constraints de enums sobre
+    VARCHAR y reglas de negocio (`consumo_papel.origen` + regla PRODUCCION/REPOSICION), índice único
+    parcial de idempotencia en `consumo_papel`, función `costeo.fn_rollo_en()` y vista
+    `costeo.v_rollo_codigo`. Aplicada a local con `prisma migrate deploy` y verificada con pruebas
+    SQL deliberadas (intentos de violar cada EXCLUDE/CHECK/índice — todos rechazados correctamente;
+    ver transcripción de la sesión si hace falta repetir las pruebas).
+  - `apps/api/prisma/seed.ts` extendido (mismo script existente, no uno nuevo): 9 departamentos, 40
+    defectos (con categoría/imputable_a — ANEXO_B los marca como sugerencia; el usuario confirmó
+    sembrarla igual y dejarla editable después, no es un hecho confirmado del sistema legacy), 6
+    tipos de papel (3 activos + 3 históricos no ambiguos, inactivos), 12 impresoras (10 activas +
+    MK3/MK4 retiradas, inactivas), 6 calandras, 5 tipos de servicio, y backfill de `grupo`
+    (YOUTH/ADULT) sobre las 13 tallas ya existentes en `recetas.tallas`. 22 permisos `costeo.*`
+    (`PROMPT_CLAUDE_CODE.md §7`) creados y otorgados por completo a ADMIN, más los 6 roles
+    granulares que sugiere el prompt — `OPERADOR_IMPRESION` (7 permisos: rollo ver/montar/desmontar +
+    consumo ver/capturar + estándar ver + dashboard), `OPERADOR_TRANSFERENCIA` (7: rollo ver + consumo
+    ver/capturar + reposición ver/crear + estándar ver + dashboard), `ANALISTA_COSTOS` (11: OF
+    ver/crear/editar + insumo ver/editar_costo + estándar ver/administrar + consumo ver + reposición
+    ver + dashboard ver/financiero), `SUPERVISOR_PRODUCCION` (15: control operativo completo del piso
+    incluida anulación, sin costos de insumos ni cierre de OF), `GERENCIA_COSTEO` (15: visibilidad
+    total + cierre/reapertura de OF + anulación, sin captura de piso) y `ADMIN_IT_COSTEO` (22, todos —
+    acceso técnico completo a costeo sin los permisos `plataforma.*`). El mapeo permiso↔rol es diseño
+    propio basado en el flujo real del proceso (impresión → transferencia → costeo → supervisión →
+    gerencia), confirmado por el usuario para crear los roles ya con esa distribución — ajustable
+    después vía `/usuarios` sin tocar el schema. Seed verificado idempotente (varias corridas, mismo
+    conteo de filas y de `rol_permisos`).
+  - **Deliberadamente fuera de alcance de F1** (documentado para decisión futura, no un olvido):
+    impresoras `MS 7`/`MS 8`/`MK'S` (ANEXO_B no confirma si son equipos reales), tipos de papel
+    `PAPEL DIGITAL PROTECT 100 GSM 64"` y `TEXTPRINT 1000` (posibles duplicados de los ya activos),
+    las ~145 tallas de ANEXO_B que no están en uso hoy, y cualquier alta en `recetas.insumos` (D1
+    dejó pendiente confirmar antes de tocar ese schema con altas masivas).
+  - **No se ha escrito código de aplicación (controllers/services/frontend) ni se ha tocado el
+    servidor de producción** — el prompt lo prohíbe explícitamente hasta validar cada fase con el
+    usuario. F2 (Gestión de Rollos) es la siguiente fase, no iniciada.
+- **F2 (Gestión de Rollos)** — ✅ completada en local, pendiente de validación del usuario antes de F3.
+  Antes de empezar, se encontraron y corrigieron dos bugs reales de F1 en `costeo.fn_rollo_en()`
+  (migraciones `20260810235300_fix_fn_rollo_en` y `20260810235800_fix_fn_rollo_en_precision`, nunca
+  se edita una migración ya aplicada): (1) devolvía `id_rollo_papel` en vez de `id_montaje_rollo`
+  como pide `PROMPT_CLAUDE_CODE.md §5.4` — importa porque `consumo_papel.id_montaje_rollo` y
+  `reposicion.id_montaje_rollo` son FKs hacia `montaje_rollo`, no hacia `rollo_papel`; (2) comparaba
+  el `p_momento` recibido (precisión de microsegundos) contra `vigencia` (generada desde columnas
+  `timestamptz(3)`, redondeadas a milisegundos al guardar) sin igualar la precisión — una consulta
+  por "ahora mismo" podía fallar en no encontrar un montaje que arrancó en el mismo milisegundo.
+  Verificado con pruebas SQL deliberadas (instante exacto encuentra el montaje, instante pasado no).
+  - Backend: `apps/api/src/modules/costeo-rollos/` (`costeo-rollos.module.ts`, `.controller.ts`,
+    `.service.ts`, `dto/`), registrado en `app.module.ts`. Rutas bajo `/erp/api/costeo/rollos/...`
+    con permisos por método (`costeo.rollo.ver/ingresar/montar/desmontar`). Cubre los 4 flujos de
+    `§6.0`: **ingreso** (`POST /ingreso`, factura + N rollos en una transacción), **montaje**
+    (`POST /:id/montar`, cierra automáticamente el montaje anterior de esa impresora si lo había —
+    sin eso el `EXCLUDE USING gist` rechazaría el insert — dejando `yardas_finales` en NULL y el
+    rollo anterior en `EN_BODEGA`, no `AGOTADO`: no hay evidencia de que se haya terminado, solo de
+    que se cambió sin pasar por el flujo formal), **desmontaje** (`PATCH /montajes/:id/desmontar`,
+    calcula en vivo `yardasUsadasFisicas` y `merma` = usadas físicas − consumo registrado; el estado
+    final del rollo — `EN_BODEGA`/`AGOTADO`/`DESCARTADO` — lo elige explícitamente quien desmonta,
+    no se infiere de un umbral de yardas porque no hay una regla de negocio confirmada para eso) y
+    **panel de estado** (`GET /panel`, una fila por impresora activa con el montaje vigente si lo
+    hay; expone `porcentajeRestante` pero NO decide el umbral de "alerta de poco papel" — eso es
+    estilo visual del frontend, no una regla de negocio en el backend, mismo criterio que la
+    clasificación de defectos de F1). Probado end-to-end con curl contra un usuario de prueba
+    desechable con rol ADMIN (creado y borrado en la misma sesión, sin tocar la cuenta admin real
+    ni sus credenciales) — ingreso, montaje, auto-cierre del montaje previo, rechazo de doble
+    montaje (409), desmontaje con cálculo de merma, rechazo de doble desmontaje (409) y validación
+    de DTO (400) verificados uno por uno.
+  - Frontend: `apps/web/src/features/costeo-rollos/` (`rollos-page.tsx` con 3 tabs — Panel, Montaje,
+    Ingreso — más `components/tab-panel.tsx`, `tab-montaje.tsx`, `tab-ingreso.tsx`,
+    `modal-desmontaje.tsx`). Ruta `/costeo/rollos`, ítem nuevo en el sidebar condicionado a
+    `costeo.rollo.ver` (mismo patrón que `/usuarios`, no se tocó `app/modulos.ts` — Costeo Real es
+    un adelanto de Fase 3, no uno de los 8 módulos del roadmap). El tab Montaje es la "pantalla
+    táctil grande" que pide `§6.0`: impresora → rollo → confirmar, con tarjetas grandes en vez de
+    formularios, pensada para uso en planta.
+  - **Verificación de UI**: typecheck y lint limpios en ambos paquetes (`api` y `web`), servidor
+    dev de la API confirma las 9 rutas nuevas mapeadas correctamente sin colisión con `:id`. **No
+    se pudo hacer verificación visual/interactiva en navegador** (Playwright u otra herramienta de
+    automatización de navegador no estaba disponible en esta sesión) — code review posterior o una
+    pasada manual del usuario en `/costeo/rollos` sigue pendiente antes de dar F2 por completamente
+    cerrada.
+  - **Aún no tocado**: F3 (Reposiciones) — es la siguiente fase, no iniciada. Servidor de producción
+    sin cambios.
+
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
 código en él.** Al empezar cualquier sesión de trabajo aquí:
