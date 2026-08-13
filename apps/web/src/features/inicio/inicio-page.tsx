@@ -128,9 +128,6 @@ export function InicioPage() {
                 <div className="flex size-[34px] items-center justify-center rounded-[9px] bg-black/[0.04] text-xs font-bold text-ink-faint dark:bg-white/[0.06]">
                   {modulo.codigo}
                 </div>
-                <span className="rounded-full bg-black/[0.04] px-2 py-[3px] text-[9.5px] font-bold tracking-wide text-ink-faint dark:bg-white/[0.06]">
-                  {modulo.fase}
-                </span>
               </div>
               <div>
                 <div className="text-[15px] font-bold tracking-tight text-ink">{modulo.nombre}</div>
@@ -144,12 +141,6 @@ export function InicioPage() {
           ),
         )}
       </div>
-
-      <p className="mt-7 max-w-[640px] border-t border-border/70 pt-4 text-xs leading-relaxed text-ink-faint">
-        El tipo de cambio de arriba sale de un dato real que Recetas ya expone; los 7 módulos en
-        «Próximamente» reflejan el roadmap tal como está hoy en <span className="font-mono">CLAUDE.md</span>, no son
-        funcionalidad inventada.
-      </p>
     </div>
   )
 }

@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiError } from '@/lib/api'
 import { costeoRollosApi } from '../api'
-import type { FacturaPapel, RolloPapel } from '../types'
+import type { FacturaConRollos } from '../types'
 
 const HOY = new Date().toISOString().slice(0, 10)
 
@@ -28,7 +28,7 @@ export function TabIngreso() {
 
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [resultado, setResultado] = useState<(FacturaPapel & { rollos: RolloPapel[] }) | null>(null)
+  const [resultado, setResultado] = useState<FacturaConRollos | null>(null)
 
   function limpiar() {
     setNumeroFactura('')

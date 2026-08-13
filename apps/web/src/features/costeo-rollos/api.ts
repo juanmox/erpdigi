@@ -1,5 +1,5 @@
 import { apiFetch } from '@/lib/api'
-import type { EstadoRollo, FacturaPapel, Impresora, MontajeDetalle, PanelItem, RolloPapel, TipoPapel } from './types'
+import type { EstadoRollo, FacturaConRollos, Impresora, MontajeDetalle, PanelItem, RolloPapel, TipoPapel } from './types'
 
 export const costeoRollosApi = {
   listarImpresoras: () => apiFetch<Impresora[]>('/costeo/rollos/impresoras'),
@@ -16,8 +16,22 @@ export const costeoRollosApi = {
     yardasPorRollo?: number
     costoUnitario?: number
   }) =>
-    apiFetch<FacturaPapel & { rollos: RolloPapel[] }>('/costeo/rollos/ingreso', {
+    apiFetch<FacturaConRollos>('/costeo/rollos/ingreso', {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  buscarFactura: (numeroFactura: string) =>
+    apiFetch<FacturaConRollos>(`/costeo/rollos/facturas/${encodeURIComponent(numeroFactura)}`),
+  editarIngreso: (
+    idFacturaPapel: number,
+    body: {
+      numeroFactura?: string
+      fecha?: string
+      rollos: { idRolloPapel: number; idTipoPapel: number; yardasIniciales?: number; costoUnitario?: number }[]
+    },
+  ) =>
+    apiFetch<FacturaConRollos>(`/costeo/rollos/facturas/${idFacturaPapel}`, {
+      method: 'PATCH',
       body: JSON.stringify(body),
     }),
   montar: (idRolloPapel: number, idImpresora: number) =>

@@ -12,6 +12,7 @@ const RUTAS_IMPORT_EXCEL = [
   '/erp/api/recetas/insumos/importar-altas/preview',
   '/erp/api/recetas/productos/importar-altas/preview',
   '/erp/api/recetas/importar-recetas/preview',
+  '/erp/api/costeo/ordenes/importar/preview',
 ];
 
 async function bootstrap() {

@@ -44,6 +44,12 @@ model Impresora {
   anchoPulgadas       Decimal? @map("ancho_pulgadas") @db.Decimal(6, 2)
   idTipoPapelDefault  Int?    @map("id_tipo_papel_default")
   activo              Boolean @default(true)
+  // Agregados a pedido del usuario (sesión F3): orden de despliegue fijo
+  // (MS 1-6, MP 7-8, RG NEXT/ONE, Mimaki 3-6 — no alfabético) y agrupación
+  // para las secciones colapsables del panel de estado. Valores de grupo:
+  // MS_DT (impresoras MS/MP) · DP (RG NEXT/ONE + Mimaki).
+  orden               Int     @default(0)
+  grupo               String? @db.VarChar(20)
 
   tipoPapelDefault TipoPapel?       @relation(fields: [idTipoPapelDefault], references: [idTipoPapel])
   montajes         MontajeRollo[]
@@ -150,11 +156,16 @@ model ConsumoEstandar {
 }
 
 // ── Órdenes ──────────────────────────────────────────────────────────
-// + SQL: columna `codigo` GENERATED ALWAYS AS (lpad(anio,2,'0')||'OP'||lpad(correlativo,6,'0')) STORED
 model OrdenProduccion {
   idOrdenProduccion Int       @id @default(autoincrement()) @map("id_orden_produccion")
   anio              Int       @db.SmallInt
   correlativo       Int
+  // Columna GENERATED ALWAYS AS (...) STORED (ver migración init_costeo) —
+  // declarada para que Prisma la incluya en los SELECT, pero JAMÁS se debe
+  // pasar en `data:` de un create/update (encontrado como bug real al
+  // construir F3: costeoOrdenes/costeoReposiciones dependían de leer este
+  // campo y siempre volvía undefined porque no estaba declarado).
+  codigo            String    @default(dbgenerated()) @unique @db.VarChar(20)
   idCliente         Int?      @map("id_cliente")
   idLineaProducto   Int?      @map("id_linea_producto")
   ordenCompra       String?   @map("orden_compra") @db.VarChar(40)
@@ -189,11 +200,12 @@ model TipoServicio {
   @@schema("costeo")
 }
 
-// + SQL: columna `codigo` GENERATED ALWAYS AS (lpad(anio,2,'0')||'OF'||lpad(correlativo,6,'0')) STORED
 model OrdenFacturacion {
   idOrdenFacturacion Int       @id @default(autoincrement()) @map("id_orden_facturacion")
   anio               Int       @db.SmallInt
   correlativo        Int
+  // GENERATED ALWAYS AS ... STORED — ver nota en OrdenProduccion.codigo.
+  codigo             String    @default(dbgenerated()) @unique @db.VarChar(20)
   fecha              DateTime  @db.Date
   numeroFactura      String?   @map("numero_factura") @db.VarChar(30)
   idCliente          Int       @map("id_cliente")
@@ -303,6 +315,14 @@ model LineaProduccion {
   fechaCliente       DateTime? @map("fecha_cliente") @db.Date
   fechaEntregar      DateTime? @map("fecha_entregar") @db.Date
   estatus            String    @default("ABIERTO") @db.VarChar(20)
+  // Agregados tras revisar DataDisev3!DatosOrigen real (sesión F3) — dos de
+  // los "8 campos con valor de negocio" que ANEXO_A §3.6 documenta como
+  // descartados por copiarDatos() y que la corrección #1 de §6.1 exige no
+  // perder. imagen: 0/1129 filas reales lo usan hoy, se preserva igual.
+  // prioridad: valores reales observados RUSH/STH/MTS, sin CHECK porque no
+  // está confirmado que sea una lista cerrada.
+  imagen             String?   @db.VarChar(500)
+  prioridad          String?   @db.VarChar(20)
   procesadaEn        DateTime? @map("procesada_en") @db.Timestamptz(3)
   creadoEn           DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
   creadoPor          Int       @map("creado_por")
@@ -381,7 +401,8 @@ model Reposicion {
   fecha             DateTime  @db.Timestamptz(3)
   idOrdenProduccion Int       @map("id_orden_produccion")
   numeroRepo        Int       @map("numero_repo") @db.SmallInt
-  // + SQL: columna `codigo_repo` GENERATED ALWAYS AS ('R'||lpad(numero_repo,2,'0')) STORED
+  // GENERATED ALWAYS AS ... STORED — ver nota en OrdenProduccion.codigo.
+  codigoRepo        String    @default(dbgenerated()) @unique @map("codigo_repo") @db.VarChar(10)
   idDepartamento    Int       @map("id_departamento")
   idEmpleado        Int?      @map("id_empleado")
   idDefecto         Int       @map("id_defecto")
@@ -393,6 +414,11 @@ model Reposicion {
   yardasPapel       Decimal   @default(0) @map("yardas_papel") @db.Decimal(12, 4)
   idInsumoTela      Int?      @map("id_insumo_tela")
   yardasTela        Decimal   @default(0) @map("yardas_tela") @db.Decimal(12, 4)
+  // Agregado tras revisión con el usuario (sesión F3) — texto libre para
+  // contexto que no cabe en ningún campo estructurado (ej. detalle de lo
+  // que pasó, instrucciones de Diseño, etc.). Sin límite de longitud, mismo
+  // patrón que consumo_papel.observacion / of_insumo.nota.
+  comentario        String?
   creadoEn          DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
   creadoPor         Int       @map("creado_por")
   anuladoEn         DateTime? @map("anulado_en") @db.Timestamptz(3)
@@ -409,6 +435,12 @@ model Reposicion {
   insumoTela      Insumo?         @relation(fields: [idInsumoTela], references: [idInsumo])
   consumosPapel   ConsumoPapel[]
 
+  // Evita que dos reposiciones concurrentes para la misma OP terminen con el
+  // mismo número — el número sugerido (MAX+1) solo es confiable si el motor
+  // lo garantiza. Aplica también a filas anuladas: una vez usado, un número
+  // no se reasigna a otro evento distinto (mismo criterio que nunca borrar
+  // físico — el rastro de auditoría no debe reescribirse).
+  @@unique([idOrdenProduccion, numeroRepo])
   @@index([idOrdenProduccion])
   @@index([fecha(sort: Desc)])
   @@index([idDefecto])

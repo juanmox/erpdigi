@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from '@/features/auth/auth-context'
 import { LoginPage } from '@/features/auth/login-page'
 import { SeleccionarEmpresa } from '@/features/auth/seleccionar-empresa'
 import { CatalogoPage } from '@/features/catalogo/catalogo-page'
+import { OrdenesPage } from '@/features/costeo-ordenes/ordenes-page'
+import { ReposicionesPage } from '@/features/costeo-reposiciones/reposiciones-page'
 import { RollosPage } from '@/features/costeo-rollos/rollos-page'
 import { InicioPage } from '@/features/inicio/inicio-page'
 import { CotizacionPage } from '@/features/recetas/cotizacion-page'
@@ -55,6 +57,8 @@ function App() {
             <Route path="recetas" element={<CotizacionPage />} />
             <Route path="catalogo" element={<CatalogoPage />} />
             <Route path="costeo/rollos" element={<RollosPage />} />
+            <Route path="costeo/ordenes" element={<OrdenesPage />} />
+            <Route path="costeo/reposiciones" element={<ReposicionesPage />} />
             <Route path="usuarios" element={<UsuariosPage />} />
           </Route>
         </Routes>

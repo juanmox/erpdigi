@@ -1,4 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TabCorregirIngreso } from './components/tab-corregir-ingreso'
 import { TabIngreso } from './components/tab-ingreso'
 import { TabMontaje } from './components/tab-montaje'
 import { TabPanel } from './components/tab-panel'
@@ -13,6 +14,7 @@ export function RollosPage() {
           <TabsTrigger value="panel">Panel de estado</TabsTrigger>
           <TabsTrigger value="montaje">Montaje</TabsTrigger>
           <TabsTrigger value="ingreso">Ingreso a bodega</TabsTrigger>
+          <TabsTrigger value="corregir">Corregir ingreso</TabsTrigger>
         </TabsList>
         <TabsContent value="panel">
           <TabPanel />
@@ -22,6 +24,9 @@ export function RollosPage() {
         </TabsContent>
         <TabsContent value="ingreso">
           <TabIngreso />
+        </TabsContent>
+        <TabsContent value="corregir">
+          <TabCorregirIngreso />
         </TabsContent>
       </Tabs>
     </div>

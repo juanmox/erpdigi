@@ -157,6 +157,167 @@ una** — no avanzar por iniciativa propia.
     cerrada.
   - **Aún no tocado**: F3 (Reposiciones) — es la siguiente fase, no iniciada. Servidor de producción
     sin cambios.
+- **F3 (Reposiciones)** — ✅ completada en local, pendiente de validación del usuario antes de F4.
+  Alcance ampliado a mitad de fase: encontré (código real del GAS de Forma 1 + `DataDisev3.xlsx`,
+  ambos en la carpeta de análisis del usuario, no solo el resumen de ANEXO_A) que `costeo.
+  orden_produccion` no tenía ningún flujo de alta — ninguna fase F2-F8 lo cubre, las OP se dan por
+  existentes en todas las fuentes legacy. El usuario confirmó: un módulo de Producción completo
+  vendrá después (Montaje → Diseño → Transferencia → Corte → Calidad → Confección → Bordados →
+  Empaque → Exportación); por ahora, las OP se cargan por import de plantilla (mismo patrón
+  preview→aplicar de `recetas`), reusando `ImportPreviewDialog`.
+  - **Correcciones de catálogo** (`Mantenimiento` real de `DataDisev3.xlsx`, no solo ANEXO_B): `MK'S`
+    no era una impresora retirada — son 4 equipos activos (Mimaki 3-6, `MK3`-`MK6`) que usan papel
+    Chino Alemán; `CHINO_ALEMAN_120` pasa de inactivo a activo. Corregido en el seed, sin migración
+    (son solo datos).
+  - **Dos bugs reales corregidos antes de seguir** (ninguno bloqueaba la app, pero habrían dado
+    datos incorrectos silenciosamente):
+    1. `costeo-rollos.service.ts`: la agregación de consumo por rollo no filtraba `anulado_en` —
+       una reposición anulada seguía restando papel del rollo en el panel. Encontrado al construir
+       la anulación de reposiciones; un solo `where` adicional, sin migración.
+    2. `OrdenProduccion.codigo`, `OrdenFacturacion.codigo` y `Reposicion.codigoRepo` (columnas
+       `GENERATED ALWAYS ... STORED`) nunca se agregaron al schema Prisma en F1 — la nota `// + SQL:`
+       decía correctamente que Prisma no puede *expresar* columnas generadas, pero interpretar eso
+       como "no declarar el campo" fue el error: sin declararlo, Prisma tampoco lo *lee*, así que
+       `orden.codigo` y `reposicion.codigoRepo` volvían `undefined` en cualquier respuesta de la API
+       — un bug real que habría roto el frontend de Reposiciones en producción. Corregido
+       declarando los 3 campos con `@default(dbgenerated())` (el patrón estándar de Prisma para
+       columnas con default/generado del lado de la base: se incluyen en el `SELECT`, nunca se
+       escriben en `create`/`update`). Sin migración — son columnas que ya existían en la base
+       desde F1, solo le faltaban a Prisma saber que existen.
+  - Backend: `apps/api/src/modules/costeo-ordenes/` (import de OP+ítems con plantilla normalizada
+    de 29 columnas — 16 de metadata + las 13 tallas actuales de `recetas.tallas`, deliberadamente
+    *no* las ~216 columnas crudas de `DataDisev3`; ver corrección #1 de `PROMPT_CLAUDE_CODE.md
+    §6.2` sobre no perder los 8 campos de negocio que el `copiarDatos()` legacy descartaba —
+    agregué `imagen` y `prioridad` a `LineaProduccion`, que no estaban ni en el diseño original de
+    F1, vía migración `20260812001601_linea_produccion_campos_reposicion_unique`) y
+    `apps/api/src/modules/costeo-reposiciones/` (crear/listar/anular). Un producto que no exista en
+    `recetas.productos` queda pendiente en el preview del import, nunca se crea automáticamente
+    (confirmado con el usuario). La carga histórica real de las ~420 OP / 1,129 ítems de
+    `DataDisev3` queda para F8 (script de migración histórica) — este módulo es la herramienta que
+    Diseño usará hacia adelante, no el backfill en sí.
+  - **Reposiciones** resuelve el rollo exactamente como describe §6.1: el operario solo elige la
+    impresora (si la reposición implica repapelado) y la fecha/hora; el servidor resuelve
+    `id_montaje_rollo` vía `fn_rollo_en()` y de ahí deriva el tipo de papel — nunca se acepta del
+    cliente. Si la impresora no tiene rollo montado en ese instante, se rechaza (409) en vez de
+    guardar un dato indeterminado. El número de reposición se calcula siempre en el servidor
+    (`MAX(numero_repo)+1` dentro de la misma transacción, protegido por el `UNIQUE
+    (id_orden_produccion, numero_repo)` agregado en la misma migración de arriba) — nunca se acepta
+    del cliente, elimina cualquier posibilidad de colisión o de que un operario lo edite. Al anular
+    una reposición, el `consumo_papel` asociado también se anula (mismo patrón `anulado_en`) — así
+    el panel de Gestión de Rollos vuelve a reflejar el papel disponible correctamente.
+  - Permisos nuevos **fuera de los 22 originales de `PROMPT_CLAUDE_CODE.md §7`**: `costeo.orden.ver`
+    y `costeo.orden.importar` — el prompt nunca anticipó un alta de OP como sub-módulo propio.
+    Otorgados a `ANALISTA_COSTOS`/`SUPERVISOR_PRODUCCION` (importar) y también a
+    `OPERADOR_IMPRESION`/`OPERADOR_TRANSFERENCIA`/`GERENCIA_COSTEO` (solo ver, para tener contexto
+    de OP al capturar reposiciones).
+  - Frontend: `apps/web/src/features/costeo-ordenes/` (`ordenes-page.tsx`: búsqueda de OP por
+    código + diálogo de import) y `apps/web/src/features/costeo-reposiciones/`
+    (`reposiciones-page.tsx`: pantalla única mobile-first — buscar OP → autocompleta cliente/línea
+    de producto → formulario en el orden de captura de §6.1 → confirmación con opción "Registrar y
+    capturar otra" que conserva el contexto de la OP, tal como pide la UX del prompt).
+  - **Verificado end-to-end con curl** (no con Playwright — seguía sin estar disponible en esta
+    sesión): import completo (fila válida, producto faltante marcado pendiente, re-import detecta
+    duplicados), reposición sin impresora (solo tela), reposición con impresora sin rollo montado
+    (rechazo 409), reposición con impresora resuelta correctamente (`id_montaje_rollo`/tipo de
+    papel derivados, panel de rollos refleja el consumo), anulación (reversa el consumo del panel,
+    doble anulación rechazada 409), numeración secuencial correcta con múltiples reposiciones por
+    OP. Datos de prueba limpiados de la base local en cada paso.
+  - **Aún no tocado**: F4 (Consumo de Papel) — es la siguiente fase, no iniciada. Servidor de
+    producción sin cambios.
+  - **4 observaciones del usuario tras revisar F3, todas resueltas antes de pasar a F4**:
+    1. **Atajo de código**: en Reposiciones y Órdenes, el buscador de OP ahora acepta solo el
+       correlativo (`159`) y autocompleta año activo + prefijo + ceros a la izquierda
+       (`26OP000159`) — sigue aceptando el código completo si se prefiere, incluso de otro año.
+       Función compartida `apps/web/src/lib/codigos-costeo.ts`, ya preparada para `OF` cuando
+       llegue F5 (`normalizarCodigoCosteo(texto, 'OP' | 'OF')`).
+    2. **Confirmado**: la resolución del NRollo ya es 100% automática desde F3 (vía
+       `fn_rollo_en()`, corregida antes de F2) — no hay ni debe haber ningún campo para teclearlo
+       a mano, coincide con la corrección #1 de `§6.1`.
+    3. **Panel de impresoras en Reposiciones**: agregado como columna lateral
+       (`components/panel-impresoras.tsx`, reusa el mismo `costeoRollosApi.panel()` de F2) — cada
+       impresora muestra si tiene rollo montado (mismo rojo/verde ya usado en Gestión de Rollos) y
+       clickearla llena el campo Impresora del formulario, sin reemplazar el `<Select>` existente.
+    4. **Corrección de ingresos mal capturados en Gestión de Rollos**: nueva pestaña "Corregir
+       ingreso" — permite editar número de factura, fecha, y tipo de papel/yardas/costo por rollo,
+       pero **solo mientras ningún rollo de esa factura se haya montado nunca** (ni ahora ni en el
+       pasado — se verifica contra el historial completo de `montaje_rollo`, no solo el estado
+       actual). En cuanto cualquier rollo de la factura se montó una vez, la factura queda
+       congelada — el endpoint rechaza con 409 y el mensaje explica por qué. El caso raro de
+       necesitar corregir un dato ya congelado se resuelve por edición directa en la base de datos
+       (decisión explícita del usuario, no una laguna — no hay pantalla para eso a propósito).
+    Todo verificado end-to-end con curl (atajo de código con año/prefijo/ceros, factura editable
+    antes de montar, `editable:false` + rechazo 409 después de montar un rollo, validación de
+    tipo de papel inexistente). Se dejó una OP de ejemplo en la base local (`26OP000001`, cliente
+    BSN SPORTS) para que el usuario pueda seguir probando Reposiciones sin tener que cargar datos
+    primero.
+  - **3 pedidos más tras seguir revisando F3**:
+    1. **Campo `comentario`** (texto libre, sin límite) agregado a `costeo.Reposicion` — migración
+       `20260812191044_reposicion_comentario`. Corresponde al campo "OBSERVACIONES" de la
+       Requisición de Bodega física que ya usan (el usuario mandó una foto de referencia real).
+       Se agregó también `apps/web/src/components/ui/textarea.tsx` (no existía ningún componente
+       de texto multilínea en el kit shadcn de este proyecto todavía).
+    2. **Reposiciones imprimibles** — `apps/web/src/features/costeo-reposiciones/imprimir.ts`,
+       mismo patrón de iframe oculto que `features/recetas/imprimir.ts` (nunca `window.open`).
+       Réplica del layout real de la Requisición de Bodega: número (`codigoRepo`) arriba a la
+       derecha, tabla con una fila **por cada material presente** (papel y tela pueden coexistir
+       en una misma reposición — el diseño inicial solo imprimía uno de los dos, corregido antes
+       de darlo por terminado), observaciones (defecto + responsable + el comentario nuevo),
+       "Solicitado por" (usuario actual vía `useAuth()`) / "Autorizado por" (línea en blanco para
+       firma física). Tamaño **media carta** (`@page { size: 5.5in 8.5in }`). De paso se corrigió
+       un bug preexistente no relacionado: `features/recetas/imprimir.ts` ya apuntaba a
+       `/logo.png`, que nunca existió en `apps/web/public/` (el logo no se mostraba en ningún
+       PDF de cotización/resumen impreso hasta ahora) — se copió el logo real ahí, beneficia
+       también a esos dos documentos existentes.
+    3. **Aclaración pedida sobre selección de impresora**: no hay dos mecanismos con prioridad
+       entre sí (uno "detectado" y otro "manual que lo reemplaza") — el campo Impresora del
+       formulario es uno solo; el `<Select>` y las tarjetas del panel lateral son dos controles
+       distintos que escriben ese mismo campo. Además, ningún NRollo se calcula ni se guarda al
+       elegir la impresora — esa resolución ocurre enteramente en el servidor, recién al hacer
+       clic en "Registrar", usando la fecha/hora que esté en el formulario en ese momento (por
+       eso una fecha pasada puede resolver un rollo distinto al que el panel muestra "ahora").
+    4. **Orden fijo de impresoras + grupos colapsables**: el catálogo se mostraba alfabético
+       (`orderBy: codigo`); el usuario pidió el orden real de planta (MS 1-6, MP 7-8, RG NEXT/ONE,
+       Mimaki 3-6) partido en dos secciones colapsables — "Impresoras MS DT" (MS 1-6 + MP 7-8) e
+       "Impresoras DP" (RG NEXT, RG ONE, MK3-6). Agregadas columnas `orden`/`grupo` a
+       `costeo.Impresora` (migración `20260812210311_impresora_orden_grupo`), sembradas desde el
+       índice/agrupación ya correctos del arreglo `IMPRESORAS_COSTEO` en `seed.ts`. `orderBy` de
+       `listarImpresoras()`/`panel()` en `costeo-rollos.service.ts` cambiado de `codigo` a `orden`.
+       Componente nuevo `apps/web/src/components/shared/grupo-colapsable.tsx` (`useState` local,
+       sin Radix — no había necesidad de animación ni control externo) aplicado al grid de
+       `tab-panel.tsx` (Gestión de Rollos) y a la barra lateral `panel-impresoras.tsx`
+       (Reposiciones); **no** se tocó el selector de impresora de `tab-montaje.tsx` (pantalla
+       táctil de F2, patrón de interacción distinto) — solo hereda el nuevo orden del backend, sin
+       agrupar. Verificado con curl que ambos endpoints devuelven el orden/grupo correctos.
+    5. **Bug real: el import de OP nunca escribía `idLineaProducto`** — el usuario notó que
+       Reposiciones/Órdenes siempre mostraban "Línea de producto: —" y preguntó por qué, mostrando
+       una captura del sistema legacy donde el campo `CLIENTE` en realidad mezcla cliente + línea
+       (`BSN Basketball`, `BSN Jersey`...) — hallazgo ya documentado en
+       `ANEXO_A_Hallazgos.md §2.3` y la razón por la que F1 modeló `costeo.LineaProducto` como
+       catálogo separado (`{idCliente, nombre}`) desde el principio. El modelo estaba bien, pero
+       `costeo-ordenes.service.ts` nunca resolvía ni escribía ese campo al importar — un vacío real
+       de F3, no una decisión de diseño ni un malentendido del usuario. Corregido: nueva columna
+       "Línea de producto (nombre, opcional)" en la plantilla de import (posición 3, junto a
+       Cliente), resuelta contra `costeo.LineaProducto` por `(idCliente, nombre)`. Si el nombre no
+       existe para ese cliente, la fila queda **pendiente** en el preview — mismo patrón que
+       Producto faltante, confirmado con el usuario — y no se crea la OP hasta darla de alta.
+       Verificado con curl: línea inexistente → error de pendiente; línea creada directo en BD →
+       preview la resuelve y el import la escribe correctamente en `orden_produccion`.
+       El usuario confirmó construir ya una pantalla mínima de alta (en vez de dejarlo por edición
+       directa en base de datos, dado que F8 va a generar líneas nuevas seguido): `GET/POST
+       /costeo/ordenes/lineas-producto` y `GET /costeo/ordenes/clientes` en
+       `costeo-ordenes.service.ts`/`.controller.ts` (gateados con `costeo.orden.importar`, el mismo
+       permiso que ya requiere el import — sin permiso nuevo), con validación de cliente existente
+       (404) y línea duplicada por `(idCliente, nombre)` (409). Frontend: botón "Líneas de
+       producto" en `ordenes-page.tsx` abre `components/modal-lineas-producto.tsx` — formulario
+       simple (Select cliente + input nombre) más una tabla de las ya creadas, sin flujo de
+       aprobación (a diferencia de Producto, que si tiene alta real en `/catalogo` con receta y
+       costos asociados). Verificado con curl (alta nueva, cliente inexistente → 404, línea
+       duplicada → 409) — **no verificado visualmente en navegador**, Playwright/automatización de
+       navegador no estaba disponible en esta sesión; falta una pasada manual del usuario o una
+       sesión donde sí esté disponible antes de dar esto por completamente cerrado. De paso, se
+       aprovechó la línea "Basketball" creada durante la prueba con curl para dejarla real en el
+       catálogo y asignársela a la OP de ejemplo `26OP000001` — ahora Reposiciones/Órdenes muestran
+       Cliente: BSN SPORTS / Línea: Basketball en vez de "—".
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar

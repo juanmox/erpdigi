@@ -36,11 +36,21 @@ const PERMISOS_ADMIN_ADICIONALES = [
 // Permisos del módulo Costeo Real (PROMPT_CLAUDE_CODE.md §7). Otorgados por
 // completo a ADMIN, y repartidos entre los 6 roles granulares que sugiere el
 // prompt (ver ROLES_GRANULARES_COSTEO más abajo).
+//
+// costeo.orden.ver / costeo.orden.importar NO están en la lista original de
+// 22 permisos de §7 — el prompt nunca anticipó un sub-módulo de alta de
+// Órdenes de Producción (ninguna fase F2-F8 lo menciona explícitamente).
+// Se agregan aquí porque Reposiciones (F3) necesita OPs reales contra las
+// cuales validar, y esas OPs se cargan por import (ver costeo-ordenes,
+// sesión F3, confirmado con el usuario). Documentado como desviación
+// deliberada del RBAC original, no un descuido.
 const PERMISOS_COSTEO = [
   'costeo.rollo.ver',
   'costeo.rollo.montar',
   'costeo.rollo.desmontar',
   'costeo.rollo.ingresar',
+  'costeo.orden.ver',
+  'costeo.orden.importar',
   'costeo.reposicion.ver',
   'costeo.reposicion.crear',
   'costeo.reposicion.anular',
@@ -93,6 +103,7 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.rollo.ver',
       'costeo.rollo.montar',
       'costeo.rollo.desmontar',
+      'costeo.orden.ver',
       'costeo.consumo.ver',
       'costeo.consumo.capturar',
       'costeo.estandar.ver',
@@ -104,6 +115,7 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
     'Operador Transferencia',
     [
       'costeo.rollo.ver',
+      'costeo.orden.ver',
       'costeo.consumo.ver',
       'costeo.consumo.capturar',
       'costeo.reposicion.ver',
@@ -116,6 +128,8 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
     'ANALISTA_COSTOS',
     'Analista de Costos',
     [
+      'costeo.orden.ver',
+      'costeo.orden.importar',
       'costeo.of.ver',
       'costeo.of.crear',
       'costeo.of.editar',
@@ -137,6 +151,8 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.rollo.montar',
       'costeo.rollo.desmontar',
       'costeo.rollo.ingresar',
+      'costeo.orden.ver',
+      'costeo.orden.importar',
       'costeo.reposicion.ver',
       'costeo.reposicion.crear',
       'costeo.reposicion.anular',
@@ -155,6 +171,7 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
     'Gerencia',
     [
       'costeo.rollo.ver',
+      'costeo.orden.ver',
       'costeo.reposicion.ver',
       'costeo.reposicion.anular',
       'costeo.consumo.ver',
@@ -239,37 +256,46 @@ const DEFECTOS_COSTEO: Array<[codigo: string, nombre: string, categoria: string,
   ['PERDIDA_BIES', 'Perdida de Bies', 'HUMANO', 'INTERNO'],
 ]
 
-// Tipos de papel activos hoy en el formulario (ANEXO_B §5.1) + históricos NO
-// ambiguos, marcados inactivos para no perder el registro (ANEXO_B §5.2).
-// Se excluyen a propósito "PAPEL DIGITAL PROTECT 100 GSM 64"" y "TEXTPRINT
-// 1000" — el anexo los marca como posibles duplicados de los activos y pide
-// confirmar con el usuario antes de unificarlos.
+// Tipos de papel confirmados activos: los del formulario (ANEXO_B §5.1) +
+// CHINO_ALEMAN_120, confirmado activo por la hoja real `DataDisev3!
+// Mantenimiento` (usuario, sesión de F3) — el pool Mimaki 3-6 lo usa hoy,
+// no es histórico. CHINO_ALEMAN_1000 y ALEMAN_CON_TACK siguen sin
+// confirmar, quedan inactivos. Se excluye a propósito "PAPEL DIGITAL
+// PROTECT 100 GSM 64"" y "TEXTPRINT 1000" — posibles duplicados pendientes
+// de confirmar antes de unificarlos.
 const TIPOS_PAPEL_COSTEO: Array<[codigo: string, nombre: string, activo: boolean]> = [
   ['HIGH_SPEED', 'HIGH SPEED', true],
   ['TEXTPRINT_XP_105_K2_1000', 'TEXTPRINT XP 105 K2 de 1000', true],
   ['DIGITAL_PROTECT_100', 'DIGITAL PROTECT 100', true],
+  ['CHINO_ALEMAN_120', 'CHINO-ALEMAN de 120', true],
   ['ALEMAN_CON_TACK', 'ALEMAN CON TACK', false],
   ['CHINO_ALEMAN_1000', 'CHINO-ALEMAN de 1000', false],
-  ['CHINO_ALEMAN_120', 'CHINO-ALEMAN de 120', false],
 ]
 
-// Impresoras activas del formulario (ANEXO_B §3.1) + MK3/MK4, documentadas
-// ahí como equipos retirados (se preservan inactivas, no se destruye el
-// registro histórico). MS 7/MS 8 y "MK'S" quedan fuera a propósito — ANEXO_B
-// marca su existencia real como no confirmada ("verificar antes de descartar").
-const IMPRESORAS_COSTEO: Array<[codigo: string, tipoPapelDefault: string | null, activo: boolean]> = [
-  ['MS 1', 'TEXTPRINT_XP_105_K2_1000', true],
-  ['MS 2', 'TEXTPRINT_XP_105_K2_1000', true],
-  ['MS 3', 'TEXTPRINT_XP_105_K2_1000', true],
-  ['MS 4', 'TEXTPRINT_XP_105_K2_1000', true],
-  ['MS 5', 'TEXTPRINT_XP_105_K2_1000', true],
-  ['MS 6', 'TEXTPRINT_XP_105_K2_1000', true],
-  ['MP 7', 'TEXTPRINT_XP_105_K2_1000', true],
-  ['MP 8', 'TEXTPRINT_XP_105_K2_1000', true],
-  ['RG NEXT', 'HIGH_SPEED', true],
-  ['RG ONE', 'HIGH_SPEED', true],
-  ['MK3', null, false],
-  ['MK4', null, false],
+// Impresoras activas del formulario (ANEXO_B §3.1) + el pool Mimaki 3-6
+// (MK3-MK6), que usan papel Chino Alemán — el usuario confirmó (sesión de
+// F3) que "MK'S" en ANEXO_B no era una impresora retirada sino este pool
+// completo de 4 equipos activos, mal registrado como ambiguo en F1. MS 7/
+// MS 8 siguen fuera — esos sí quedan sin confirmar.
+// grupo: MS_DT (impresoras MS/MP) · DP (RG NEXT/ONE + Mimaki) — a pedido del
+// usuario (sesión F3), para las secciones colapsables del panel de estado.
+// El orden de despliegue es el orden de este arreglo (MS 1-6, MP 7-8, RG
+// NEXT/ONE, Mimaki 3-6), nunca alfabético.
+const IMPRESORAS_COSTEO: Array<[codigo: string, tipoPapelDefault: string | null, activo: boolean, grupo: string]> = [
+  ['MS 1', 'TEXTPRINT_XP_105_K2_1000', true, 'MS_DT'],
+  ['MS 2', 'TEXTPRINT_XP_105_K2_1000', true, 'MS_DT'],
+  ['MS 3', 'TEXTPRINT_XP_105_K2_1000', true, 'MS_DT'],
+  ['MS 4', 'TEXTPRINT_XP_105_K2_1000', true, 'MS_DT'],
+  ['MS 5', 'TEXTPRINT_XP_105_K2_1000', true, 'MS_DT'],
+  ['MS 6', 'TEXTPRINT_XP_105_K2_1000', true, 'MS_DT'],
+  ['MP 7', 'TEXTPRINT_XP_105_K2_1000', true, 'MS_DT'],
+  ['MP 8', 'TEXTPRINT_XP_105_K2_1000', true, 'MS_DT'],
+  ['RG NEXT', 'HIGH_SPEED', true, 'DP'],
+  ['RG ONE', 'HIGH_SPEED', true, 'DP'],
+  ['MK3', 'CHINO_ALEMAN_120', true, 'DP'],
+  ['MK4', 'CHINO_ALEMAN_120', true, 'DP'],
+  ['MK5', 'CHINO_ALEMAN_120', true, 'DP'],
+  ['MK6', 'CHINO_ALEMAN_120', true, 'DP'],
 ]
 
 const CALANDRAS_COSTEO = ['MONTI #1', 'MONTI #2', 'MONTI #3', 'MONTI #4', 'MONTI #5', 'MONTI #6']
@@ -357,12 +383,13 @@ async function seedCosteo() {
   const idTipoPapelPorCodigo = new Map(tiposPapel.map((t) => [t.codigo, t.idTipoPapel]))
 
   const impresoras = await Promise.all(
-    IMPRESORAS_COSTEO.map(([codigo, tipoPapelDefault, activo]) => {
+    IMPRESORAS_COSTEO.map(([codigo, tipoPapelDefault, activo, grupo], indice) => {
       const idTipoPapelDefault = tipoPapelDefault ? (idTipoPapelPorCodigo.get(tipoPapelDefault) ?? null) : null
+      const orden = indice + 1
       return prisma.impresora.upsert({
         where: { codigo },
-        update: { idTipoPapelDefault, activo },
-        create: { codigo, idTipoPapelDefault, activo },
+        update: { idTipoPapelDefault, activo, orden, grupo },
+        create: { codigo, idTipoPapelDefault, activo, orden, grupo },
       })
     }),
   )

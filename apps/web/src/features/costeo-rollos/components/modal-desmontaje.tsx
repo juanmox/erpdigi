@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,18 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const idMontajeRollo = item?.montaje?.idMontajeRollo
+
+  // Se pide fresco al abrir (no se reutiliza lo que trae el panel) porque acá
+  // hace falta yardasAlIniciarEsteMontaje/consumoEsteMontaje — si el rollo ya
+  // se montó antes en otra sesión, esos valores no son los mismos que
+  // yardasIniciales/consumoTotalHistoricoRollo del panel.
+  const { data: detalle, isLoading } = useQuery({
+    queryKey: ['costeo-rollos', 'montajes', idMontajeRollo],
+    queryFn: () => costeoRollosApi.detalleMontaje(idMontajeRollo!),
+    enabled: open && !!idMontajeRollo,
+  })
+
   useEffect(() => {
     if (open) {
       setYardasFinales('')
@@ -38,15 +50,17 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
   }, [open])
 
   if (!item?.montaje) return null
-  const { montaje, impresora } = item
+  const { impresora } = item
 
-  const yardasIniciales = montaje.rolloPapel.yardasIniciales ? Number(montaje.rolloPapel.yardasIniciales) : null
+  const yardasAlIniciar = detalle?.yardasAlIniciarEsteMontaje ?? null
+  const consumoEsteMontaje = detalle?.consumoEsteMontaje ?? 0
   const finalesNum = Number(yardasFinales)
-  const usadasFisicas = yardasIniciales != null && yardasFinales !== '' && !Number.isNaN(finalesNum) ? yardasIniciales - finalesNum : null
-  const merma = usadasFisicas != null ? usadasFisicas - montaje.consumoAcumulado : null
+  const usadasFisicas =
+    yardasAlIniciar != null && yardasFinales !== '' && !Number.isNaN(finalesNum) ? yardasAlIniciar - finalesNum : null
+  const merma = usadasFisicas != null ? usadasFisicas - consumoEsteMontaje : null
 
   async function confirmar() {
-    if (!item?.montaje) return
+    if (!idMontajeRollo) return
     if (yardasFinales === '' || Number.isNaN(finalesNum) || finalesNum < 0) {
       setError('Ingresá las yardas finales del rollo')
       return
@@ -54,7 +68,7 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
     setGuardando(true)
     setError(null)
     try {
-      await costeoRollosApi.desmontar(item.montaje.idMontajeRollo, { yardasFinales: finalesNum, estado })
+      await costeoRollosApi.desmontar(idMontajeRollo, { yardasFinales: finalesNum, estado })
       queryClient.invalidateQueries({ queryKey: ['costeo-rollos'] })
       onDesmontado()
       onOpenChange(false)
@@ -83,14 +97,15 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
         <div className="space-y-3">
           <div className="rounded-md bg-black/[0.03] px-3 py-2 text-sm dark:bg-white/[0.04]">
             <div className="font-mono">
-              {montaje.rolloPapel.facturaPapel.numeroFactura}-{montaje.rolloPapel.facturaPapel.totalRollos}-{montaje.rolloPapel.secuencia}
+              {item.montaje.rolloPapel.facturaPapel.numeroFactura}-{item.montaje.rolloPapel.facturaPapel.totalRollos}-
+              {item.montaje.rolloPapel.secuencia}
             </div>
-            <div className="text-ink-muted">{montaje.rolloPapel.tipoPapel.nombre}</div>
+            <div className="text-ink-muted">{item.montaje.rolloPapel.tipoPapel.nombre}</div>
           </div>
 
           <div>
-            <Label className="mb-1 block text-xs">Yardas iniciales</Label>
-            <Input value={yardasIniciales ?? '—'} disabled />
+            <Label className="mb-1 block text-xs">Yardas al iniciar este montaje</Label>
+            <Input value={isLoading ? 'Cargando…' : (yardasAlIniciar ?? '—')} disabled />
           </div>
           <div>
             <Label className="mb-1 block text-xs">Yardas finales (lectura al desmontar)</Label>
@@ -106,8 +121,8 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
 
           <div className="grid grid-cols-2 gap-3 rounded-md border border-border p-3 text-sm">
             <div>
-              <div className="text-ink-faint">Consumo registrado</div>
-              <div className="font-medium">{montaje.consumoAcumulado.toFixed(2)} yd</div>
+              <div className="text-ink-faint">Consumo de este montaje</div>
+              <div className="font-medium">{consumoEsteMontaje.toFixed(2)} yd</div>
             </div>
             <div>
               <div className="text-ink-faint">Merma calculada</div>
@@ -139,7 +154,7 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button disabled={guardando} onClick={confirmar}>
+          <Button disabled={guardando || isLoading} onClick={confirmar}>
             {guardando ? 'Guardando…' : 'Confirmar desmontaje'}
           </Button>
         </DialogFooter>

@@ -8,6 +8,8 @@ import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
+import { CosteoOrdenesModule } from './modules/costeo-ordenes/costeo-ordenes.module';
+import { CosteoReposicionesModule } from './modules/costeo-reposiciones/costeo-reposiciones.module';
 import { CosteoRollosModule } from './modules/costeo-rollos/costeo-rollos.module';
 import { EmpresasModule } from './modules/empresas/empresas.module';
 import { MonedasModule } from './modules/monedas/monedas.module';
@@ -39,6 +41,8 @@ import { PrismaModule } from './prisma/prisma.module';
     ProductosModule,
     CotizacionesModule,
     CosteoRollosModule,
+    CosteoOrdenesModule,
+    CosteoReposicionesModule,
   ],
   controllers: [AppController],
   providers: [

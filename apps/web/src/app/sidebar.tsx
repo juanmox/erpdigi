@@ -64,6 +64,8 @@ export function Sidebar() {
     { to: moduloRecetas.ruta!, codigo: moduloRecetas.codigo, etiqueta: moduloRecetas.nombre },
     ...(puedeGestionar ? [{ to: '/catalogo', codigo: 'GD', etiqueta: 'Gestión de datos' }] : []),
     ...(tienePermiso('costeo.rollo.ver') ? [{ to: '/costeo/rollos', codigo: 'CR', etiqueta: 'Gestión de Rollos' }] : []),
+    ...(tienePermiso('costeo.orden.ver') ? [{ to: '/costeo/ordenes', codigo: 'OP', etiqueta: 'Órdenes de Producción' }] : []),
+    ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones', codigo: 'RE', etiqueta: 'Reposiciones' }] : []),
     ...(tienePermiso('plataforma.usuarios.administrar') ? [{ to: '/usuarios', codigo: 'US', etiqueta: 'Usuarios' }] : []),
   ]
 
@@ -109,9 +111,6 @@ export function Sidebar() {
                     {modulo.codigo}
                   </span>
                   {modulo.nombre}
-                  <span className="ml-auto rounded-full bg-black/[0.04] px-[7px] py-0.5 text-[9.5px] font-bold text-ink-faint dark:bg-white/[0.06]">
-                    {modulo.fase}
-                  </span>
                 </span>
               </li>
             ))}
@@ -120,12 +119,6 @@ export function Sidebar() {
       )}
 
       <div className="mt-auto flex flex-col gap-2.5">
-        {!colapsado && (
-          <div className="border-t border-border/70 px-2.5 pt-2.5 text-[11.5px] leading-relaxed text-ink-faint">
-            Roadmap de migración desde <span className="font-mono">01_erp</span> — cada módulo se activa aquí cuando su fase queda
-            completa.
-          </div>
-        )}
         <button
           type="button"
           onClick={() => setColapsado((v) => !v)}

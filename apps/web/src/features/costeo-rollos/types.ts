@@ -16,6 +16,8 @@ export interface Impresora {
   idTipoPapelDefault: number | null
   activo: boolean
   tipoPapelDefault: TipoPapel | null
+  orden: number
+  grupo: string | null
 }
 
 export interface FacturaPapel {
@@ -50,9 +52,32 @@ export interface MontajeDetalle {
   yardasFinales: string | null
   rolloPapel: RolloPapel
   impresora: Impresora
-  consumoAcumulado: number
+  /** Consumo registrado solo durante esta sesión de montaje. */
+  consumoEsteMontaje: number
+  /** Consumo del rollo a través de TODOS sus montajes (incluye este). */
+  consumoTotalHistoricoRollo: number
+  /** Lo que quedaba en el rollo al iniciar este montaje (yardas_iniciales si es el primer montaje del rollo). */
+  yardasAlIniciarEsteMontaje: number | null
+  /** Restante real del rollo físico ahora mismo (yardas_iniciales − consumo histórico total). */
+  yardasRestantesRollo: number | null
   yardasUsadasFisicas: number | null
   merma: number | null
+}
+
+export interface RolloDeFactura {
+  idRolloPapel: number
+  secuencia: number
+  idTipoPapel: number
+  yardasIniciales: string | null
+  costoUnitario: string | null
+  estado: EstadoRollo
+  tipoPapel: TipoPapel
+}
+
+export interface FacturaConRollos extends FacturaPapel {
+  rollos: RolloDeFactura[]
+  /** false si algún rollo de esta factura ya se montó alguna vez — ver corrección de F3. */
+  editable: boolean
 }
 
 export interface PanelItem {
@@ -62,7 +87,8 @@ export interface PanelItem {
     idRolloPapel: number
     montadoEn: string
     rolloPapel: RolloPapel
-    consumoAcumulado: number
+    consumoEsteMontaje: number
+    consumoTotalHistoricoRollo: number
     yardasRestantesEstimadas: number | null
     porcentajeRestante: number | null
   } | null
