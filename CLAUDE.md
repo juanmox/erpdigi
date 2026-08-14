@@ -318,6 +318,60 @@ una** — no avanzar por iniciativa propia.
        aprovechó la línea "Basketball" creada durante la prueba con curl para dejarla real en el
        catálogo y asignársela a la OP de ejemplo `26OP000001` — ahora Reposiciones/Órdenes muestran
        Cliente: BSN SPORTS / Línea: Basketball en vez de "—".
+  - **Espejo hacia Google Sheets legacy (posterior al commit de F3, sin commitear todavía)**: el
+    usuario recordó que el formulario legacy (`Forma 1`, `Código.gs`) escribe cada reposición en
+    dos Google Sheets que siguen alimentando los Dashboards de Google Data Studio, y preguntó si
+    el ERP nuevo hace lo mismo — no lo hacía. Confirmado con el código real del GAS legacy
+    (`guardarRepo()`/`doPost()`) más los dos libros descargados como Excel para análisis
+    (`DataREPOSMig.xlsx`, `ConsumosFinal DIGITEXSAMig.xlsx`, en la carpeta de análisis del
+    usuario) — esto además ya estaba anticipado en las notas originales del usuario
+    ("Forma 1 Formulario Web.txt"): *"La solución deberá ingresar los datos, tanto a la base de
+    datos de PostgreSQL actual del ERP, como a las hojas de cálculo actuales."*
+    - **Los dos libros**: `Registro` (ID `1Be8_xaVbMtQzQa518m8R5M7tWiwDjMJ8sWYX3Jkg62Q`) — detalle
+      de reposiciones, 15 columnas fijas (FECHA·ORDEN·No. REPO·DEPARTAMENTO·RESPONSABLE·DEFECTO·
+      BODEGA SAC·YARDAS PAPEL·TIPO PAPEL·TELA·YARDAS TELA·CLIENTE·EQUIPO·CALANDRA·NRollo) — y
+      `Datos` (ID `1P5Q9iVr4hA-50SH18pPrtKMKPO0Y5THJ-KJ4QtuCBYY`, hoja compartida con Forma 2/
+      consumo de producción) — mismas 15 columnas del legacy pero sin tela nunca (una reposición
+      solo llena las columnas de papel ahí, igual que el legacy).
+    - **NRollo**: a pedido explícito del usuario, se manda el valor que el ERP ya resolvió
+      (`fn_rollo_en()` → `numeroFactura-totalRollos-secuencia`, mismo formato que
+      `costeo.v_rollo_codigo`), **no** la búsqueda heurística del legacy (`buscarNRollo()`, que en
+      los datos reales se queda en `"Buscando..."` sin resolver con frecuencia).
+    - **Nunca bloquea el guardado** (confirmado con el usuario): `GoogleSheetsService`
+      (`apps/api/src/common/google-sheets/`) nunca lanza — cualquier error de red/cuota/permiso
+      queda solo en el log. Se dispara en segundo plano (`void this.espejarEnGoogleSheets(...)`,
+      sin `await`) al final de `crear()` en `costeo-reposiciones.service.ts`, después de que la
+      reposición ya quedó confirmada en Postgres.
+    - **Anulaciones**: a pedido explícito del usuario, **no** se reflejan en los Sheets — el
+      legacy tampoco borra ni marca filas (`appendRow` únicamente), y una reposición anulada en
+      el ERP simplemente deja su fila ya escrita tal cual, para limpiarse a mano si hiciera falta
+      ("no creo que pase eso").
+    - **Credenciales**: service account de Google Cloud (`temperp@erpgas-505420.iam.gserviceaccount.com`,
+      compartida con Editor en ambos Sheets por el usuario) — el archivo JSON vive en
+      `apps/api/credentials/` (nunca se commitea, agregado a `.gitignore` junto con `*.pem`), y
+      `apps/api/.env`/`​.env.example` tienen `GOOGLE_SHEETS_CREDENTIALS_PATH`,
+      `GOOGLE_SHEETS_ID_REGISTRO`, `GOOGLE_SHEETS_ID_CONSUMOS`.
+    - **Bug real encontrado y corregido durante la verificación** (el espejo no escribía nada, sin
+      ningún error visible): `apps/api/src/config/env.validation.ts` valida `.env` con un schema
+      Zod — `ConfigModule` de NestJS usa `dotenv.parse()` (no `dotenv.config()`, nunca muta
+      `process.env` directo) y solo re-inyecta a `process.env` lo que sobrevive a ese schema. Las
+      tres variables nuevas de Sheets no estaban declaradas ahí, así que Zod las descartaba en
+      silencio — `GoogleSheetsService` las leía como `undefined` y el primer `if` de
+      `agregarFila()` retornaba sin loggear nada. Corregido agregando las tres al `envSchema` como
+      opcionales, más un `logger.warn()` nuevo en ese `if` para que un descuido similar con
+      cualquier variable futura quede visible en vez de fallar en silencio. Dejado un comentario
+      explícito en `env.validation.ts` advirtiendo esto para la próxima variable de entorno nueva.
+    - **Verificado de punta a punta contra los Sheets reales** (no un mock): tras el fix, una
+      reposición de prueba (`26OP000001`/`R07`) apareció correctamente en ambos libros con el
+      formato de fecha exacto del legacy (`dd/MM/yyyy HH:mm`, zona `America/Guatemala`) y las
+      columnas correctas; la reposición de prueba se anuló después en Postgres (no en Sheets,
+      conforme al punto de arriba — la fila de prueba sigue ahí, visible por su comentario/defecto
+      obviamente de prueba, sin necesidad de limpieza urgente dado el volumen del libro real).
+    - **Gotcha de infraestructura de esta sesión, no del código**: el servidor dev de la API quedó
+      con dos procesos `nest start --watch` corriendo en paralelo (uno huérfano de un restart
+      anterior) peleando por el puerto 4000, causando reinicios en cascada que interrumpían el
+      envío en segundo plano a mitad de camino y hacían parecer que el código fallaba — ya
+      resueltos mata en dos veces todos los procesos `nest`/`dist/src/main` y arrancando uno solo.
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar

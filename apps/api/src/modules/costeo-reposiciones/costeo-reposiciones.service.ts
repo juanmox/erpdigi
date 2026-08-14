@@ -4,6 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  formatearFechaSheets,
+  GoogleSheetsService,
+} from '../../common/google-sheets/google-sheets.service';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
@@ -26,6 +30,7 @@ export class CosteoReposicionesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditoria: AuditoriaService,
+    private readonly googleSheets: GoogleSheetsService,
   ) {}
 
   listarDepartamentos() {
@@ -112,79 +117,86 @@ export class CosteoReposicionesService {
     const fecha = new Date(dto.fecha);
     const yardasPapel = dto.yardasPapel ?? 0;
 
-    const idReposicion = await this.prisma.$transaction(async (tx) => {
-      let idMontajeRollo: number | null = null;
-      let idTipoPapel: number | null = null;
+    const { idReposicion, nrolloTexto } = await this.prisma.$transaction(
+      async (tx) => {
+        let idMontajeRollo: number | null = null;
+        let idTipoPapel: number | null = null;
+        let nrolloTexto = '';
 
-      if (dto.idImpresora != null) {
-        const resultado = await tx.$queryRaw<{ id_montaje: number | null }[]>`
+        if (dto.idImpresora != null) {
+          const resultado = await tx.$queryRaw<{ id_montaje: number | null }[]>`
           SELECT costeo.fn_rollo_en(${dto.idImpresora}, ${fecha}::timestamptz) AS id_montaje
         `;
-        idMontajeRollo = resultado[0]?.id_montaje ?? null;
-        if (idMontajeRollo == null) {
-          throw new ConflictException(
-            'Esta impresora no tiene ningún rollo montado en ese momento',
-          );
+          idMontajeRollo = resultado[0]?.id_montaje ?? null;
+          if (idMontajeRollo == null) {
+            throw new ConflictException(
+              'Esta impresora no tiene ningún rollo montado en ese momento',
+            );
+          }
+          const montaje = await tx.montajeRollo.findUniqueOrThrow({
+            where: { idMontajeRollo },
+            include: { rolloPapel: { include: { facturaPapel: true } } },
+          });
+          idTipoPapel = montaje.rolloPapel.idTipoPapel;
+          // Mismo formato que costeo.v_rollo_codigo — el NRollo que el ERP ya
+          // resolvió (no la búsqueda heurística del Código.gs legacy, que a
+          // veces se queda en "Buscando..." sin resolver nada).
+          nrolloTexto = `${montaje.rolloPapel.facturaPapel.numeroFactura}-${montaje.rolloPapel.facturaPapel.totalRollos}-${montaje.rolloPapel.secuencia}`;
         }
-        const montaje = await tx.montajeRollo.findUniqueOrThrow({
-          where: { idMontajeRollo },
-          include: { rolloPapel: true },
+
+        // MAX+1 calculado dentro de la misma transacción — el UNIQUE
+        // (id_orden_produccion, numero_repo) es la garantía real ante
+        // concurrencia, esto solo evita colisiones en el caso común.
+        const agg = await tx.reposicion.aggregate({
+          where: { idOrdenProduccion: orden.idOrdenProduccion },
+          _max: { numeroRepo: true },
         });
-        idTipoPapel = montaje.rolloPapel.idTipoPapel;
-      }
+        const numeroRepo = (agg._max.numeroRepo ?? 0) + 1;
 
-      // MAX+1 calculado dentro de la misma transacción — el UNIQUE
-      // (id_orden_produccion, numero_repo) es la garantía real ante
-      // concurrencia, esto solo evita colisiones en el caso común.
-      const agg = await tx.reposicion.aggregate({
-        where: { idOrdenProduccion: orden.idOrdenProduccion },
-        _max: { numeroRepo: true },
-      });
-      const numeroRepo = (agg._max.numeroRepo ?? 0) + 1;
-
-      const reposicion = await tx.reposicion.create({
-        data: {
-          fecha,
-          idOrdenProduccion: orden.idOrdenProduccion,
-          numeroRepo,
-          idDepartamento: dto.idDepartamento,
-          idEmpleado: dto.idEmpleado ?? null,
-          idDefecto: dto.idDefecto,
-          bodegaSac: dto.bodegaSac ?? null,
-          idImpresora: dto.idImpresora ?? null,
-          idCalandra: dto.idCalandra ?? null,
-          idMontajeRollo,
-          idTipoPapel,
-          yardasPapel,
-          idInsumoTela: dto.idInsumoTela ?? null,
-          yardasTela: dto.yardasTela ?? 0,
-          comentario: dto.comentario ?? null,
-          creadoPor: idUsuarioActor,
-        },
-      });
-
-      // Si la reposición sí consumió papel de un rollo resuelto, queda
-      // registrada también como hecho de consumo — es lo que permite que
-      // el panel de Gestión de Rollos (F2) refleje el papel usado por
-      // reposiciones, no solo por producción.
-      if (idMontajeRollo != null && yardasPapel > 0) {
-        await tx.consumoPapel.create({
+        const reposicion = await tx.reposicion.create({
           data: {
             fecha,
-            origen: 'REPOSICION',
             idOrdenProduccion: orden.idOrdenProduccion,
-            idReposicion: reposicion.idReposicion,
-            idImpresora: dto.idImpresora!,
+            numeroRepo,
+            idDepartamento: dto.idDepartamento,
+            idEmpleado: dto.idEmpleado ?? null,
+            idDefecto: dto.idDefecto,
+            bodegaSac: dto.bodegaSac ?? null,
+            idImpresora: dto.idImpresora ?? null,
+            idCalandra: dto.idCalandra ?? null,
             idMontajeRollo,
-            idTipoPapel: idTipoPapel!,
-            consumoYd: yardasPapel,
+            idTipoPapel,
+            yardasPapel,
+            idInsumoTela: dto.idInsumoTela ?? null,
+            yardasTela: dto.yardasTela ?? 0,
+            comentario: dto.comentario ?? null,
             creadoPor: idUsuarioActor,
           },
         });
-      }
 
-      return reposicion.idReposicion;
-    });
+        // Si la reposición sí consumió papel de un rollo resuelto, queda
+        // registrada también como hecho de consumo — es lo que permite que
+        // el panel de Gestión de Rollos (F2) refleje el papel usado por
+        // reposiciones, no solo por producción.
+        if (idMontajeRollo != null && yardasPapel > 0) {
+          await tx.consumoPapel.create({
+            data: {
+              fecha,
+              origen: 'REPOSICION',
+              idOrdenProduccion: orden.idOrdenProduccion,
+              idReposicion: reposicion.idReposicion,
+              idImpresora: dto.idImpresora!,
+              idMontajeRollo,
+              idTipoPapel: idTipoPapel!,
+              consumoYd: yardasPapel,
+              creadoPor: idUsuarioActor,
+            },
+          });
+        }
+
+        return { idReposicion: reposicion.idReposicion, nrolloTexto };
+      },
+    );
 
     await this.auditoria.registrar({
       idUsuario: idUsuarioActor,
@@ -199,7 +211,82 @@ export class CosteoReposicionesService {
       },
     });
 
-    return this.obtener(idReposicion);
+    const detalle = await this.obtener(idReposicion);
+
+    // Espejo hacia los dos Google Sheets legacy que todavía alimentan Data
+    // Studio — en segundo plano, nunca bloquea ni puede fallar el guardado
+    // (que ya quedó confirmado en Postgres arriba).
+    void this.espejarEnGoogleSheets(detalle, nrolloTexto);
+
+    return detalle;
+  }
+
+  private async espejarEnGoogleSheets(
+    detalle: Awaited<ReturnType<CosteoReposicionesService['obtener']>>,
+    nrolloTexto: string,
+  ) {
+    const fechaTexto = formatearFechaSheets(detalle.fecha);
+    const responsable = detalle.empleado?.nombres ?? 'Sin responsable';
+    const cliente = detalle.ordenProduccion.cliente?.nombre ?? '';
+    const yardasPapel = Number(detalle.yardasPapel);
+    const yardasTela = Number(detalle.yardasTela);
+    const tipoPapel = detalle.tipoPapel?.nombre ?? '';
+    const impresora = detalle.impresora?.codigo ?? '';
+
+    // Hoja "Registro" (libro Repos) — una fila por reposición, réplica
+    // exacta de guardarRepo()/hojasRepos.appendRow() del Código.gs legacy.
+    const filaRegistro = [
+      fechaTexto,
+      detalle.ordenProduccion.codigo,
+      detalle.codigoRepo,
+      detalle.departamento.nombre,
+      responsable,
+      detalle.defecto.nombre,
+      detalle.bodegaSac ?? '',
+      yardasPapel,
+      tipoPapel,
+      detalle.insumoTela?.descripcion ?? '',
+      yardasTela,
+      cliente,
+      impresora,
+      detalle.calandra?.codigo ?? '',
+      nrolloTexto,
+    ];
+
+    // Hoja "Datos" (libro ConsumosFinal DIGITEXSA, compartido con Forma 2) —
+    // mismas columnas que hojaCostos.appendRow() del Código.gs legacy; una
+    // reposición solo llena las de papel, el resto queda en blanco (nunca
+    // se manda tela ahí, igual que el legacy).
+    const filaDatos = [
+      fechaTexto,
+      '',
+      detalle.ordenProduccion.codigo,
+      detalle.codigoRepo,
+      cliente,
+      impresora,
+      '',
+      tipoPapel,
+      '',
+      '',
+      '',
+      '',
+      yardasPapel,
+      '',
+      nrolloTexto,
+    ];
+
+    await Promise.all([
+      this.googleSheets.agregarFila(
+        process.env.GOOGLE_SHEETS_ID_REGISTRO,
+        'Registro',
+        filaRegistro,
+      ),
+      this.googleSheets.agregarFila(
+        process.env.GOOGLE_SHEETS_ID_CONSUMOS,
+        'Datos',
+        filaDatos,
+      ),
+    ]);
   }
 
   async anular(

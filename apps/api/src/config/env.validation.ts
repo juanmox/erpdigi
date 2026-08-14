@@ -13,6 +13,15 @@ export const envSchema = z.object({
   // con NODE_ENV=production y sin este override, el cookie Secure rompería el login
   // porque el navegador nunca lo manda de vuelta por HTTP plano.
   COOKIE_SECURE: z.coerce.boolean().optional(),
+  // Espejo de Reposiciones hacia Google Sheets (ver GoogleSheetsService) — los tres
+  // opcionales a propósito: si faltan, el espejo simplemente se omite (nunca bloquea
+  // el guardado real). IMPORTANTE: cualquier variable de entorno nueva DEBE
+  // declararse acá o Zod la descarta en silencio (ConfigModule usa dotenv.parse(),
+  // no dotenv.config() — nunca mutan process.env directo, solo lo que sobrevive a
+  // este schema) — ya causó un bug real de "no pasa nada, sin error" con estas tres.
+  GOOGLE_SHEETS_CREDENTIALS_PATH: z.string().optional(),
+  GOOGLE_SHEETS_ID_REGISTRO: z.string().optional(),
+  GOOGLE_SHEETS_ID_CONSUMOS: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

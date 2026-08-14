@@ -5,6 +5,8 @@ dist/
 build/
 .env
 .env.local
+credentials/
+*.pem
 *.log
 .DS_Store
 Thumbs.db
