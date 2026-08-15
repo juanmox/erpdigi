@@ -372,6 +372,14 @@ una** — no avanzar por iniciativa propia.
       anterior) peleando por el puerto 4000, causando reinicios en cascada que interrumpían el
       envío en segundo plano a mitad de camino y hacían parecer que el código fallaba — ya
       resueltos mata en dos veces todos los procesos `nest`/`dist/src/main` y arrancando uno solo.
+    - **Columna P "Comentario" agregada solo en `Registro`** (pedido posterior del usuario): el
+      campo `comentario` de la reposición (ya existente en el ERP desde antes) ahora se manda
+      también como 16ª columna en la fila que va a `Registro`/`DataREPOSMig` — el usuario ya había
+      puesto el encabezado "Comentario" en la columna P de esa hoja (confirmado vacío en las
+      59,000+ filas antes de usarla). **Deliberadamente no se manda a "Datos"/ConsumosFinal** — ese
+      libro no tiene columna equivalente y el usuario pidió explícitamente que fuera solo en el
+      primero. Verificado contra el libro real: la fila de `Registro` trae el comentario en la
+      columna P, la fila correspondiente de `Datos` queda igual que antes (sin comentario).
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar

@@ -234,7 +234,10 @@ export class CosteoReposicionesService {
     const impresora = detalle.impresora?.codigo ?? '';
 
     // Hoja "Registro" (libro Repos) — una fila por reposición, réplica
-    // exacta de guardarRepo()/hojasRepos.appendRow() del Código.gs legacy.
+    // exacta de guardarRepo()/hojasRepos.appendRow() del Código.gs legacy,
+    // más la columna P "Comentario" (agregada a pedido del usuario, solo en
+    // este libro — el campo comentario del ERP no existía en el legacy y no
+    // tiene equivalente en "Datos"/ConsumosFinal).
     const filaRegistro = [
       fechaTexto,
       detalle.ordenProduccion.codigo,
@@ -251,6 +254,7 @@ export class CosteoReposicionesService {
       impresora,
       detalle.calandra?.codigo ?? '',
       nrolloTexto,
+      detalle.comentario ?? '',
     ];
 
     // Hoja "Datos" (libro ConsumosFinal DIGITEXSA, compartido con Forma 2) —
