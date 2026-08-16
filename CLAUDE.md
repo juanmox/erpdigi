@@ -501,10 +501,31 @@ sin i18n (todo en español).
   `ImportPreviewDialog`); primitivos de shadcn/ui sin modificar van en `components/ui/`.
 
 ## Autenticación y permisos (RBAC)
-- JWT de acceso (15 min, claims `{sub, email, idEmpresa, roles, permisos}`) + refresh token
+- JWT de acceso (15 min, claims `{sub, username, idEmpresa, roles, permisos}`) + refresh token
   **opaco** (no JWT) de 30 días, hasheado (SHA-256) en `refresh_tokens`, cookie httpOnly
   `path=/erp/api/auth`. Rotación en cada refresh; reutilizar un refresh ya rotado/revocado
   revoca toda la sesión (detección de robo de token).
+- **Login por `username`, no por email** (sesión posterior a la migración inicial de `core`):
+  `<input type="email">` en el login bloqueaba con la validación nativa del navegador en cuanto el
+  usuario escribía algo que no fuera un correo real (ej. "Administrador") — el usuario pidió poder
+  loguearse con un nombre simple (`juan`, `lissette`) en vez de un correo completo, notando además
+  que el correo es un dato que cambia y no aporta nada funcional hoy (no hay recuperación de
+  contraseña ni notificaciones por email). `core.Usuario.username` (`String @unique`, patrón
+  `^[a-z0-9](?:[a-z0-9._-]{1,28}[a-z0-9])?$`, ver `apps/api/src/common/username.ts`) es ahora el
+  identificador real de login; `email` pasa a **opcional** (`String? @unique`) — solo un dato de
+  referencia, sin validar formato salvo que se provea. Migración
+  `20260815180000_usuario_username_login` agrega la columna y hace backfill de `username` desde el
+  local-part del email existente (`admin@digitexsa.com` → `admin`), verificado sin colisiones
+  contra los 8 usuarios reales del ambiente antes de aplicarla. `seed.ts` gana
+  `SEED_ADMIN_USERNAME` (default `admin`), sin reemplazar `SEED_ADMIN_EMAIL` (el admin sigue
+  teniendo un email real por defecto, solo que ya no es lo que se usa para loguearse).
+  `usuarios.service.ts` ahora expone `editar()` (`PATCH /usuarios/:id`, username + email +
+  nombre) — antes el email solo se fijaba al crear, sin forma de corregirlo; cambiar username o
+  email es seguro para el historial porque `idUsuario` (entero, inmutable) es lo único que
+  referencian `creadoPor`/`anuladoPor` en todo el schema, nunca ninguno de los dos. Verificado con
+  curl: login viejo con `email` en el body (400, ya no es un campo válido), login nuevo con
+  `username`, usuario creado sin email (`email: null`), formato de username inválido (400),
+  username duplicado (409), edición de username+email con login posterior confirmando el cambio.
 - Guards globales vía `APP_GUARD`: `JwtAuthGuard` (bloquea todo por defecto; `@Public()` para
   login/refresh) + `PermissionsGuard` (`@RequirePermissions('codigo.punto.accion')`, a nivel de
   método o de controller completo).
@@ -533,6 +554,21 @@ sin i18n (todo en español).
   desactivarse a sí mismo ni quitarse su propio rol que otorga `plataforma.usuarios.administrar`
   (si no, un error de un click podría dejar el sistema sin ningún admin, sin más recuperación que
   tocar la base directamente).
+  - **Navegación y edición** (sesión posterior): `/usuarios` se sacó del sidebar principal — no es
+    un módulo de negocio como Recetas/Costeo, es administración de plataforma, así que mezclarlo
+    con la grilla de módulos o el sidebar de navegación era un error de categoría. Ahora vive
+    detrás de un desplegable en el círculo de iniciales de `shell.tsx` (antes puramente decorativo,
+    sin `onClick`) — mismo patrón que Gmail/Slack/Linear, y pensado para escalar: los permisos
+    `plataforma.roles.administrar`/`plataforma.empresas.administrar`/`plataforma.auditoria.ver` ya
+    existen en el seed sin pantalla propia todavía; cuando se construyan, son ítems nuevos dentro
+    de ese mismo desplegable, no tiles ni ítems de sidebar nuevos. Requirió un componente
+    `components/ui/dropdown-menu.tsx` nuevo (no existía en el kit shadcn de este proyecto).
+    De paso se agregó `editar()` (`PATCH /usuarios/:id`, nombre + email) — antes el email solo se
+    fijaba al crear, sin forma de corregirlo. Cambiarlo es seguro para el historial: `idUsuario`
+    (entero, inmutable) es lo que referencian `creadoPor`/`anuladoPor` en todo el schema, nunca el
+    email — confirmado revisando `costeo.prisma` antes de construirlo. Verificado con curl: edición
+    completa, edición parcial (el email no se borra si no se manda), y conflicto por email
+    duplicado (409).
 
 ## Convenciones heredadas de `recetas` (aplican a TODO el ERP, no solo a ese módulo)
 `recetas` (Fase 2, ya migrado y committeado) es el módulo de referencia — cualquier módulo nuevo

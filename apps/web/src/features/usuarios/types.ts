@@ -10,7 +10,8 @@ export interface EmpresaRolUsuario {
 
 export interface UsuarioAdmin {
   idUsuario: number
-  email: string
+  username: string
+  email: string | null
   nombreCompleto: string
   activo: boolean
   ultimoLoginEn: string | null

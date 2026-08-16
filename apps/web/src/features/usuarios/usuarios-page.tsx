@@ -20,7 +20,8 @@ export function UsuariosPage() {
     queryFn: () => usuariosApi.listar(),
   })
 
-  const [modalCrearAbierto, setModalCrearAbierto] = useState(false)
+  const [modalUsuarioAbierto, setModalUsuarioAbierto] = useState(false)
+  const [usuarioEditando, setUsuarioEditando] = useState<UsuarioAdmin | null>(null)
   const [usuarioPassword, setUsuarioPassword] = useState<UsuarioAdmin | null>(null)
   const [usuarioRoles, setUsuarioRoles] = useState<UsuarioAdmin | null>(null)
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
@@ -47,7 +48,13 @@ export function UsuariosPage() {
           <h1 className="text-xl font-semibold text-ink">Usuarios</h1>
           <p className="text-sm text-ink-muted">{usuarios?.length ?? 0} usuarios registrados</p>
         </div>
-        <Button size="sm" onClick={() => setModalCrearAbierto(true)}>
+        <Button
+          size="sm"
+          onClick={() => {
+            setUsuarioEditando(null)
+            setModalUsuarioAbierto(true)
+          }}
+        >
           Nuevo usuario
         </Button>
       </div>
@@ -84,7 +91,10 @@ export function UsuariosPage() {
                     {u.nombreCompleto}
                     {u.idUsuario === yo?.idUsuario && <span className="ml-1.5 text-xs text-ink-faint">(vos)</span>}
                   </div>
-                  <div className="text-xs text-ink-faint">{u.email}</div>
+                  <div className="text-xs text-ink-faint">
+                    @{u.username}
+                    {u.email && <span className="ml-1.5">· {u.email}</span>}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-1">
@@ -104,6 +114,16 @@ export function UsuariosPage() {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setUsuarioEditando(u)
+                        setModalUsuarioAbierto(true)
+                      }}
+                    >
+                      Editar
+                    </Button>
                     <Button variant="ghost" size="sm" onClick={() => setUsuarioRoles(u)}>
                       Roles
                     </Button>
@@ -121,7 +141,12 @@ export function UsuariosPage() {
         </Table>
       </div>
 
-      <ModalUsuario open={modalCrearAbierto} onOpenChange={setModalCrearAbierto} onGuardado={invalidar} />
+      <ModalUsuario
+        usuario={usuarioEditando}
+        open={modalUsuarioAbierto}
+        onOpenChange={setModalUsuarioAbierto}
+        onGuardado={invalidar}
+      />
 
       <ModalPassword
         usuario={usuarioPassword}

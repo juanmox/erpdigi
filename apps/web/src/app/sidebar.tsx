@@ -66,7 +66,6 @@ export function Sidebar() {
     ...(tienePermiso('costeo.rollo.ver') ? [{ to: '/costeo/rollos', codigo: 'CR', etiqueta: 'Gestión de Rollos' }] : []),
     ...(tienePermiso('costeo.orden.ver') ? [{ to: '/costeo/ordenes', codigo: 'OP', etiqueta: 'Órdenes de Producción' }] : []),
     ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones', codigo: 'RE', etiqueta: 'Reposiciones' }] : []),
-    ...(tienePermiso('plataforma.usuarios.administrar') ? [{ to: '/usuarios', codigo: 'US', etiqueta: 'Usuarios' }] : []),
   ]
 
   const proximamente = MODULOS.filter((m) => !m.activo)

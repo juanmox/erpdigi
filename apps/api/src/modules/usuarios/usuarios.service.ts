@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { AsignarRolDto } from './dto/asignar-rol.dto';
 import { CrearUsuarioDto } from './dto/crear-usuario.dto';
+import { EditarUsuarioDto } from './dto/editar-usuario.dto';
 import { EstablecerPasswordDto } from './dto/establecer-password.dto';
 
 const PERMISO_ADMINISTRAR_USUARIOS = 'plataforma.usuarios.administrar';
@@ -26,6 +27,7 @@ export class UsuariosService {
     return this.prisma.usuario.findMany({
       select: {
         idUsuario: true,
+        username: true,
         email: true,
         nombreCompleto: true,
         activo: true,
@@ -45,6 +47,7 @@ export class UsuariosService {
       where: { idUsuario },
       select: {
         idUsuario: true,
+        username: true,
         email: true,
         nombreCompleto: true,
         activo: true,
@@ -61,15 +64,26 @@ export class UsuariosService {
   }
 
   async crear(dto: CrearUsuarioDto, idUsuarioActor: number) {
-    const existente = await this.prisma.usuario.findUnique({
-      where: { email: dto.email },
+    const existenteUsername = await this.prisma.usuario.findUnique({
+      where: { username: dto.username },
     });
-    if (existente)
-      throw new ConflictException('Ya existe un usuario con ese email');
+    if (existenteUsername)
+      throw new ConflictException(
+        'Ya existe un usuario con ese nombre de usuario',
+      );
+
+    if (dto.email) {
+      const existenteEmail = await this.prisma.usuario.findUnique({
+        where: { email: dto.email },
+      });
+      if (existenteEmail)
+        throw new ConflictException('Ya existe un usuario con ese email');
+    }
 
     const passwordHash = await bcrypt.hash(dto.password, RONDAS_BCRYPT);
     const usuario = await this.prisma.usuario.create({
       data: {
+        username: dto.username,
         email: dto.email,
         passwordHash,
         nombreCompleto: dto.nombreCompleto,
@@ -81,10 +95,62 @@ export class UsuariosService {
       entidad: 'usuarios',
       idEntidad: String(usuario.idUsuario),
       accion: 'CREATE',
-      datosNuevos: { idUsuario: usuario.idUsuario, email: usuario.email },
+      datosNuevos: { idUsuario: usuario.idUsuario, username: usuario.username },
     });
 
     return this.obtener(usuario.idUsuario);
+  }
+
+  // El correo NUNCA es la clave real de nada — idUsuario (Int, inmutable) es
+  // lo que referencian creadoPor/anuladoPor/auditoría en todo el sistema, así
+  // que editarlo acá no reescribe ni desvincula ningún historial ya guardado.
+  async editar(
+    idUsuario: number,
+    dto: EditarUsuarioDto,
+    idUsuarioActor: number,
+  ) {
+    await this.obtener(idUsuario);
+
+    if (dto.username) {
+      const existente = await this.prisma.usuario.findUnique({
+        where: { username: dto.username },
+      });
+      if (existente && existente.idUsuario !== idUsuario)
+        throw new ConflictException(
+          'Ya existe un usuario con ese nombre de usuario',
+        );
+    }
+
+    if (dto.email) {
+      const existente = await this.prisma.usuario.findUnique({
+        where: { email: dto.email },
+      });
+      if (existente && existente.idUsuario !== idUsuario)
+        throw new ConflictException('Ya existe un usuario con ese email');
+    }
+
+    const usuario = await this.prisma.usuario.update({
+      where: { idUsuario },
+      data: {
+        username: dto.username,
+        email: dto.email,
+        nombreCompleto: dto.nombreCompleto,
+      },
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      entidad: 'usuarios',
+      idEntidad: String(idUsuario),
+      accion: 'UPDATE',
+      datosNuevos: {
+        username: usuario.username,
+        email: usuario.email,
+        nombreCompleto: usuario.nombreCompleto,
+      },
+    });
+
+    return this.obtener(idUsuario);
   }
 
   async asignarRol(

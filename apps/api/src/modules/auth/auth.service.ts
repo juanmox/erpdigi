@@ -22,7 +22,12 @@ export interface EmpresaDisponible {
 export interface SesionEmitida {
   accessToken: string;
   refreshToken: string;
-  usuario: { idUsuario: number; email: string; nombreCompleto: string };
+  usuario: {
+    idUsuario: number;
+    username: string;
+    email: string | null;
+    nombreCompleto: string;
+  };
   idEmpresa: number | null;
   empresasDisponibles: EmpresaDisponible[];
 }
@@ -70,7 +75,12 @@ export class AuthService {
   }
 
   private async emitirSesion(
-    usuario: { idUsuario: number; email: string; nombreCompleto: string },
+    usuario: {
+      idUsuario: number;
+      username: string;
+      email: string | null;
+      nombreCompleto: string;
+    },
     idEmpresa: number | null,
   ): Promise<SesionEmitida> {
     const empresasDisponibles = await this.empresasActivasDe(usuario.idUsuario);
@@ -80,7 +90,7 @@ export class AuthService {
 
     const payload: JwtPayload = {
       sub: usuario.idUsuario,
-      email: usuario.email,
+      username: usuario.username,
       idEmpresa,
       roles,
       permisos,
@@ -107,8 +117,10 @@ export class AuthService {
     };
   }
 
-  async login(email: string, password: string): Promise<SesionEmitida> {
-    const usuario = await this.prisma.usuario.findUnique({ where: { email } });
+  async login(username: string, password: string): Promise<SesionEmitida> {
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { username },
+    });
     if (!usuario || !usuario.activo) {
       throw new UnauthorizedException('Credenciales inválidas');
     }
@@ -136,6 +148,7 @@ export class AuthService {
     return this.emitirSesion(
       {
         idUsuario: usuario.idUsuario,
+        username: usuario.username,
         email: usuario.email,
         nombreCompleto: usuario.nombreCompleto,
       },
@@ -160,6 +173,7 @@ export class AuthService {
     return this.emitirSesion(
       {
         idUsuario: usuario.idUsuario,
+        username: usuario.username,
         email: usuario.email,
         nombreCompleto: usuario.nombreCompleto,
       },
@@ -210,6 +224,7 @@ export class AuthService {
     return this.emitirSesion(
       {
         idUsuario: usuario.idUsuario,
+        username: usuario.username,
         email: usuario.email,
         nombreCompleto: usuario.nombreCompleto,
       },

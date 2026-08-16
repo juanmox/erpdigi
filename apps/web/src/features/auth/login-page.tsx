@@ -23,7 +23,7 @@ function MarcaDigitexsa({ variant }: { variant: 'clara' | 'dorada' }) {
 
 export function LoginPage() {
   const { login } = useAuth()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
@@ -33,7 +33,7 @@ export function LoginPage() {
     setError(null)
     setEnviando(true)
     try {
-      await login(email, password)
+      await login(username, password)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'No se pudo iniciar sesión')
     } finally {
@@ -65,15 +65,15 @@ export function LoginPage() {
 
           <form className="mt-7 flex flex-col gap-4" onSubmit={onSubmit}>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="email">Correo electrónico</Label>
+              <Label htmlFor="username">Usuario</Label>
               <Input
-                id="email"
-                type="email"
+                id="username"
+                type="text"
                 autoComplete="username"
-                placeholder="nombre@digitexsa.com"
+                placeholder="usuario"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="h-10 rounded-[9px] focus-visible:border-accent-warm focus-visible:ring-accent-warm/40"
               />
             </div>

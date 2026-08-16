@@ -12,7 +12,8 @@ export interface EmpresaDisponible {
 
 export interface Usuario {
   idUsuario: number
-  email: string
+  username: string
+  email: string | null
   nombreCompleto: string
 }
 
@@ -35,7 +36,7 @@ interface AuthContextValue extends AuthState {
   cargando: boolean
   autenticado: boolean
   requiereSeleccionEmpresa: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<void>
   seleccionarEmpresa: (idEmpresa: number) => Promise<void>
   logout: () => Promise<void>
   tienePermiso: (permiso: string) => boolean
@@ -89,10 +90,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [intentarRefrescar])
 
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (username: string, password: string) => {
       const sesion = await apiFetch<SesionRespuesta>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username, password }),
       })
       aplicarSesion(sesion)
     },

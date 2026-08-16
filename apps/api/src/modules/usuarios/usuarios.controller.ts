@@ -13,6 +13,7 @@ import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { AsignarRolDto } from './dto/asignar-rol.dto';
 import { CrearUsuarioDto } from './dto/crear-usuario.dto';
+import { EditarUsuarioDto } from './dto/editar-usuario.dto';
 import { EstablecerPasswordDto } from './dto/establecer-password.dto';
 import { UsuariosService } from './usuarios.service';
 
@@ -34,6 +35,15 @@ export class UsuariosController {
   @Post()
   crear(@Body() dto: CrearUsuarioDto, @CurrentUser() usuario: JwtPayload) {
     return this.usuariosService.crear(dto, usuario.sub);
+  }
+
+  @Patch(':id')
+  editar(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: EditarUsuarioDto,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.usuariosService.editar(id, dto, usuario.sub);
   }
 
   @Post(':id/roles')

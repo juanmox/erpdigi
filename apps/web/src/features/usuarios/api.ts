@@ -3,8 +3,10 @@ import type { EmpresaOpcion, RolOpcion, UsuarioAdmin } from './types'
 
 export const usuariosApi = {
   listar: () => apiFetch<UsuarioAdmin[]>('/usuarios'),
-  crear: (body: { email: string; password: string; nombreCompleto: string }) =>
+  crear: (body: { username: string; email?: string; password: string; nombreCompleto: string }) =>
     apiFetch<UsuarioAdmin>('/usuarios', { method: 'POST', body: JSON.stringify(body) }),
+  editar: (id: number, body: { username?: string; email?: string; nombreCompleto?: string }) =>
+    apiFetch<UsuarioAdmin>(`/usuarios/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   establecerPassword: (id: number, password: string) =>
     apiFetch<UsuarioAdmin>(`/usuarios/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password }) }),
   activar: (id: number) => apiFetch<UsuarioAdmin>(`/usuarios/${id}/activar`, { method: 'PATCH' }),

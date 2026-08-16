@@ -10,20 +10,17 @@ import {
   PATRON_USERNAME,
 } from '../../../common/username';
 
-export class CrearUsuarioDto {
-  @IsString()
+export class EditarUsuarioDto {
+  @IsOptional()
   @Matches(PATRON_USERNAME, { message: MENSAJE_USERNAME_INVALIDO })
-  username!: string;
+  username?: string;
 
   @IsOptional()
   @IsEmail()
   email?: string;
 
-  @IsString()
-  @MinLength(8, { message: 'La contraseña debe tener al menos 8 caracteres' })
-  password!: string;
-
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  nombreCompleto!: string;
+  nombreCompleto?: string;
 }

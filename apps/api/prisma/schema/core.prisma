@@ -18,7 +18,12 @@ model Empresa {
 
 model Usuario {
   idUsuario      Int                 @id @default(autoincrement()) @map("id_usuario")
-  email          String              @unique
+  // Identificador de login (ej. "juan", "lissette") — reemplaza a email para
+  // ese propósito, sin formato de correo forzado. email queda opcional, sin
+  // uso funcional hoy (no hay recuperación de contraseña ni notificaciones
+  // por correo) — solo un dato de referencia si algún día hace falta.
+  username       String              @unique
+  email          String?             @unique
   passwordHash   String              @map("password_hash")
   nombreCompleto String              @map("nombre_completo")
   activo         Boolean             @default(true)

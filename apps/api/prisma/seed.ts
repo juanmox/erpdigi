@@ -455,14 +455,16 @@ async function main() {
 
   const costeo = await seedCosteo()
 
+  const usernameAdmin = process.env.SEED_ADMIN_USERNAME ?? 'admin'
   const emailAdmin = process.env.SEED_ADMIN_EMAIL ?? 'admin@digitexsa.com'
   const passwordAdmin = process.env.SEED_ADMIN_PASSWORD ?? 'CambiarInmediatamente123!'
   const passwordHash = await bcrypt.hash(passwordAdmin, 12)
 
   const admin = await prisma.usuario.upsert({
-    where: { email: emailAdmin },
+    where: { username: usernameAdmin },
     update: {},
     create: {
+      username: usernameAdmin,
       email: emailAdmin,
       passwordHash,
       nombreCompleto: 'Administrador',
@@ -495,9 +497,9 @@ async function main() {
   )
   console.log(`Roles granulares Costeo: ${rolesGranularesCosteo.map((r) => r.codigo).join(', ')}`)
   if (!process.env.SEED_ADMIN_PASSWORD) {
-    console.log(`Usuario admin: ${emailAdmin} / contraseña temporal: ${passwordAdmin}`)
+    console.log(`Usuario admin: ${usernameAdmin} / contraseña temporal: ${passwordAdmin}`)
   } else {
-    console.log(`Usuario admin: ${emailAdmin} (contraseña tomada de SEED_ADMIN_PASSWORD)`)
+    console.log(`Usuario admin: ${usernameAdmin} (contraseña tomada de SEED_ADMIN_PASSWORD)`)
   }
 }
 
