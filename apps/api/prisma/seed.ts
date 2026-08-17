@@ -71,19 +71,29 @@ const PERMISOS_COSTEO = [
   'costeo.dashboard.ver_financiero',
 ]
 
-// Los 6 roles granulares que sugiere PROMPT_CLAUDE_CODE.md §7, con el mapeo
-// permiso↔rol diseñado según el flujo real del proceso (impresión →
-// transferencia → costeo/facturación → supervisión → gerencia), no un dato
-// confirmado del sistema legacy. Fácil de ajustar después (son solo filas
-// rol_permiso, editables desde /usuarios sin tocar el schema).
+// Los roles granulares que sugiere PROMPT_CLAUDE_CODE.md §7, ajustados tras
+// revisión práctica del usuario probando cada rol con un usuario dedicado
+// (sesión posterior a F3) — el mapeo original le daba a varios roles acceso
+// a pantallas que en la práctica no debían tocar. Fácil de seguir ajustando
+// después (son solo filas rol_permiso, editables desde /usuarios sin tocar
+// el schema).
 //
-// - Operador Impresión: monta/desmonta rollo en la impresora y captura el
-//   consumo de papel durante la impresión — no toca reposiciones, insumos,
-//   ni facturación.
-// - Operador Transferencia: la etapa de transferencia/calandra es donde se
-//   originan la mayoría de defectos (ANEXO_B: "Transferido al revés",
-//   "Transferido sin Temperatura", etc.) — captura consumo y registra
-//   reposiciones, sin acceso a montaje de rollo ni facturación.
+// - Operador Impresión: SOLO Panel de estado + Montaje/desmontaje de rollo
+//   en la impresora — no ingresa factura de papel (eso es Bodeguero) ni
+//   toca reposiciones/insumos/facturación.
+// - Bodeguero (nuevo): ingreso de factura de papel a bodega + corrección de
+//   ingresos mal capturados, y ver el panel de estado — no monta/desmonta
+//   rollo en la impresora (eso es físicamente Operador Impresión) ni toca
+//   reposiciones/insumos/facturación.
+// - Diseño (nuevo): mismo alcance que Operador Impresión (Panel de estado +
+//   Montaje) — departamento distinto, mismo tipo de acceso al sistema.
+// - Operador Reposiciones (código interno OPERADOR_TRANSFERENCIA, sin
+//   cambiar — ver nota junto al rol): SOLO la pantalla de Reposiciones + el
+//   panel lateral de estado de impresoras que muestra esa pantalla. Incluye
+//   `recetas.catalogo.ver` únicamente porque el selector de "Insumo de
+//   tela" del formulario lee ese catálogo — no le da acceso al módulo
+//   Recetas en el sidebar/rutas (gateados por `recetas.cotizaciones.ver`,
+//   que este rol no tiene) ni a generar cotizaciones.
 // - Analista Costos: dueño de costo_unitario de insumos (versionado SCD2),
 //   consumo estándar y órdenes de facturación — visibilidad financiera
 //   completa, sin operar equipo físico.
@@ -99,29 +109,33 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
   [
     'OPERADOR_IMPRESION',
     'Operador Impresión',
-    [
-      'costeo.rollo.ver',
-      'costeo.rollo.montar',
-      'costeo.rollo.desmontar',
-      'costeo.orden.ver',
-      'costeo.consumo.ver',
-      'costeo.consumo.capturar',
-      'costeo.estandar.ver',
-      'costeo.dashboard.ver',
-    ],
+    ['costeo.rollo.ver', 'costeo.rollo.montar', 'costeo.rollo.desmontar'],
   ],
   [
+    'BODEGUERO',
+    'Bodeguero',
+    ['costeo.rollo.ver', 'costeo.rollo.ingresar'],
+  ],
+  [
+    'DISENO',
+    'Diseño',
+    ['costeo.rollo.ver', 'costeo.rollo.montar', 'costeo.rollo.desmontar'],
+  ],
+  [
+    // Código interno sin cambiar a propósito (upsert por `codigo` — cambiarlo
+    // crearía un rol nuevo en vez de renombrar el existente, dejando
+    // huérfanas las asignaciones ya hechas a usuarios reales). Solo cambia
+    // el nombre visible, de "Operador Transferencia" a "Operador
+    // Reposiciones" — refleja mejor el alcance real del rol (solo la
+    // pantalla de Reposiciones).
     'OPERADOR_TRANSFERENCIA',
-    'Operador Transferencia',
+    'Operador Reposiciones',
     [
       'costeo.rollo.ver',
       'costeo.orden.ver',
-      'costeo.consumo.ver',
-      'costeo.consumo.capturar',
       'costeo.reposicion.ver',
       'costeo.reposicion.crear',
-      'costeo.estandar.ver',
-      'costeo.dashboard.ver',
+      'recetas.catalogo.ver',
     ],
   ],
   [
@@ -336,6 +350,11 @@ async function upsertPermiso(codigo: string) {
   })
 }
 
+// Reconcilia de verdad: agrega los permisos que falten Y quita los que ya no
+// estén en `codigosPermisos` — antes solo agregaba, así que recortar la
+// lista de un rol acá y correr el seed de nuevo no alcanzaba para quitarle
+// el acceso viejo (bug real, encontrado al recortar OPERADOR_IMPRESION/
+// OPERADOR_TRANSFERENCIA en sesión posterior a F3).
 async function upsertRolConPermisos(codigo: string, nombre: string, codigosPermisos: string[]) {
   const rol = await prisma.rol.upsert({
     where: { codigo },
@@ -344,6 +363,7 @@ async function upsertRolConPermisos(codigo: string, nombre: string, codigosPermi
   })
 
   const permisos = await Promise.all(codigosPermisos.map(upsertPermiso))
+  const idsPermisosDeseados = permisos.map((p) => p.idPermiso)
 
   await Promise.all(
     permisos.map((permiso) =>
@@ -354,6 +374,10 @@ async function upsertRolConPermisos(codigo: string, nombre: string, codigosPermi
       }),
     ),
   )
+
+  await prisma.rolPermiso.deleteMany({
+    where: { idRol: rol.idRol, idPermiso: { notIn: idsPermisosDeseados } },
+  })
 
   return rol
 }

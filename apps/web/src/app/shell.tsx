@@ -38,7 +38,7 @@ export function Shell() {
             <DropdownMenuContent>
               <DropdownMenuLabel className="font-normal">
                 <p className="text-sm font-semibold text-ink">{usuario?.nombreCompleto}</p>
-                <p className="text-xs text-ink-faint">@{usuario?.username}</p>
+                <p className="text-xs text-ink-faint">{usuario?.username}</p>
               </DropdownMenuLabel>
               {puedeAdministrarUsuarios && (
                 <>

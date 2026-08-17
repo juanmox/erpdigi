@@ -569,6 +569,65 @@ sin i18n (todo en español).
     email — confirmado revisando `costeo.prisma` antes de construirlo. Verificado con curl: edición
     completa, edición parcial (el email no se borra si no se manda), y conflicto por email
     duplicado (409).
+  - **Gestión de datos también se sacó del sidebar** (misma sesión): a diferencia de Usuarios, no
+    es administración de plataforma — es parte del flujo de Recetas (catálogo de insumos/productos
+    que alimenta la cotización), así que vivir como ítem propio del sidebar principal, al mismo
+    nivel que Recetas, era el mismo error de categoría. Ahora es un botón dentro de
+    `cotizacion-page.tsx`, en la misma barra que USD/GTQ/Historial (`/catalogo` vía `Link` con
+    `asChild` en `Button`), gateado por el mismo permiso que ya usaba en el sidebar
+    (`recetas.insumos.editar`/`recetas.productos.editar`/`recetas.importar`).
+  - **Reorganización de roles granulares de Costeo, tras pruebas del usuario con un usuario real
+    por rol** (misma sesión): encontró que Operador Impresión podía ver las pestañas "Ingreso a
+    bodega"/"Corregir ingreso" de Gestión de Rollos, que no le correspondían.
+    - **2 bugs reales de UI encontrados y corregidos**: (1) `rollos-page.tsx` mostraba las 4
+      pestañas sin filtrar por permiso — el backend sí rechazaba la escritura sin
+      `costeo.rollo.ingresar`, pero la pestaña/formulario se veían igual. Ahora "Montaje" exige
+      `costeo.rollo.montar`/`desmontar` e "Ingreso"/"Corregir ingreso" exigen
+      `costeo.rollo.ingresar`. (2) `sidebar.tsx` agregaba el ítem "Recetas" **sin ninguna
+      condición** — cualquier usuario autenticado lo veía. Ahora exige `recetas.cotizaciones.ver`
+      (sesión posterior, ver arriba). Mismo patrón de bug también corregido en el botón "Anular"
+      de Reposiciones (`reposiciones-page.tsx`), que no chequeaba `costeo.reposicion.anular`.
+    - **Tensión real encontrada y resuelta con el usuario**: el selector de "Insumo de tela" del
+      formulario de Reposiciones lee `/recetas/insumos`, gateado por `recetas.catalogo.ver` — el
+      mismo permiso que originalmente daba acceso al módulo Recetas completo. El usuario confirmó
+      separar el gate del sidebar a `recetas.cotizaciones.ver` (más específico — solo
+      Cotizador/Editor/Admin) para que Operador Transferencia pueda tener `recetas.catalogo.ver`
+      (necesario solo para ese selector) sin que el módulo Recetas le aparezca en la navegación ni
+      pueda generar cotizaciones.
+    - **Roles recortados/nuevos** (`seed.ts`, `ROLES_GRANULARES_COSTEO`): `OPERADOR_IMPRESION`
+      recortado a solo `costeo.rollo.ver`/`montar`/`desmontar` (Panel + Montaje, sin
+      orden/consumo/estándar/dashboard que no usa ninguna pantalla hoy — F4/Consumo de Papel ni
+      existe todavía). `OPERADOR_TRANSFERENCIA` recortado a
+      `costeo.rollo.ver`/`orden.ver`/`reposicion.ver`/`reposicion.crear`/`recetas.catalogo.ver`
+      (solo la pantalla de Reposiciones + su panel lateral de impresoras). Dos roles nuevos:
+      `BODEGUERO` (`costeo.rollo.ver`/`ingresar` — ingreso y corrección de factura de papel + panel
+      de estado, sin montar/desmontar en la impresora) y `DISENO` (mismo alcance que Operador
+      Impresión: Panel + Montaje, departamento distinto). `ANALISTA_COSTOS`/`SUPERVISOR_PRODUCCION`/
+      `GERENCIA_COSTEO`/`ADMIN_IT_COSTEO` sin cambios (no mencionados por el usuario).
+    - **Bug real de infraestructura del seed, encontrado al recortar permisos**:
+      `upsertRolConPermisos()` en `seed.ts` solo agregaba filas `rol_permisos`, nunca las quitaba
+      — recortar la lista de permisos de un rol y volver a correr el seed no alcanzaba para
+      quitarle el acceso viejo (verificado con SQL directo: los permisos recortados seguían ahí
+      tras el primer reseed). Corregido agregando un `deleteMany` al final de la función
+      (`idPermiso: { notIn: idsPermisosDeseados }`) para que el seed reconcilie de verdad, no solo
+      agregue. Re-verificado idempotente (dos corridas seguidas, mismo conteo de filas por rol) y
+      con SQL directo que cada rol quedó con exactamente los permisos esperados, ni uno más.
+    - **Gap real encontrado probando con usuarios reales por rol**: Operador Reposiciones (ver
+      abajo) seguía pudiendo *ver* el módulo Recetas navegando directo a `/recetas` por URL — el
+      link del sidebar ya estaba oculto, pero **ninguna ruta del frontend tenía guard por
+      permiso**, solo `RutaProtegida` (autenticación + selección de empresa). Como el rol sí tiene
+      `recetas.catalogo.ver` (necesario para el selector de tela de Reposiciones), la página de
+      Recetas cargaba y dejaba navegar el catálogo aunque no pudiera guardar cotizaciones. No era
+      un problema exclusivo de Recetas — las otras rutas (`/catalogo`, `/costeo/rollos`,
+      `/costeo/ordenes`, `/costeo/reposiciones`, `/usuarios`) tenían el mismo hueco, solo que
+      nadie lo había notado todavía. Corregido de forma general en `App.tsx`: `RutaConPermiso`
+      nueva (exige al menos uno de una lista de permisos — mismo criterio "OR" que ya usa
+      `sidebar.tsx`/`cotizacion-page.tsx` — o redirige a Inicio) envolviendo cada ruta sensible,
+      cada una con el mismo permiso que ya usa su link de navegación correspondiente.
+    - **Operador Transferencia → Operador Reposiciones** (solo el nombre visible; `codigo` interno
+      queda igual a propósito — cambiarlo en el `upsert` por `codigo` habría creado un rol nuevo en
+      vez de renombrar el existente, dejando huérfanas las asignaciones ya hechas a usuarios reales
+      de prueba). Refleja mejor que el alcance real del rol es solo la pantalla de Reposiciones.
 
 ## Convenciones heredadas de `recetas` (aplican a TODO el ERP, no solo a ese módulo)
 `recetas` (Fase 2, ya migrado y committeado) es el módulo de referencia — cualquier módulo nuevo

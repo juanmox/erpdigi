@@ -45,7 +45,8 @@ function campoVacio() {
 
 export function ReposicionesPage() {
   const queryClient = useQueryClient()
-  const { usuario } = useAuth()
+  const { usuario, tienePermiso } = useAuth()
+  const puedeAnular = tienePermiso('costeo.reposicion.anular')
 
   const [codigoOp, setCodigoOp] = useState('')
   const [opBuscada, setOpBuscada] = useState<string | null>(null)
@@ -403,7 +404,7 @@ export function ReposicionesPage() {
                         >
                           Imprimir
                         </Button>
-                        {!r.anuladoEn && (
+                        {!r.anuladoEn && puedeAnular && (
                           <Button variant="ghost" size="sm" onClick={() => setReposicionAnular(r)}>
                             Anular
                           </Button>

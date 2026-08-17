@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AutocompleteBuscador } from '@/components/shared/autocomplete-buscador'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -179,6 +180,11 @@ export function CotizacionPage() {
 
   const puedeVerCotizaciones = tienePermiso('recetas.cotizaciones.ver')
   const puedeCrearCotizaciones = tienePermiso('recetas.cotizaciones.crear')
+  // Antes vivía en el sidebar principal, mezclado con módulos de negocio —
+  // Gestión de datos es en realidad parte del flujo de Recetas (catálogo de
+  // insumos/productos que alimenta la cotización), así que se movió acá.
+  const puedeGestionarDatos =
+    tienePermiso('recetas.insumos.editar') || tienePermiso('recetas.productos.editar') || tienePermiso('recetas.importar')
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-4">
@@ -213,6 +219,11 @@ export function CotizacionPage() {
           {puedeVerCotizaciones && (
             <Button variant="outline" onClick={() => setModalHistorialAbierto(true)}>
               Historial
+            </Button>
+          )}
+          {puedeGestionarDatos && (
+            <Button variant="outline" asChild>
+              <Link to="/catalogo">Gestión de datos</Link>
             </Button>
           )}
         </div>

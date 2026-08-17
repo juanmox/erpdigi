@@ -56,13 +56,16 @@ export function Sidebar() {
 
   const empresaActual = empresasDisponibles.find((e) => e.idEmpresa === idEmpresa)
   const moduloRecetas = MODULOS.find((m) => m.codigo === 'RC')!
-  const puedeGestionar =
-    tienePermiso('recetas.insumos.editar') || tienePermiso('recetas.productos.editar') || tienePermiso('recetas.importar')
 
   const itemsReales: NavItemInfo[] = [
     { to: '/', codigo: 'IN', etiqueta: 'Inicio', end: true },
-    { to: moduloRecetas.ruta!, codigo: moduloRecetas.codigo, etiqueta: moduloRecetas.nombre },
-    ...(puedeGestionar ? [{ to: '/catalogo', codigo: 'GD', etiqueta: 'Gestión de datos' }] : []),
+    // Recetas contiene información confidencial de desarrollo de prendas —
+    // solo Cotizador/Editor/Admin (recetas.cotizaciones.ver) deben verla en
+    // la navegación, no cualquier usuario autenticado (bug real: antes se
+    // agregaba sin ninguna condición).
+    ...(tienePermiso('recetas.cotizaciones.ver')
+      ? [{ to: moduloRecetas.ruta!, codigo: moduloRecetas.codigo, etiqueta: moduloRecetas.nombre }]
+      : []),
     ...(tienePermiso('costeo.rollo.ver') ? [{ to: '/costeo/rollos', codigo: 'CR', etiqueta: 'Gestión de Rollos' }] : []),
     ...(tienePermiso('costeo.orden.ver') ? [{ to: '/costeo/ordenes', codigo: 'OP', etiqueta: 'Órdenes de Producción' }] : []),
     ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones', codigo: 'RE', etiqueta: 'Reposiciones' }] : []),

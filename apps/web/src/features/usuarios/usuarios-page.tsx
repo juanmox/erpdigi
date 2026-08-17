@@ -92,7 +92,7 @@ export function UsuariosPage() {
                     {u.idUsuario === yo?.idUsuario && <span className="ml-1.5 text-xs text-ink-faint">(vos)</span>}
                   </div>
                   <div className="text-xs text-ink-faint">
-                    @{u.username}
+                    {u.username}
                     {u.email && <span className="ml-1.5">· {u.email}</span>}
                   </div>
                 </TableCell>
