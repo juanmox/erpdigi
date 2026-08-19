@@ -4,6 +4,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ApiError } from '@/lib/api'
@@ -32,6 +33,34 @@ export function OrdenesPage() {
       setError(err instanceof ApiError ? err.message : 'Error al buscar la orden')
     } finally {
       setBuscando(false)
+    }
+  }
+
+  async function toggleEnBlanco(idLineaProduccion: number, consumoEnBlanco: boolean) {
+    if (!orden) return
+    setError(null)
+    // Optimista: la pantalla no espera a la respuesta para reflejar el click.
+    setOrden({
+      ...orden,
+      lineasProduccion: orden.lineasProduccion.map((l) =>
+        l.idLineaProduccion === idLineaProduccion ? { ...l, consumoEnBlanco } : l,
+      ),
+    })
+    try {
+      await costeoOrdenesApi.editarLineaProduccion(idLineaProduccion, consumoEnBlanco)
+    } catch (err) {
+      // Revierte si el servidor rechazó el cambio (ej. sin permiso).
+      setOrden((prev) =>
+        prev
+          ? {
+              ...prev,
+              lineasProduccion: prev.lineasProduccion.map((l) =>
+                l.idLineaProduccion === idLineaProduccion ? { ...l, consumoEnBlanco: !consumoEnBlanco } : l,
+              ),
+            }
+          : prev,
+      )
+      setError(err instanceof ApiError ? err.message : 'Error al actualizar la línea')
     }
   }
 
@@ -87,10 +116,6 @@ export function OrdenesPage() {
                   <div className="font-medium text-ink">{orden.ordenCompra ?? '—'}</div>
                 </div>
                 <div>
-                  <div className="text-ink-faint">Desarrollo</div>
-                  <div className="font-medium text-ink">{orden.desarrollo ?? '—'}</div>
-                </div>
-                <div>
                   <div className="text-ink-faint">Estatus</div>
                   <Badge variant="secondary">{orden.estatus}</Badge>
                 </div>
@@ -100,19 +125,28 @@ export function OrdenesPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Línea</TableHead>
+                    <TableHead>Desarrollo</TableHead>
                     <TableHead>Producto</TableHead>
                     <TableHead>Estatus</TableHead>
                     <TableHead>Tallas</TableHead>
+                    <TableHead>En blanco</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {orden.lineasProduccion.map((l) => (
                     <TableRow key={l.idLineaProduccion}>
                       <TableCell className="font-mono">{l.codigoLine}</TableCell>
+                      <TableCell>{l.desarrollo ?? '—'}</TableCell>
                       <TableCell>{l.producto.codigo}</TableCell>
                       <TableCell>{l.estatus}</TableCell>
                       <TableCell className="whitespace-normal">
                         {l.tallas.map((t) => `${t.talla.nombre}:${t.cantidad}`).join('  ·  ')}
+                      </TableCell>
+                      <TableCell>
+                        <Checkbox
+                          checked={l.consumoEnBlanco}
+                          onCheckedChange={(checked) => toggleEnBlanco(l.idLineaProduccion, checked === true)}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

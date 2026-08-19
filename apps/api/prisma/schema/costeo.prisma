@@ -142,6 +142,11 @@ model ConsumoEstandar {
   idProducto        Int       @map("id_producto")
   idTalla           Int       @map("id_talla")
   pulgadasPapel     Decimal   @map("pulgadas_papel") @db.Decimal(10, 4)
+  // GENERATED ALWAYS AS (pulgadas_papel / 36.0) STORED — declarada para que
+  // Prisma la incluya en el SELECT (mismo bug real que OrdenProduccion.codigo
+  // en F3: sin declarar el campo, Prisma tampoco lo lee). Nunca se pasa en
+  // `data:` de un create/update.
+  yardas            Decimal?  @default(dbgenerated()) @db.Decimal(10, 4)
   vigenteDesde      DateTime  @map("vigente_desde") @db.Date
   vigenteHasta      DateTime? @map("vigente_hasta") @db.Date
   creadoEn          DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
@@ -169,7 +174,6 @@ model OrdenProduccion {
   idCliente         Int?      @map("id_cliente")
   idLineaProducto   Int?      @map("id_linea_producto")
   ordenCompra       String?   @map("orden_compra") @db.VarChar(40)
-  desarrollo        String?   @db.VarChar(40)
   fechaRecibido     DateTime? @map("fecha_recibido") @db.Date
   fechaCompromiso   DateTime? @map("fecha_compromiso") @db.Date
   estatus           String    @default("ABIERTO") @db.VarChar(20)
@@ -308,6 +312,11 @@ model LineaProduccion {
   idImpresora        Int?      @map("id_impresora")
   idTipoPapel        Int?      @map("id_tipo_papel")
   enguiamientoYd     Decimal   @default(0) @map("enguiamiento_yd") @db.Decimal(10, 4)
+  // Movido desde OrdenProduccion (F3 lo modelaba mal como campo único de la
+  // OP) — confirmado con impresiones reales de OP del sistema actual: una
+  // misma OP trae varios Desarrollo distintos, uno por línea/registro, nunca
+  // uno solo por orden completa.
+  desarrollo         String?   @db.VarChar(40)
   consumoEnBlanco    Boolean   @default(false) @map("consumo_en_blanco")
   factorEnBlanco     Decimal   @default(0.6) @map("factor_en_blanco") @db.Decimal(6, 4)
   fechaData          DateTime? @map("fecha_data") @db.Date

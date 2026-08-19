@@ -13,6 +13,7 @@ const RUTAS_IMPORT_EXCEL = [
   '/erp/api/recetas/productos/importar-altas/preview',
   '/erp/api/recetas/importar-recetas/preview',
   '/erp/api/costeo/ordenes/importar/preview',
+  '/erp/api/costeo/estandar/importar/preview',
 ];
 
 async function bootstrap() {

@@ -1,5 +1,11 @@
 import { apiFetch, descargarArchivo } from '@/lib/api'
-import type { ClienteRef, FilaPreviewLinea, LineaProductoDetalle, OrdenProduccionDetalle } from './types'
+import type {
+  ClienteRef,
+  FilaPreviewLinea,
+  LineaProduccionDetalle,
+  LineaProductoDetalle,
+  OrdenProduccionDetalle,
+} from './types'
 
 async function subirArchivo<T>(path: string, archivo: File): Promise<T> {
   return apiFetch<T>(path, { method: 'POST', body: archivo })
@@ -21,5 +27,10 @@ export const costeoOrdenesApi = {
     apiFetch<LineaProductoDetalle>('/costeo/ordenes/lineas-producto', {
       method: 'POST',
       body: JSON.stringify(dto),
+    }),
+  editarLineaProduccion: (id: number, consumoEnBlanco: boolean) =>
+    apiFetch<LineaProduccionDetalle>(`/costeo/ordenes/lineas/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ consumoEnBlanco }),
     }),
 }

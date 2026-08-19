@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from '@/features/auth/auth-context'
 import { LoginPage } from '@/features/auth/login-page'
 import { SeleccionarEmpresa } from '@/features/auth/seleccionar-empresa'
 import { CatalogoPage } from '@/features/catalogo/catalogo-page'
+import { EstandarPage } from '@/features/costeo-estandar/estandar-page'
 import { OrdenesPage } from '@/features/costeo-ordenes/ordenes-page'
 import { ReposicionesPage } from '@/features/costeo-reposiciones/reposiciones-page'
 import { RollosPage } from '@/features/costeo-rollos/rollos-page'
@@ -105,6 +106,14 @@ function App() {
               element={
                 <RutaConPermiso permisos={['costeo.reposicion.ver']}>
                   <ReposicionesPage />
+                </RutaConPermiso>
+              }
+            />
+            <Route
+              path="costeo/estandar"
+              element={
+                <RutaConPermiso permisos={['costeo.estandar.ver']}>
+                  <EstandarPage />
                 </RutaConPermiso>
               }
             />

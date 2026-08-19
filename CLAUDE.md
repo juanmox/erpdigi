@@ -380,6 +380,125 @@ una** — no avanzar por iniciativa propia.
       libro no tiene columna equivalente y el usuario pidió explícitamente que fuera solo en el
       primero. Verificado contra el libro real: la fila de `Registro` trae el comentario en la
       columna P, la fila correspondiente de `Datos` queda igual que antes (sin comentario).
+  - **Toggle "En blanco" en Órdenes (adelanto puntual de F4, diseño en
+    [[f4-consumo-papel-diseno]] sigue pausado)**: al analizar la recolección de datos de Forma 2
+    (consumo de papel), el usuario confirmó dos decisiones sobre los dos factores que capturaba
+    el GAS legacy en `copiarDatos()`: **enguiamiento** se queda exactamente como está
+    (`cantidad × 0.084375`, constante, ya modelado desde F1 en
+    `costeo.LineaProduccion.enguiamientoYd` vía el import) — no había nada que cambiar ahí, mi
+    lectura inicial de que convenía "un solo valor real por línea" era incorrecta y el usuario la
+    corrigió con un ejemplo real de la hoja "Datos" en vivo. **"En blanco"**
+    (`costeo.LineaProduccion.consumoEnBlanco`/`factorEnBlanco`, ya existían desde F1 con default
+    `false`/`0.6` pero el import nunca los tocaba) es distinto: el legacy solo lo captura en
+    ciertas OP, a mano, según si el operador de Diseño considera que se gastó papel en blanco —
+    no es un dato que se sepa de antemano al cargar la OP. Plan acordado con el usuario
+    ("Procede por favor"): las líneas se siguen importando siempre con `consumoEnBlanco=false`
+    (el import de `costeo-ordenes.service.ts` no cambia), y se agrega un endpoint nuevo
+    `PATCH /costeo/ordenes/lineas/:id` (`EditarLineaProduccionDto`, gateado por el mismo
+    `costeo.orden.importar` que ya exige el import — sin permiso nuevo) que solo permite
+    prender/apagar `consumoEnBlanco` después de importada, editable libremente. Frontend: nueva
+    columna "En blanco" en la tabla de líneas de `ordenes-page.tsx`, un `Checkbox` por línea con
+    actualización optimista (revierte sola si el servidor rechaza el cambio, ej. por permiso).
+    Verificado con curl usando un usuario de prueba desechable con rol ADMIN (creado y borrado en
+    la misma sesión, igual que en F2/F3) sobre una OP/línea también desechables: toggle a
+    `true`/`false` reflejado correctamente en `GET /costeo/ordenes/:codigo`, 404 sobre id
+    inexistente, 400 con body inválido, 401 sin token, y 403 con un rol sin
+    `costeo.orden.importar` (probado con BODEGUERO). Toda la data de prueba (usuario, OP, línea)
+    borrada al terminar. **Sigue pendiente, sin resolver todavía**: de dónde sale la LINE en sí
+    (¿Excel externo, como hoy, o ya viene de lo importado en F3?) — es la única de las 3 preguntas
+    originales de F4 que sigue abierta; el diseño completo de F4 (captura real de consumo,
+    `ConsumoEstandar`, espejo a Google Sheets estilo Forma 2) no ha arrancado.
+  - **Bug real de F3 encontrado y corregido al retomar el diseño de F4**: `desarrollo` estaba
+    modelado como campo único de `costeo.OrdenProduccion`, asumiendo un solo valor por OP. El
+    usuario compartió una captura real de la hoja "DatosOrigen" (fuente de Forma 2) más dos
+    impresiones reales de OP del sistema actual (`26OP010439`, `26OP022119`) que prueban lo
+    contrario: una misma OP siempre trae varios `Desarrollo` distintos, uno por línea/registro —
+    el import ya leía `desarrollo` por fila (`FilaPreviewLinea.desarrollo`, columna 9 de la
+    plantilla) pero al aplicar solo lo escribía una vez, tomando el valor de la primera fila que
+    creaba la OP; cualquier línea posterior con un Desarrollo distinto se perdía en silencio. De
+    paso se confirmó con el usuario (tras una primera hipótesis mía equivocada en sentido
+    contrario) que **1 Orden de Compra = exactamente 1 Orden de Producción** ("por cada OC se
+    realiza una OP"), así que `OrdenProduccion.ordenCompra` como campo único **no** tenía el mismo
+    problema — no hizo falta ninguna tabla `costeo.OrdenCompra` nueva, solo mover `desarrollo`.
+    Corregido: migración `20260818180000_desarrollo_a_linea_produccion` (quita `desarrollo` de
+    `OrdenProduccion`, lo agrega a `LineaProduccion`), `aplicarImportarLineas()` ahora escribe
+    `desarrollo` por línea en vez de por OP, `ordenes-page.tsx` movió la columna "Desarrollo" de
+    la ficha de la OP (donde mostraba un solo valor engañoso) a una columna de la tabla de líneas.
+    Verificado con curl: import de una OP de prueba con 2 líneas y `Desarrollo` distinto en cada
+    una (`DES-AAA`/`DES-BBB`), confirmando que `GET /costeo/ordenes/:codigo` devuelve cada línea
+    con su propio valor en vez de colapsarlos. Datos de prueba borrados al terminar. No afecta
+    Reposiciones ni Rollos (ninguno de los dos usa `desarrollo`/`ordenCompra`).
+  - **Módulo `costeo-estandar` — primer tramo real de F4 (Consumo de Papel)**: gestión completa de
+    `costeo.ConsumoEstandar` (producto+talla → pulgadas/yardas de papel, versionado SCD2 desde F1).
+    El usuario pidió explícitamente import masivo **y** alta uno-por-uno con validación anti-
+    duplicado, preguntando si el `CONCAT(código,talla)` del legacy tenía una forma mejor de
+    hacerse — respuesta: sí, ya estaba resuelto desde F1 sin saberlo: el schema usa FK reales
+    (`idProducto`+`idTalla`) más un `EXCLUDE USING gist (id_producto, id_talla, vigencia)` a nivel
+    de Postgres que hace imposible insertar dos consumos que se solapen en fechas para el mismo
+    producto+talla — no fue necesario diseñar nada nuevo, solo construir encima. Backend:
+    `apps/api/src/modules/costeo-estandar/` (`listar`, `crear` con pre-chequeo de solape para dar
+    un 409 legible en vez de la excepción cruda de Postgres — mismo criterio que
+    `costeo-rollos.service.ts:montar()` con el EXCLUDE de `montaje_rollo` —, `previewImportar`/
+    `aplicarImportar` con patrón preview→aplicar estándar, `plantillaImportar`). Decisión del
+    usuario sobre fechas: como la hoja "Consumos" legacy no trae fecha de vigencia, "Vigente desde"
+    es opcional y en blanco toma la fecha de hoy (nunca se inventa una fecha pasada); "Vigente
+    hasta" opcional, en blanco = sin fecha de corte. Producto/Talla inexistentes quedan pendientes
+    en el preview, mismo patrón que Órdenes — nunca se crean automáticamente. Rutas gateadas
+    `costeo.estandar.ver` (listar, plantilla) / `costeo.estandar.administrar` (crear, import) — los
+    22 permisos ya existían desde F1, sin permiso nuevo. `ANALISTA_COSTOS`/`GERENCIA_COSTEO`
+    ganaron `recetas.catalogo.ver` (necesario solo para el selector de Producto/Talla del
+    formulario de alta, que llama `/recetas/productos`/`/recetas/tallas` — mismo criterio ya usado
+    con Operador Reposiciones y su selector de tela, no otorga acceso al módulo Recetas en sí).
+    Frontend: `apps/web/src/features/costeo-estandar/` (`estandar-page.tsx` con tabla + búsqueda
+    por código de producto, botones "+ Nuevo consumo"/"Importar plantilla" ocultos sin
+    `costeo.estandar.administrar`; `components/modal-consumo-estandar.tsx` con
+    `AutocompleteBuscador` para Producto — mismo componente ya usado en Cotización, no uno nuevo).
+    Ruta `/costeo/estandar` en `App.tsx` (`RutaConPermiso`) e ítem nuevo en `sidebar.tsx`.
+    **Bug real encontrado de paso** (mismo patrón que `OrdenProduccion.codigo`/`Reposicion.codigoRepo`
+    en F3): la columna generada `yardas` (`pulgadas_papel / 36.0 STORED`) nunca se había declarado
+    en el schema Prisma de `ConsumoEstandar` — sin declararla, Prisma tampoco la lee, así que
+    `yardas` habría vuelto `undefined` en toda respuesta de esta API. Corregido agregando el campo
+    con `@default(dbgenerated())`, sin migración (la columna ya existía en la base desde F1).
+    Verificado con curl de punta a punta usando un usuario de prueba desechable con rol ADMIN
+    (creado y borrado en la misma sesión, igual que en F2/F3): alta uno-por-uno (`yardas` calculada
+    correctamente, ej. 18 pulgadas → 0.5 yardas), rechazo 409 de un rango que se solapa con uno ya
+    vigente, 404 de producto inexistente, 400 de pulgadas negativas, alta de una talla distinta sin
+    solape real (OK); import con 4 filas (2 válidas, 1 duplicada dentro del mismo archivo, 1 con
+    producto inexistente) — preview marcó las 2 inválidas correctamente y `aplicar` solo creó las 2
+    válidas; descarga de plantilla (200 OK); 403 en listar y crear con un rol sin
+    `costeo.estandar.ver`/`administrar` (probado con BODEGUERO). Toda la data de prueba borrada al
+    terminar. **Esto es solo el catálogo/versionado de consumo estándar** — la pantalla real de F4
+    que descuenta papel del rollo montado por OP (buscar OP → ver líneas pendientes → resolver
+    consumo+rollo automático → confirmar) y el espejo a Google Sheets siguen sin construirse.
+  - **Reemplazo automático de versiones en Consumo Estándar** (pedido posterior del usuario, tras
+    revisar cómo se vería un producto con varias actualizaciones): con 5 actualizaciones × 13
+    tallas por producto, cerrar la versión anterior a mano antes de cargar la nueva sería
+    inmanejable. Implementado en `costeo-estandar.service.ts` (`resolverReemplazo()`, usado por
+    `crear()`, y su equivalente en `previewImportar()`/`aplicarImportar()`): al cargar un
+    producto+talla que ya tiene una fila vigente sin fecha de corte, se resuelve solo en vez de
+    rechazar — **fecha posterior**: cierra la fila anterior (`vigente_hasta` = la nueva fecha) y
+    crea la nueva, mismo patrón que `costeo-rollos.service.ts:montar()` con el montaje anterior;
+    **misma fecha (mismo día)**: no se puede representar como un rango separado porque
+    `vigente_desde`/`vigente_hasta` son columnas `date` sin hora y el CHECK de la base exige
+    `vigente_hasta > vigente_desde` estrictamente — en ese caso se **corrige** el valor de la fila
+    existente en el lugar, sin crear ninguna fila nueva. Casos ambiguos (más de una fila solapada,
+    o fecha nueva anterior a la vigente) se siguen rechazando con 409 — no se adivina cuál
+    reemplaza a cuál. **Bug real encontrado con curl al probar esto** (antes de agregar la
+    distinción por día): reemplazar el mismo día tiraba 500 (`PrismaClientKnownRequestError`,
+    Postgres `23514`, viola `ck_consumo_estandar_vigencia`) porque el primer diseño cerraba la fila
+    vieja con `vigente_hasta` = fecha de la nueva sin importar si caían el mismo día — corregido
+    comparando por día calendario (`inicioDelDia()`) antes de decidir cerrar-y-crear vs. corregir
+    en el lugar. El listado (`GET /costeo/estandar`) cambió su default: solo muestra la versión
+    vigente **hoy** de cada producto+talla (antes mostraba todas, lo que sería ilegible con
+    historial acumulado) — `?historial=true` expone todas las versiones; frontend con un checkbox
+    "Ver histórico" en `estandar-page.tsx`. `aplicarImportar()` devuelve `{creados, reemplazados,
+    corregidos}` y el mensaje de éxito del import los desglosa. Verificado con curl: alta v1 →
+    alta v2 con fecha futura (reemplaza, v1 queda cerrada en la fecha de v2, listado default
+    muestra solo v1 hasta que llegue esa fecha) → intento de fecha anterior a la vigente (409,
+    ambiguo) → import repetido el mismo día para el mismo producto+talla (corrige en el lugar, se
+    confirmó que sigue existiendo una sola fila en la base, no dos) → listado con/sin
+    `historial=true` (3 vigentes hoy vs. 4 filas totales, incluyendo la futura). Datos de prueba
+    borrados al terminar.
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar

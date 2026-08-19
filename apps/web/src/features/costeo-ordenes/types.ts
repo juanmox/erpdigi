@@ -38,6 +38,8 @@ export interface LineaProduccionDetalle {
   codigoLine: string
   estatus: string
   enguiamientoYd: string
+  desarrollo: string | null
+  consumoEnBlanco: boolean
   producto: { idProducto: number; codigo: string; descripcion: string }
   tallas: { talla: { nombre: string }; cantidad: number }[]
 }
@@ -61,7 +63,6 @@ export interface OrdenProduccionDetalle {
   anio: number
   correlativo: number
   ordenCompra: string | null
-  desarrollo: string | null
   estatus: string
   cliente: { idCliente: number; codigo: string; nombre: string } | null
   lineaProducto: { idLineaProducto: number; nombre: string } | null

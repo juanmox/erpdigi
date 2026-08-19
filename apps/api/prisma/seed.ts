@@ -151,6 +151,12 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.insumo.editar_costo',
       'costeo.estandar.ver',
       'costeo.estandar.administrar',
+      // Necesario solo para el selector de Producto/Talla al dar de alta un
+      // consumo estándar (llama GET /recetas/productos y /recetas/tallas) —
+      // mismo criterio que Operador Reposiciones con el selector de tela: no
+      // otorga acceso al módulo Recetas en sí, ese gate es
+      // recetas.cotizaciones.ver, separado.
+      'recetas.catalogo.ver',
       'costeo.consumo.ver',
       'costeo.reposicion.ver',
       'costeo.dashboard.ver',
@@ -198,6 +204,7 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.insumo.editar_costo',
       'costeo.estandar.ver',
       'costeo.estandar.administrar',
+      'recetas.catalogo.ver',
       'costeo.dashboard.ver',
       'costeo.dashboard.ver_financiero',
     ],

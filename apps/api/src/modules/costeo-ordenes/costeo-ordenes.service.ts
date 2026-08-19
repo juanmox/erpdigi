@@ -15,6 +15,7 @@ import {
   TALLAS_IMPORT_LINEAS,
 } from './costeo-ordenes.types';
 import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
+import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
 
 const AZUL_DIGITEXSA = 'FF203080';
 
@@ -109,6 +110,39 @@ export class CosteoOrdenesService {
     });
 
     return linea;
+  }
+
+  // consumo_en_blanco/factor_en_blanco ya existen desde F1 (default false/0.6),
+  // pero el import de OP (arriba) nunca los toca — se importan siempre
+  // apagados, a propósito: es una decisión que el operador de Diseño toma al
+  // momento de imprimir/capturar consumo, no algo que se sepa de antemano al
+  // cargar la OP. Este endpoint es la única forma de prenderlo, editable
+  // libremente después de importar.
+  async editarLineaProduccion(
+    idLineaProduccion: number,
+    dto: EditarLineaProduccionDto,
+    idUsuarioActor: number,
+  ) {
+    const linea = await this.prisma.lineaProduccion.findUnique({
+      where: { idLineaProduccion },
+    });
+    if (!linea)
+      throw new NotFoundException('Línea de producción no encontrada');
+
+    const actualizada = await this.prisma.lineaProduccion.update({
+      where: { idLineaProduccion },
+      data: { consumoEnBlanco: dto.consumoEnBlanco },
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      entidad: 'costeo.linea_produccion',
+      idEntidad: String(idLineaProduccion),
+      accion: 'UPDATE',
+      datosNuevos: { consumoEnBlanco: actualizada.consumoEnBlanco },
+    });
+
+    return actualizada;
   }
 
   async previewImportarLineas(
@@ -343,7 +377,6 @@ export class CosteoOrdenesService {
                 idCliente: f.idCliente,
                 idLineaProducto: f.idLineaProducto,
                 ordenCompra: f.ordenCompraOp,
-                desarrollo: f.desarrollo,
                 fechaRecibido: f.fechaRecibidoOp
                   ? new Date(f.fechaRecibidoOp)
                   : null,
@@ -366,6 +399,7 @@ export class CosteoOrdenesService {
             idProducto: f.idProducto,
             idImpresora: f.idImpresora,
             enguiamientoYd: f.enguiamientoYd,
+            desarrollo: f.desarrollo,
             fechaData: f.fechaData ? new Date(f.fechaData) : null,
             fechaRecibido: f.fechaRecibidoOp
               ? new Date(f.fechaRecibidoOp)

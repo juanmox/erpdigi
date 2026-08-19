@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Req, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -6,6 +16,7 @@ import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CosteoOrdenesService } from './costeo-ordenes.service';
 import type { FilaPreviewLinea } from './costeo-ordenes.types';
 import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
+import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
 
 @Controller('costeo/ordenes')
 export class CosteoOrdenesController {
@@ -60,6 +71,16 @@ export class CosteoOrdenesController {
     @CurrentUser() usuario: JwtPayload,
   ) {
     return this.service.crearLineaProducto(dto, usuario.sub);
+  }
+
+  @RequirePermissions('costeo.orden.importar')
+  @Patch('lineas/:id')
+  editarLineaProduccion(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: EditarLineaProduccionDto,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.editarLineaProduccion(id, dto, usuario.sub);
   }
 
   @RequirePermissions('costeo.orden.ver')
