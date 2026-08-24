@@ -312,11 +312,6 @@ model LineaProduccion {
   idImpresora        Int?      @map("id_impresora")
   idTipoPapel        Int?      @map("id_tipo_papel")
   enguiamientoYd     Decimal   @default(0) @map("enguiamiento_yd") @db.Decimal(10, 4)
-  // Movido desde OrdenProduccion (F3 lo modelaba mal como campo único de la
-  // OP) — confirmado con impresiones reales de OP del sistema actual: una
-  // misma OP trae varios Desarrollo distintos, uno por línea/registro, nunca
-  // uno solo por orden completa.
-  desarrollo         String?   @db.VarChar(40)
   consumoEnBlanco    Boolean   @default(false) @map("consumo_en_blanco")
   factorEnBlanco     Decimal   @default(0.6) @map("factor_en_blanco") @db.Decimal(6, 4)
   fechaData          DateTime? @map("fecha_data") @db.Date

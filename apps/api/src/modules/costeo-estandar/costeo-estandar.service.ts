@@ -12,6 +12,13 @@ import { CrearConsumoEstandarDto } from './dto/crear-consumo-estandar.dto';
 import { FilaPreviewConsumoEstandar } from './costeo-estandar.types';
 
 const AZUL_DIGITEXSA = 'FF203080';
+// La plantilla de plantillaImportar() tiene título (fila 1) + instrucciones
+// (fila 2, celda combinada) + fila en blanco (3) + encabezado (4) antes de
+// los datos. Bug real encontrado con el archivo real de 3,687 filas del
+// usuario: al saltar solo la fila 1, las filas 2 y 4 se leían como si
+// fueran datos (la celda combinada de instrucciones se lee igual en cada
+// columna, así que "Producto" terminaba siendo el párrafo completo).
+const FILA_INICIO_DATOS = 5;
 
 function estiloEncabezado(cell: ExcelJS.Cell) {
   cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -203,19 +210,30 @@ export class CosteoEstandarService {
       pulgadasPapel: unknown;
       vigenteDesde: Date | null;
       vigenteHasta: Date | null;
+      // Texto crudo de la celda, para distinguir "vacío" (usa el default) de
+      // "tenía contenido pero no se pudo interpretar como fecha" (typo/dato
+      // mal escrito) — sin esto, fechaCelda() devuelve null en ambos casos
+      // por igual y un error de tecleo pasaba desapercibido en vez de
+      // marcarse como fila con error.
+      vigenteDesdeTexto: string;
+      vigenteHastaTexto: string;
     }[] = [];
 
     ws.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
+      if (rowNumber < FILA_INICIO_DATOS) return;
       const productoCodigo = textoCelda(row.getCell(1).value).trim();
       if (!productoCodigo) return;
+      const celdaDesde = row.getCell(4).value;
+      const celdaHasta = row.getCell(5).value;
       crudo.push({
         fila: rowNumber,
         productoCodigo,
         tallaNombre: textoCelda(row.getCell(2).value).trim(),
         pulgadasPapel: row.getCell(3).value,
-        vigenteDesde: fechaCelda(row.getCell(4).value),
-        vigenteHasta: fechaCelda(row.getCell(5).value),
+        vigenteDesde: fechaCelda(celdaDesde),
+        vigenteHasta: fechaCelda(celdaHasta),
+        vigenteDesdeTexto: textoCelda(celdaDesde).trim(),
+        vigenteHastaTexto: textoCelda(celdaHasta).trim(),
       });
     });
 
@@ -323,6 +341,10 @@ export class CosteoEstandarService {
         error = `Talla "${r.tallaNombre}" no reconocida`;
       else if (!Number.isFinite(pulgadasPapel) || pulgadasPapel <= 0)
         error = 'Pulgadas de papel inválidas (debe ser mayor a 0)';
+      else if (r.vigenteDesdeTexto && r.vigenteDesde === null)
+        error = `"Vigente desde" no se pudo interpretar como fecha: "${r.vigenteDesdeTexto}"`;
+      else if (r.vigenteHastaTexto && r.vigenteHasta === null)
+        error = `"Vigente hasta" no se pudo interpretar como fecha: "${r.vigenteHastaTexto}"`;
       else if (vigenteHasta && vigenteHasta <= vigenteDesde)
         error = '"Vigente hasta" debe ser posterior a "Vigente desde"';
       else if (

@@ -14,6 +14,12 @@ import { EditarInsumoDto } from './dto/editar-insumo.dto';
 import { GuardarPreciosDto } from './dto/guardar-precios.dto';
 
 const AZUL_DIGITEXSA = 'FF203080';
+// Las plantillas de este archivo tienen título (fila 1) + instrucciones
+// (fila 2, celda combinada) + fila en blanco (3) + encabezado (4) antes de
+// los datos. Bug real encontrado en costeo-estandar/costeo-ordenes/
+// productos con el mismo patrón: al saltar solo la fila 1, las filas 2 y 4
+// se leían como si fueran datos.
+const FILA_INICIO_DATOS = 5;
 
 function estiloEncabezado(cell: ExcelJS.Cell) {
   cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -141,7 +147,7 @@ export class InsumosService {
 
     const crudo: { fila: number; codigo: string; costo: number }[] = [];
     ws.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
+      if (rowNumber < FILA_INICIO_DATOS) return;
       const codigo = textoCelda(row.getCell(1).value).trim();
       const costoCell = row.getCell(2).value;
       const costo =
@@ -366,7 +372,7 @@ export class InsumosService {
       costoCell: unknown;
     }[] = [];
     ws.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
+      if (rowNumber < FILA_INICIO_DATOS) return;
       crudo.push({
         fila: rowNumber,
         codigo: textoCelda(row.getCell(1).value).trim(),

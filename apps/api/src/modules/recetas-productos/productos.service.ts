@@ -56,6 +56,26 @@ function whereSql(cond: Prisma.Sql[]): Prisma.Sql {
   return cond.length ? Prisma.join(cond, ' AND ') : Prisma.sql`TRUE`;
 }
 
+// Identifica qué columna violó una restricción única (P2002) — desde que
+// Producto.desarrollo también es único (biunívoco con Producto), no se
+// puede asumir que un P2002 siempre es por "código". Con Prisma 7 +
+// driver adapters (@prisma/adapter-pg) el campo real NO vive en
+// `meta.target` (la forma "clásica" documentada) sino anidado en
+// `meta.driverAdapterError.cause.constraint.fields` — verificado con un
+// P2002 real disparado a propósito. En vez de depender de esa forma
+// exacta (que podría volver a cambiar), se busca el nombre del campo como
+// substring en todo el `meta` serializado — el nombre de la restricción en
+// Postgres siempre lo incluye (ej. "productos_desarrollo_key").
+function violacionUnicaIncluyeCampo(meta: unknown, campo: string): boolean {
+  try {
+    return JSON.stringify(meta ?? {})
+      .toLowerCase()
+      .includes(campo.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 interface ProductoFila {
   id_producto: number;
   codigo: string;
@@ -74,6 +94,12 @@ interface ProductoFila {
 }
 
 const AZUL_DIGITEXSA = 'FF203080';
+// La plantilla de plantillaAlta() (y las demás plantillas de este proyecto)
+// tiene título (fila 1) + instrucciones (fila 2, celda combinada) + fila en
+// blanco (3) + encabezado (4) antes de los datos. Bug real encontrado en
+// costeo-estandar/costeo-ordenes con el mismo patrón: al saltar solo la
+// fila 1, las filas 2 y 4 se leían como si fueran datos.
+const FILA_INICIO_DATOS = 5;
 
 function estiloEncabezado(cell: ExcelJS.Cell) {
   cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -453,10 +479,13 @@ export class ProductosService {
       return { idProducto: producto.idProducto };
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError) {
-        if (e.code === 'P2002')
+        if (e.code === 'P2002') {
           throw new BadRequestException(
-            `Ya existe un producto con el código "${dto.codigo}"`,
+            violacionUnicaIncluyeCampo(e.meta, 'desarrollo')
+              ? `Ya existe un producto con el desarrollo "${dto.desarrollo}"`
+              : `Ya existe un producto con el código "${dto.codigo}"`,
           );
+        }
         if (e.code === 'P2003')
           throw new BadRequestException('Cliente no existe');
       }
@@ -488,11 +517,16 @@ export class ProductosService {
         },
       });
     } catch (e) {
-      if (
-        e instanceof Prisma.PrismaClientKnownRequestError &&
-        e.code === 'P2003'
-      ) {
-        throw new BadRequestException('Cliente no existe');
+      if (e instanceof Prisma.PrismaClientKnownRequestError) {
+        if (e.code === 'P2003')
+          throw new BadRequestException('Cliente no existe');
+        if (e.code === 'P2002') {
+          throw new BadRequestException(
+            violacionUnicaIncluyeCampo(e.meta, 'desarrollo')
+              ? `Ya existe un producto con el desarrollo "${dto.desarrollo}"`
+              : 'Ya existe un producto con ese dato único',
+          );
+        }
       }
       throw e;
     }
@@ -557,7 +591,7 @@ export class ProductosService {
       costoMoCell: unknown;
     }[] = [];
     ws.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
+      if (rowNumber < FILA_INICIO_DATOS) return;
       crudo.push({
         fila: rowNumber,
         codigo: textoCelda(row.getCell(1).value).trim(),
@@ -577,7 +611,9 @@ export class ProductosService {
       this.prisma.cliente.findMany(),
       this.prisma.talla.findMany(),
       this.prisma.deporte.findMany(),
-      this.prisma.producto.findMany({ select: { codigo: true } }),
+      this.prisma.producto.findMany({
+        select: { codigo: true, desarrollo: true },
+      }),
     ]);
     const clientePorCodigo = new Map(
       clientes.map((c) => [c.codigo.toLowerCase(), c.idCliente]),
@@ -587,8 +623,16 @@ export class ProductosService {
       deportes.map((d) => d.nombre.toLowerCase()),
     );
     const codigosExistentes = new Set(existentes.map((e) => e.codigo));
+    // Desarrollo↔Producto es biunívoco (confirmado 2026-08-20) — mismo
+    // criterio anti-duplicado que ya existía para código.
+    const desarrollosExistentes = new Set(
+      existentes
+        .filter((e) => e.desarrollo)
+        .map((e) => e.desarrollo!.trim().toLowerCase()),
+    );
 
     const vistos = new Set<string>();
+    const vistosDesarrollo = new Set<string>();
     const filas: FilaPreviewAltaProducto[] = crudo.map((r) => {
       const precio =
         r.precioCell == null || r.precioCell === '' ? 0 : Number(r.precioCell);
@@ -608,6 +652,16 @@ export class ProductosService {
         error = 'Ya existe un producto con ese código';
       else if (!r.descripcion) error = 'Descripción vacía';
       else if (
+        r.desarrollo &&
+        vistosDesarrollo.has(r.desarrollo.trim().toLowerCase())
+      )
+        error = 'Desarrollo duplicado en el archivo';
+      else if (
+        r.desarrollo &&
+        desarrollosExistentes.has(r.desarrollo.trim().toLowerCase())
+      )
+        error = 'Ya existe un producto con ese desarrollo';
+      else if (
         r.clienteCodigo &&
         !clientePorCodigo.has(r.clienteCodigo.toLowerCase())
       )
@@ -623,6 +677,7 @@ export class ProductosService {
       else if (!Number.isFinite(costoMo) || costoMo < 0)
         error = 'Costo de mano de obra por minuto inválido';
       if (r.codigo) vistos.add(r.codigo);
+      if (r.desarrollo) vistosDesarrollo.add(r.desarrollo.trim().toLowerCase());
 
       return {
         fila: r.fila,
@@ -671,11 +726,15 @@ export class ProductosService {
           });
           creados++;
         } catch (e) {
-          const motivo =
+          let motivo = 'error al insertar';
+          if (
             e instanceof Prisma.PrismaClientKnownRequestError &&
             e.code === 'P2002'
-              ? 'código ya existe'
-              : 'error al insertar';
+          ) {
+            motivo = violacionUnicaIncluyeCampo(e.meta, 'desarrollo')
+              ? 'ya existe un producto con ese desarrollo'
+              : 'código ya existe';
+          }
           errores.push({ codigo: a.codigo, motivo });
         }
       }

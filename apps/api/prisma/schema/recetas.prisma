@@ -147,7 +147,11 @@ model ProductoInsumo {
 model Producto {
   idProducto          Int                 @id @default(autoincrement()) @map("id_producto")
   codigo              String              @unique @db.VarChar(40)
-  desarrollo          String?             @db.VarChar(40)
+  // Biunívoco con Producto (confirmado 2026-08-20 contra 1,128 filas reales
+  // de DataDisev3.xlsx: 88 desarrollos únicos, 88 items únicos, cero
+  // excepciones) — un desarrollo es un prototipo que, al aprobarse, se
+  // convierte en exactamente un producto.
+  desarrollo          String?             @unique @db.VarChar(40)
   patron              String?             @db.VarChar(60)
   descripcion         String              @db.VarChar(250)
   tamano              String?             @db.VarChar(60)

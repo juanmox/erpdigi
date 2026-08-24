@@ -38,9 +38,10 @@ export interface LineaProduccionDetalle {
   codigoLine: string
   estatus: string
   enguiamientoYd: string
-  desarrollo: string | null
   consumoEnBlanco: boolean
-  producto: { idProducto: number; codigo: string; descripcion: string }
+  // Desarrollo↔Producto es biunívoco — se lee del producto, nunca se
+  // duplica como campo propio de la línea (evita que se desincronicen).
+  producto: { idProducto: number; codigo: string; descripcion: string; desarrollo: string | null }
   tallas: { talla: { nombre: string }; cantidad: number }[]
 }
 

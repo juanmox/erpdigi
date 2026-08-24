@@ -136,7 +136,7 @@ export function OrdenesPage() {
                   {orden.lineasProduccion.map((l) => (
                     <TableRow key={l.idLineaProduccion}>
                       <TableCell className="font-mono">{l.codigoLine}</TableCell>
-                      <TableCell>{l.desarrollo ?? '—'}</TableCell>
+                      <TableCell>{l.producto.desarrollo ?? '—'}</TableCell>
                       <TableCell>{l.producto.codigo}</TableCell>
                       <TableCell>{l.estatus}</TableCell>
                       <TableCell className="whitespace-normal">

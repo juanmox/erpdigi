@@ -18,6 +18,13 @@ import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
 import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
 
 const AZUL_DIGITEXSA = 'FF203080';
+// La plantilla de plantillaImportarLineas() tiene título (fila 1) +
+// instrucciones (fila 2, celda combinada) + fila en blanco (3) + encabezado
+// (4) antes de los datos. Bug real encontrado en costeo-estandar con el
+// mismo patrón de plantilla: al saltar solo la fila 1, las filas 2 y 4 se
+// leían como si fueran datos (la celda combinada de instrucciones se lee
+// igual en cada columna).
+const FILA_INICIO_DATOS = 5;
 
 function estiloEncabezado(cell: ExcelJS.Cell) {
   cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -180,7 +187,7 @@ export class CosteoOrdenesService {
     }[] = [];
 
     ws.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
+      if (rowNumber < FILA_INICIO_DATOS) return;
       const op = textoCelda(row.getCell(1).value).trim();
       if (!op) return;
 
@@ -224,7 +231,7 @@ export class CosteoOrdenesService {
           select: { idLineaProducto: true, idCliente: true, nombre: true },
         }),
         this.prisma.producto.findMany({
-          select: { idProducto: true, codigo: true },
+          select: { idProducto: true, codigo: true, desarrollo: true },
         }),
         this.prisma.impresora.findMany({
           select: { idImpresora: true, codigo: true },
@@ -242,6 +249,9 @@ export class CosteoOrdenesService {
     );
     const productoPorCodigo = new Map(
       productos.map((p) => [p.codigo.toLowerCase(), p.idProducto]),
+    );
+    const desarrolloPorIdProducto = new Map(
+      productos.map((p) => [p.idProducto, p.desarrollo]),
     );
     const impresoraPorCodigo = new Map(
       impresoras.map((i) => [i.codigo.toLowerCase(), i.idImpresora]),
@@ -290,6 +300,17 @@ export class CosteoOrdenesService {
       else if (!r.producto) error = 'Producto vacío';
       else if (idProducto === null)
         error = `Producto "${r.producto}" no existe en recetas — dar de alta primero`;
+      // Desarrollo↔Producto es biunívoco (confirmado 2026-08-20 contra datos
+      // reales) — si la fila trae un Desarrollo y el producto ya tiene uno
+      // registrado, deben coincidir. Si el producto todavía no tiene
+      // desarrollo cargado, no hay nada que validar todavía.
+      else if (
+        r.desarrollo &&
+        desarrolloPorIdProducto.get(idProducto) &&
+        r.desarrollo.trim().toLowerCase() !==
+          desarrolloPorIdProducto.get(idProducto)!.trim().toLowerCase()
+      )
+        error = `Desarrollo "${r.desarrollo}" no coincide con el desarrollo ya registrado para "${r.producto}" ("${desarrolloPorIdProducto.get(idProducto)}")`;
       else if (r.impresora && idImpresora === null)
         error = `Impresora "${r.impresora}" no reconocida`;
       else if (!Number.isFinite(enguiamientoYd) || enguiamientoYd < 0)
@@ -399,7 +420,6 @@ export class CosteoOrdenesService {
             idProducto: f.idProducto,
             idImpresora: f.idImpresora,
             enguiamientoYd: f.enguiamientoYd,
-            desarrollo: f.desarrollo,
             fechaData: f.fechaData ? new Date(f.fechaData) : null,
             fechaRecibido: f.fechaRecibidoOp
               ? new Date(f.fechaRecibidoOp)

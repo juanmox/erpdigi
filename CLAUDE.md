@@ -499,6 +499,81 @@ una** — no avanzar por iniciativa propia.
     confirmó que sigue existiendo una sola fila en la base, no dos) → listado con/sin
     `historial=true` (3 vigentes hoy vs. 4 filas totales, incluyendo la futura). Datos de prueba
     borrados al terminar.
+  - **Validación de fechas mal escritas en el import** (pedido del usuario antes de cargar el
+    archivo real de 3,687 filas): `previewImportar()` usaba `fechaCelda()` directo sobre las
+    columnas "Vigente desde"/"Vigente hasta", que devuelve `null` tanto si la celda está vacía como
+    si tiene texto que no se pudo interpretar como fecha — un typo pasaba desapercibido como si la
+    celda estuviera en blanco (tomaba el default de "hoy" en vez de marcarse como error). Corregido
+    capturando también el texto crudo de la celda (`textoCelda()`) para distinguir ambos casos: si
+    hay texto pero `fechaCelda()` devolvió `null`, ahora es un error explícito ("Vigente desde" no
+    se pudo interpretar como fecha: "..."). Verificado con curl: fecha con texto suelto en "Vigente
+    desde" → error; en "Vigente hasta" → error; celda vacía → sigue usando hoy sin error; fecha real
+    válida → se respeta tal cual. Usuario de prueba borrado al terminar.
+  - **Bug real de punta a punta encontrado al cargar el archivo real de 3,687 filas** (el usuario
+    mandó captura del modal con filas de error gigantes ilegibles, más el archivo real para
+    analizar): `previewImportar()` solo saltaba la fila 1 del Excel, pero la plantilla que genera
+    `plantillaImportar()` trae 4 filas de preámbulo antes de los datos — título (fila 1),
+    instrucciones (fila 2, celda combinada), fila en blanco (3), encabezado (4) — confirmado
+    inspeccionando el archivo real con un script (no visualmente, es un archivo de datos). Las
+    filas 2 y 4 se leían como si fueran datos reales (la celda combinada de instrucciones devuelve
+    el mismo texto larguísimo en cada columna vía ExcelJS, por eso una fila se veía como un bloque
+    gigante en el modal — "Producto" terminaba siendo el párrafo completo), inflando el conteo real
+    de 3,687 a 3,689 filas y sumando 2 errores espurios. Corregido saltando hasta la fila 5
+    (`FILA_INICIO_DATOS = 5`, constante nueva) en vez de solo la fila 1. **Se encontró y corrigió el
+    mismo bug en el import de Órdenes** (`costeo-ordenes.service.ts`, ya committeado desde antes) —
+    usa exactamente la misma estructura de plantilla (título+instrucciones+blanco+encabezado), así
+    que tenía el mismo problema latente sin haber sido detectado porque las pruebas con curl de esa
+    fase usaban archivos de prueba armados a mano sin el preámbulo real. Verificado con curl contra
+    el archivo real del usuario (3,687 filas — no un archivo sintético): el preview ahora devuelve
+    exactamente 3,687 filas (antes 3,689), la primera es la fila 5 del Excel (`TIR145L`), la última
+    es la fila 3691, y los 3,650 errores restantes son todos "Producto no existe" (esperado, solo
+    hay 4 productos reales cargados hoy) — confirmado que no se escribió nada en la base (solo se
+    corrió el preview, nunca el aplicar). Usuario de prueba borrado al terminar. **El mismo bug
+    exacto se encontró y corrigió 3 veces más** (mismo patrón de plantilla de 4 filas en todo el
+    proyecto, código ya committeado desde antes): `recetas-productos/productos.service.ts`
+    (`previewImportarAltas`, el import de altas masivas de productos) y `recetas-insumos/
+    insumos.service.ts` (los 2 imports de ese módulo — precios e altas de insumos). Los 3 usan la
+    misma constante `FILA_INICIO_DATOS = 5`. El import de "Productos+Receta" (`importar-recetas`,
+    hojas "Productos"/"Receta") **no** tiene el bug — su plantilla usa encabezado en la fila 1 sin
+    preámbulo, confirmado revisando `agregarHojaProductosReceta()`/`agregarHojaLineasReceta()`
+    antes de tocar nada ahí.
+  - **Desarrollo↔Producto es biunívoco — hallazgo del usuario, verificado contra datos reales antes
+    de tocar código** (2026-08-20): el usuario aclaró que un Desarrollo es un prototipo que, al
+    aprobarse, se convierte en exactamente un Producto (relación uno a uno en ambos sentidos).
+    Verificado con un script contra las **1,128 filas reales** de `DataDisev3.xlsx` (`DatosOrigen`,
+    columnas Desarrollo/Item): **88 desarrollos únicos, 88 items únicos, cero excepciones** — no
+    fue necesario tomarlo solo de palabra. Esto expuso 2 problemas reales:
+    1. `recetas.productos.desarrollo` no tenía `@unique` — nada imponía la regla a nivel de base.
+    2. `costeo.LineaProduccion.desarrollo` (agregado esta misma sesión al corregir el bug de F3 de
+       "desarrollo colapsado por OP") quedaba redundante y riesgoso — dos fuentes de verdad para el
+       mismo dato que se podían desincronizar.
+    Corregido con migración `20260820120000_desarrollo_biunivoco_producto`: agrega `@unique` a
+    `recetas.productos.desarrollo` (sin datos existentes que la violaran, verificado antes de
+    aplicar) y quita la columna `desarrollo` de `costeo.linea_produccion` — el valor ahora se lee
+    siempre vía `linea.producto.desarrollo` (`ordenes-page.tsx` actualizado). El import de Órdenes
+    (`costeo-ordenes.service.ts`) ahora valida cruzado: si la fila trae un Desarrollo distinto al
+    ya registrado para el producto resuelto, la fila queda pendiente con error explícito — si el
+    producto todavía no tiene desarrollo cargado, no hay nada que validar todavía (no se inventa
+    ni se asume). **Bug real encontrado en el camino, en código ya committeado desde antes**: con
+    `desarrollo` ahora único, cualquier operación de alta/edición de producto (`crear()`,
+    `editar()`, el import masivo de altas) podía chocar contra esa restricción — el manejo de error
+    ya existente asumía que un P2002 (violación de unicidad) siempre era por `código`, dando
+    mensajes engañosos ("ya existe el código X" cuando en realidad chocaba el desarrollo). Al
+    corregirlo se encontró además que Prisma 7 con driver adapters (`@prisma/adapter-pg`) **no**
+    expone el campo violado en `meta.target` (la forma "clásica" documentada) sino anidado en
+    `meta.driverAdapterError.cause.constraint.fields` — confirmado disparando un P2002 real y
+    volcando el error completo, no adivinado. Corregido con un helper (`violacionUnicaIncluyeCampo`)
+    que busca el nombre del campo como substring en todo el `meta` serializado, robusto a la forma
+    exacta. Se agregó también validación anti-duplicado de `desarrollo` en el preview del import de
+    altas de productos (mismo criterio que ya tenía `código`: rechaza duplicado dentro del archivo
+    y duplicado contra la base). Verificado con curl de punta a punta: alta con desarrollo → alta
+    de otro código con el mismo desarrollo (rechazada, mensaje correcto) → mismo código otra vez
+    (rechazada, mensaje correcto, confirma que ambos casos se distinguen) → preview de altas con
+    desarrollo duplicado en archivo y desarrollo ya existente (ambos marcados) → import de OP con
+    Desarrollo que no coincide con el del producto (rechazado) → import de OP con Desarrollo
+    coincidente (aplicado, y `GET /costeo/ordenes/:codigo` devuelve el desarrollo desde
+    `producto.desarrollo`, confirmando que la columna vieja de `linea_produccion` ya no existe).
+    Datos de prueba borrados al terminar.
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
