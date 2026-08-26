@@ -105,6 +105,7 @@ export const catalogoApi = {
   // descargas protegidas (requieren Bearer token, se resuelven con fetch+blob)
   exportarInsumos: () => descargarArchivo('/recetas/insumos/export', `insumos_${new Date().toISOString().slice(0, 10)}.xlsx`),
   plantillaAltaInsumos: () => descargarArchivo('/recetas/insumos/plantilla-alta', 'plantilla_alta_insumos.xlsx'),
+  plantillaPrecios: () => descargarArchivo('/recetas/insumos/plantilla-precios', 'plantilla_precios_insumos.xlsx'),
   exportarProductos: () => descargarArchivo('/recetas/productos/export', `productos_${new Date().toISOString().slice(0, 10)}.xlsx`),
   plantillaAltaProductos: () => descargarArchivo('/recetas/productos/plantilla-alta', 'plantilla_alta_productos.xlsx'),
   plantillaRecetas: () => descargarArchivo('/recetas/recetas-plantilla', 'plantilla_recetas.xlsx'),

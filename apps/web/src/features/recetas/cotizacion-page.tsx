@@ -237,71 +237,86 @@ export function CotizacionPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                <Select value={cliente || SIN_FILTRO} onValueChange={(v) => setCliente(v === SIN_FILTRO ? '' : v)}>
-                  <SelectTrigger size="sm">
-                    <SelectValue placeholder="Cliente" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={SIN_FILTRO}>Todos</SelectItem>
-                    {opcionesFiltro?.clientes.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={deporte || SIN_FILTRO} onValueChange={(v) => setDeporte(v === SIN_FILTRO ? '' : v)}>
-                  <SelectTrigger size="sm">
-                    <SelectValue placeholder="Deporte" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={SIN_FILTRO}>Todos</SelectItem>
-                    {opcionesFiltro?.deportes.map((d) => (
-                      <SelectItem key={d} value={d}>
-                        {d}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={talla || SIN_FILTRO} onValueChange={(v) => setTalla(v === SIN_FILTRO ? '' : v)}>
-                  <SelectTrigger size="sm">
-                    <SelectValue placeholder="Talla" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={SIN_FILTRO}>Todas</SelectItem>
-                    {opcionesFiltro?.tallas.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {t}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={patron || SIN_FILTRO} onValueChange={(v) => setPatron(v === SIN_FILTRO ? '' : v)}>
-                  <SelectTrigger size="sm">
-                    <SelectValue placeholder="Patrón" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={SIN_FILTRO}>Todos</SelectItem>
-                    {opcionesFiltro?.patrones.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {p}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={desarrollo || SIN_FILTRO} onValueChange={(v) => setDesarrollo(v === SIN_FILTRO ? '' : v)}>
-                  <SelectTrigger size="sm">
-                    <SelectValue placeholder="Desarrollo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={SIN_FILTRO}>Todos</SelectItem>
-                    {opcionesFiltro?.desarrollos.map((d) => (
-                      <SelectItem key={d} value={d}>
-                        {d}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div>
+                  <Label className="mb-1 block text-xs">Cliente</Label>
+                  <Select value={cliente || SIN_FILTRO} onValueChange={(v) => setCliente(v === SIN_FILTRO ? '' : v)}>
+                    <SelectTrigger size="sm" className="w-full">
+                      <SelectValue placeholder="Cliente" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SIN_FILTRO}>Todos</SelectItem>
+                      {opcionesFiltro?.clientes.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="mb-1 block text-xs">Deporte</Label>
+                  <Select value={deporte || SIN_FILTRO} onValueChange={(v) => setDeporte(v === SIN_FILTRO ? '' : v)}>
+                    <SelectTrigger size="sm" className="w-full">
+                      <SelectValue placeholder="Deporte" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SIN_FILTRO}>Todos</SelectItem>
+                      {opcionesFiltro?.deportes.map((d) => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="mb-1 block text-xs">Talla</Label>
+                  <Select value={talla || SIN_FILTRO} onValueChange={(v) => setTalla(v === SIN_FILTRO ? '' : v)}>
+                    <SelectTrigger size="sm" className="w-full">
+                      <SelectValue placeholder="Talla" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SIN_FILTRO}>Todas</SelectItem>
+                      {opcionesFiltro?.tallas.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="mb-1 block text-xs">Patrón</Label>
+                  <Select value={patron || SIN_FILTRO} onValueChange={(v) => setPatron(v === SIN_FILTRO ? '' : v)}>
+                    <SelectTrigger size="sm" className="w-full">
+                      <SelectValue placeholder="Patrón" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SIN_FILTRO}>Todos</SelectItem>
+                      {opcionesFiltro?.patrones.map((p) => (
+                        <SelectItem key={p} value={p}>
+                          {p}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="mb-1 block text-xs">Desarrollo</Label>
+                  <Select value={desarrollo || SIN_FILTRO} onValueChange={(v) => setDesarrollo(v === SIN_FILTRO ? '' : v)}>
+                    <SelectTrigger size="sm" className="w-full">
+                      <SelectValue placeholder="Desarrollo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SIN_FILTRO}>Todos</SelectItem>
+                      {opcionesFiltro?.desarrollos.map((d) => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="flex items-end gap-2">

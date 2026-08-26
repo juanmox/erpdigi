@@ -574,6 +574,38 @@ una** — no avanzar por iniciativa propia.
     coincidente (aplicado, y `GET /costeo/ordenes/:codigo` devuelve el desarrollo desde
     `producto.desarrollo`, confirmando que la columna vieja de `linea_produccion` ya no existe).
     Datos de prueba borrados al terminar.
+  - **4 hallazgos de UI en "Gestión de datos" (Recetas), reportados por el usuario probando la
+    pantalla real, no relacionados con Costeo**:
+    1. Cotización (`cotizacion-page.tsx`): los 5 filtros de búsqueda (Cliente/Deporte/Talla/
+       Patrón/Desarrollo) solo tenían `placeholder` en el `SelectValue`, que nunca se llega a ver
+       porque el valor por defecto es "Todos" (una opción real, no vacía) — el usuario no tenía
+       forma de saber qué filtraba cada selector una vez cargada la página. Corregido agregando un
+       `<Label>` visible arriba de cada uno.
+    2. Precios de insumos (`tab-precios.tsx`): el import de precios no tenía plantilla descargable
+       — a diferencia de todos los demás imports del proyecto (altas de insumos/productos, órdenes,
+       consumo estándar), que sí la tienen. Agregado `plantillaPrecios()` en
+       `insumos.service.ts`/`.controller.ts` (`GET /recetas/insumos/plantilla-precios`, gateado
+       `recetas.insumos.editar` — mismo permiso que ya exige el import), mismo patrón visual que
+       `plantillaAlta()` (2 columnas: Código, Costo nuevo).
+    3. Insumos (`tab-insumos.tsx`): no tenía ningún filtro de búsqueda, Categoría ni Unidad — la
+       pestaña de Precios (`tab-precios.tsx`) ya tenía exactamente esto implementado; se reusó el
+       mismo patrón (filtrado client-side con `useMemo`, mismos componentes) en vez de inventar uno
+       nuevo.
+    4. Productos (`tab-productos.tsx`): no tenía filtro de búsqueda por código/descripción — a
+       diferencia de Cotización, que sí busca por texto contra `/recetas/productos` en el servidor.
+       Se agregó como filtro client-side (mismo criterio que Insumos/Precios, ya trae hasta 2000
+       productos de una vez vía `listarProductos(estado)`) en vez de agregar un nuevo parámetro de
+       búsqueda al servidor, para no duplicar dos formas distintas de buscar productos en el mismo
+       módulo.
+    Verificado: typecheck y lint limpios en ambos paquetes (un warning real de
+    `react-hooks/exhaustive-deps` en Productos, corregido envolviendo `todosLosProductos` en su
+    propio `useMemo`); `plantilla-precios` verificado con curl (200 OK, estructura de 4 filas de
+    preámbulo + encabezado correcto en fila 4, coincide con lo que ya espera
+    `previewImportarPrecios()`) y 403 con un rol sin `recetas.insumos.editar` (probado con
+    BODEGUERO). Usuario de prueba borrado al terminar. **No se pudo verificar visualmente en
+    navegador** (Playwright/automatización de navegador seguía sin estar disponible en esta
+    sesión) — falta una pasada manual del usuario confirmando que los filtros se ven y funcionan
+    bien en pantalla.
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar

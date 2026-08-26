@@ -70,6 +70,21 @@ export class InsumosController {
   }
 
   @RequirePermissions('recetas.insumos.editar')
+  @Get('plantilla-precios')
+  async plantillaPrecios(@Res() res: Response) {
+    const buffer = await this.insumosService.plantillaPrecios();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="plantilla_precios_insumos.xlsx"',
+    );
+    res.send(buffer);
+  }
+
+  @RequirePermissions('recetas.insumos.editar')
   @Post('precios')
   guardarPrecios(
     @Body() dto: GuardarPreciosDto,

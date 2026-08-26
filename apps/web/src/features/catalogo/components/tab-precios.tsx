@@ -210,6 +210,7 @@ export function TabPrecios() {
         titulo="Importar precios desde Excel"
         getError={(f) => f.error}
         getKey={(f) => f.fila}
+        onDescargarPlantilla={() => catalogoApi.plantillaPrecios()}
         columnas={[
           { key: 'codigo', header: 'Código', render: (f) => f.codigo },
           { key: 'descripcion', header: 'Descripción', className: 'whitespace-normal', render: (f) => f.descripcion ?? '—' },

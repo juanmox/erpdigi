@@ -197,6 +197,40 @@ export class InsumosService {
     return { filas };
   }
 
+  // No existía ninguna plantilla descargable para este import — a
+  // diferencia de altas de insumos/productos/consumo estándar/órdenes, que
+  // sí la tienen. Encontrado al revisar la pantalla de Precios con el
+  // usuario. Mismo patrón visual que plantillaAlta().
+  async plantillaPrecios(): Promise<ExcelJS.Buffer> {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Digitexsa ERP';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Precios');
+    ws.mergeCells('A1:B1');
+    ws.getCell('A1').value =
+      'Digital Textil, S.A. (Digitexsa) — Actualización masiva de precios de insumos';
+    ws.getCell('A1').font = {
+      bold: true,
+      size: 14,
+      color: { argb: AZUL_DIGITEXSA },
+    };
+    ws.mergeCells('A2:B2');
+    ws.getCell('A2').value =
+      'Una fila por insumo a actualizar. El código debe coincidir con uno ya existente y activo — ' +
+      'un código que no exista o esté inactivo queda pendiente, no se crea ni se reactiva nada automáticamente.';
+    ws.getCell('A2').font = { size: 9, color: { argb: 'FF888888' } };
+    const headerRow = ws.getRow(4);
+    headerRow.values = ['Código', 'Costo nuevo'];
+    headerRow.eachCell(estiloEncabezado);
+    ws.getColumn(1).width = 16;
+    ws.getColumn(2).width = 14;
+    ws.getColumn(2).numFmt = '#,##0.0000';
+    ws.views = [{ state: 'frozen', ySplit: 4 }];
+
+    return wb.xlsx.writeBuffer();
+  }
+
   async exportarExcel(): Promise<ExcelJS.Buffer> {
     const rows = await this.prisma.insumo.findMany({
       where: { activo: true },

@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ImportPreviewDialog } from '@/components/shared/import-preview-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useAuth } from '@/features/auth/auth-context'
@@ -30,7 +31,16 @@ export function TabProductos() {
     queryKey: ['catalogo', 'productos', estado],
     queryFn: () => catalogoApi.listarProductos(estado),
   })
-  const productos = data?.productos ?? []
+  const todosLosProductos = useMemo(() => data?.productos ?? [], [data])
+
+  const [busqueda, setBusqueda] = useState('')
+  const productos = useMemo(() => {
+    const texto = busqueda.trim().toLowerCase()
+    if (!texto) return todosLosProductos
+    return todosLosProductos.filter(
+      (p) => p.codigo.toLowerCase().includes(texto) || p.descripcion.toLowerCase().includes(texto),
+    )
+  }, [todosLosProductos, busqueda])
 
   const [modalProductoAbierto, setModalProductoAbierto] = useState(false)
   const [productoEditando, setProductoEditando] = useState<ProductoCatalogo | null>(null)
@@ -83,7 +93,9 @@ export function TabProductos() {
               <SelectItem value="todos">Todos</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-muted-foreground text-sm">{productos.length} productos</p>
+          <p className="text-muted-foreground text-sm">
+            {productos.length} de {todosLosProductos.length} productos
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => catalogoApi.exportarProductos()}>
@@ -109,6 +121,13 @@ export function TabProductos() {
           )}
         </div>
       </div>
+
+      <Input
+        value={busqueda}
+        onChange={(e) => setBusqueda(e.target.value)}
+        placeholder="Buscar por código o descripción…"
+        className="h-8 max-w-xs"
+      />
 
       {mensaje && (
         <Alert variant={mensaje.tipo === 'error' ? 'destructive' : 'default'}>
