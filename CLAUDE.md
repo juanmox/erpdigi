@@ -2,11 +2,10 @@
 
 ## Qué es este proyecto
 ERP completo nuevo para Digital Textil, S.A. (Digitexsa), Guatemala — fabricante de uniformes
-deportivos. Reemplaza gradualmente al sistema actual (`01_erp`, en
-`C:\Users\PETER\Documents\Jmox\01_erp`), que sigue funcionando 100% intacto y en producción
-mientras tanto. **`01_erp` quedó fuera de servicio el 2026-08-31** (ver "Baja de `01_erp`" más
-abajo): resultó ser estrictamente un subconjunto del ERP nuevo, sin autenticación y sin usuarios
-reales, así que el corte se adelantó en vez de esperar a la Fase 5.
+deportivos. Reemplazó al sistema anterior (`01_erp`, en
+`C:\Users\PETER\Documents\Jmox\01_erp`), **apagado el 2026-08-31** — ver "Baja de `01_erp`" y
+"Despliegue a producción" más abajo. Resultó ser estrictamente un subconjunto del ERP nuevo, sin
+autenticación y sin usuarios reales, así que el corte se adelantó en vez de esperar a la Fase 5.
 
 Repo independiente en `C:\dev\digitexsa-erp` (fuera de `Jmox`, que está sincronizado por Google
 Drive for Desktop — un monorepo pnpm+Turborepo genera demasiados archivos para sincronizar ahí
@@ -1169,6 +1168,90 @@ hacerse en este orden:
 Mientras el paso 3 no ocurra, `01_erp` sigue encendido y la FK **lo va a romper** en sus 4 endpoints
 de alta/edición de productos. Eso es aceptable y esperado — nadie lo usa — pero conviene saberlo
 para no diagnosticarlo como un bug nuevo.
+
+### Despliegue a producción y apagado del legacy — 2026-08-31 (ejecutado)
+
+Los tres commits (`98a62cd`, `f5e8bf7`, `9d74088`) se desplegaron en `192.168.2.13` y **`01_erp`
+quedó apagado**. Estado final verificado: PM2 corre solo `digitexsa-api` y `biosac-rrhh`, el puerto
+3000 no responde, la raíz `/` redirige 302 a `/erp/`, y la API contesta 401 (viva y gateada).
+
+**Producción estaba mucho más atrás de lo que suponíamos**: 4 productos contra los 1,285 de local
+(todos los imports del usuario vivían solo en su máquina), sin la tabla `desarrollos`, y con el
+checkout 6 commits atrás. Antes de mover nada se comprobó que **local era un superconjunto limpio**:
+los 4 productos idénticos (mismos ids, códigos y desarrollos) y las 6 cotizaciones de producción
+exactamente iguales a las 6 primeras de local (mismos folios, fechas y totales).
+
+**Se descartó el volcado completo del schema.** Hay **13 FKs desde `costeo` hacia `recetas`**
+(`consumo_estandar`, `linea_produccion`, `consumo_papel`, `reposicion`, `orden_produccion`…);
+reemplazar `recetas` de un saque las habría arrastrado. Se copiaron **solo los datos faltantes**, con
+`pg_dump --data-only --inserts --on-conflict-do-nothing`, en el orden que exige la FK nueva:
+clientes → insumos → **desarrollos** → productos → líneas de receta, más `setval` de cada secuencia
+al final. Resultado: 1 → 99 clientes, 24 → 25 insumos, 4 → 1,285 desarrollos y productos, con
+`count(productos) = count(v_producto_costo) = 1,285` y los costos de los 4 reales idénticos antes y
+después de migrar.
+
+#### ⚠️ Los dos schemas tienen dueños distintos y ninguno es superusuario
+
+`recetas` es de `erpadmin`; `core` y `costeo` son de `digitexsa_erp`. **Ninguno de los dos roles es
+miembro del otro ni superusuario**, así que `prisma migrate deploy` no puede aplicar nada que cruce
+schemas, y ni siquiera puede aplicar lo suyo con un solo rol. De las 5 migraciones pendientes:
+
+- `20260812210311` y `20260818180000` (solo `costeo`) → `psql` con la `DATABASE_URL` de la app.
+- `20260826120000` y `20260831120000` (solo `recetas`) → `psql -U erpadmin`.
+- **`20260820120000` toca AMBOS** → hubo que **partirla en dos** y correr cada mitad con su dueño
+  (`ALTER TABLE costeo.linea_produccion DROP COLUMN desarrollo` por un lado, el `CREATE UNIQUE INDEX`
+  sobre `recetas.productos` por el otro).
+
+Después, `prisma migrate resolve --applied` de las 5, y `migrate status` confirmó
+*"Database schema is up to date"*. `20260812210311` ya estaba aplicada a medias de antes (las columnas
+existían pero Prisma no lo sabía) — se verificó columna por columna antes de marcarla, no se asumió.
+
+#### ⚠️ Dos tropiezos que dejaron la app rota "en silencio"
+
+Ambos son cosas que en local ya estaban hechas de sesiones anteriores y que no se anticipó replicar.
+Los dos se manifestaron igual: la pantalla cargaba pero **sin datos y sin ningún mensaje de error**.
+
+1. **Grants de Postgres sobre los objetos nuevos.** La migración se aplicó como `erpadmin`, así que
+   `recetas.desarrollos`, `recetas.desarrollo_insumos` y la vista `v_desarrollo_costo` nacieron
+   siendo suyos. La app corre como `digitexsa_erp`, y los grants de este servidor cubrían solo las
+   tablas que existían al momento del primer despliegue. La API tiraba `42501 permission denied for
+   table desarrollos` en cada consulta del catálogo. Corregido con los `GRANT` correspondientes **más
+   `ALTER DEFAULT PRIVILEGES FOR ROLE erpadmin IN SCHEMA recetas`**, para que la próxima tabla que
+   cree una migración ya nazca accesible y esto no se repita.
+2. **El seed nunca se había corrido en producción.** Los permisos `recetas.desarrollos.crear/editar/
+   aprobar` existían en el código pero no en esa base, así que en la pestaña Desarrollos solo se veía
+   el botón "Receta" (el único sin gate) y faltaban "Editar" y "Aprobar/Reabrir". Antes de correr el
+   seed se verificó que el upsert del admin usa `update: {}` — **no toca la contraseña** de un admin
+   existente, solo lo crea si falta — y se respaldó `core`, porque `upsertRolConPermisos` también
+   *quita* permisos fuera de su lista. Resultado: ningún rol perdió nada (ADMIN 39→42, EDITOR 11→14,
+   ANALISTA_COSTOS 13→14, GERENCIA_COSTEO 16→17) y el seed completó de paso los catálogos de Costeo,
+   que tampoco estaban. **Tras esto hay que cerrar sesión y volver a entrar**: el JWT lleva los
+   permisos en sus claims y el token viejo sigue sin ellos.
+
+**Lección para el próximo despliegue**: además de `migrate deploy`, verificar siempre (a) que los
+objetos nuevos tengan grants para `digitexsa_erp`, y (b) correr el seed si la release agregó permisos.
+Ninguna de las dos cosas falla ruidosamente.
+
+#### Decisiones conservadoras tomadas en la copia de datos
+
+- **No se pisaron los precios de insumos de producción**: el `ON CONFLICT DO NOTHING` dejó intactos
+  los 24 insumos que ya existían y solo agregó el que faltaba. Por eso los costos de producción
+  difieren de los de local (BSN-FB01N: Q70.86 allá, Q128.96 acá) — son precios distintos, no un
+  error. Sincronizarlos es un paso aparte, si se decide.
+- **Las recetas de los 4 productos reales son las de producción**, no las de local: sus 46 líneas ya
+  existían con ids que colisionaron, así que las locales se saltaron. Es lo correcto, son
+  consistentes con los precios de allá. Verificado: 10+11+11+14 = 46 líneas, cero duplicados.
+- Los otros 1,281 productos entraron **sin receta** (Q0.00). Es esperado: nunca la tuvieron.
+- Las cotizaciones de prueba de local (7-10, 12) **no** se copiaron. Producción conserva sus 6.
+
+**Respaldos en el servidor** (`~/backups/`): `recetas-antes-fk-20260831-145041.sql` y
+`core-antes-seed-20260831-154332.sql`.
+
+**Nginx**: el catch-all `location / { proxy_pass :3000 }` se reemplazó por `return 302 /erp/`, con
+backup previo en `/etc/nginx/sites-available/erpapp.bak-2026-08-31`.
+
+**Pendiente**: borrar el repositorio de `01_erp` en GitHub (es del usuario, va con su cuenta). El
+checkout local en `C:\Users\PETER\Documents\Jmox\01_erp` puede quedar un tiempo como respaldo frío.
 
 ## Convenciones heredadas de `recetas` (aplican a TODO el ERP, no solo a ese módulo)
 `recetas` (Fase 2, ya migrado y committeado) es el módulo de referencia — cualquier módulo nuevo
