@@ -18,11 +18,15 @@ import { EmpresasService } from './empresas.service';
 export class EmpresasController {
   constructor(private readonly empresasService: EmpresasService) {}
 
+  // Antes sin gate: cualquier autenticado listaba TODAS las empresas.
+  // Hoy hay una sola, así que la fuga era teórica, pero es multi-tenant.
+  @RequirePermissions('plataforma.empresas.administrar')
   @Get()
   listar() {
     return this.empresasService.listar();
   }
 
+  @RequirePermissions('plataforma.empresas.administrar')
   @Get(':id')
   obtener(@Param('id', ParseIntPipe) id: number) {
     return this.empresasService.obtener(id);

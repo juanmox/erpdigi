@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
 import express from 'express';
 import { AppModule } from './app.module';
+import { verificarRutasGateadas } from './common/verificar-rutas-gateadas';
 
 // Rutas de preview de import Excel: reciben el .xlsx crudo como body (igual que 01_erp,
 // `express.raw()` montado solo en estas rutas). Se registran antes que el `express.json()`
@@ -39,6 +40,11 @@ async function bootstrap() {
   app.use(express.json({ limit: '20mb' }));
   app.use(express.urlencoded({ limit: '20mb', extended: true }));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // Antes de escuchar: si alguna ruta no declara su acceso, no se arranca.
+  // Con el guard fail-closed devolvería 403 en producción; mejor un error
+  // ruidoso acá, con el nombre de la ruta.
+  await app.init();
+  verificarRutasGateadas(app);
   await app.listen(process.env.PORT ?? 4000);
 }
 void bootstrap();

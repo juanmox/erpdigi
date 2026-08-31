@@ -13,6 +13,7 @@ import type { Request, Response } from 'express';
 import { AuthService, SesionEmitida } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
+import { SoloAutenticado } from './decorators/solo-autenticado.decorator';
 import { LoginDto } from './dto/login.dto';
 import { SeleccionarEmpresaDto } from './dto/seleccionar-empresa.dto';
 import type { JwtPayload } from './types/jwt-payload.type';
@@ -61,6 +62,9 @@ export class AuthController {
     return this.respuesta(sesion);
   }
 
+  // Cualquier usuario autenticado elige su empresa; el servicio ya valida
+  // que tenga rol en la que pide.
+  @SoloAutenticado()
   @Post('seleccionar-empresa')
   @HttpCode(200)
   async seleccionarEmpresa(
@@ -104,6 +108,8 @@ export class AuthController {
     return { ok: true };
   }
 
+  // Devuelve el propio payload del token: nada que gatear.
+  @SoloAutenticado()
   @Get('me')
   me(@CurrentUser() usuario: JwtPayload) {
     return usuario;

@@ -812,15 +812,43 @@ sin i18n (todo en español).
 - Guards globales vía `APP_GUARD`: `JwtAuthGuard` (bloquea todo por defecto; `@Public()` para
   login/refresh) + `PermissionsGuard` (`@RequirePermissions('codigo.punto.accion')`, a nivel de
   método o de controller completo).
-- **⚠️ Hallazgo de seguridad pendiente de decisión, NO corregido todavía**:
-  `PermissionsGuard` (`apps/api/src/modules/auth/guards/permissions.guard.ts`) hace **fail-OPEN**
-  — si un endpoint no lleva `@RequirePermissions(...)`, el guard deja pasar a cualquier usuario
-  autenticado en vez de bloquear por defecto. Hoy no es explotable (se auditaron uno por uno los
-  ~30 endpoints de `recetas` y todos llevan el decorador), pero es un diseño riesgoso de cara a
-  la confidencialidad — un futuro endpoint sin decorador quedaría abierto sin que nadie lo note.
-  Antes de agregar muchos más módulos (Fase 3+), vale la pena decidir con el usuario si conviene
-  invertirlo a fail-closed (requerir algo explícito, ej. `@Public()`, para lo que de verdad no
-  necesita permiso).
+- **✅ `PermissionsGuard` es fail-CLOSED desde 2026-08-31** (era el hallazgo de seguridad que estuvo
+  pendiente varias fases). Antes, un endpoint sin `@RequirePermissions` devolvía `true` y quedaba
+  abierto a cualquier usuario autenticado. El problema no era el daño de entonces sino el **modo de
+  falla**: olvidar el decorador en un controller nuevo abría esa operación sin ningún síntoma — sin
+  error, sin log, y las pruebas manuales no lo detectan porque quien prueba suele ser admin. De cara
+  a Inventario/Compras/Ventas (Fase 3), que mueven stock y dinero, no valía la pena sostenerlo.
+  - **Exposición real que había** (auditada con un script sobre los 102 endpoints): 91 gateados, 3
+    `@Public`, y **8 fail-open**, todos de lectura. Cuatro eran inocuos (`/auth/me`,
+    `/auth/seleccionar-empresa`, `/monedas`, `/monedas/tasas-cambio`); `/empresas` y `/empresas/:id`
+    listaban **todas** las empresas (fuga multi-tenant, teórica hoy porque existe una sola); y
+    `/roles` y `/permisos` exponían el **catálogo completo del modelo de seguridad** a cualquier
+    autenticado — un operario de planta podía leerlo. No entrega credenciales, pero es material de
+    reconocimiento.
+  - **Decorador nuevo `@SoloAutenticado()`** (`auth/decorators/solo-autenticado.decorator.ts`) para
+    lo que legítimamente no necesita permiso. Lo importante es que la decisión queda **escrita**: al
+    leer el código se ve que "sin permiso" fue deliberado y no un descuido. No confundir con
+    `@Public()`, que además saltea la autenticación.
+  - `/roles` y `/permisos` pasaron a `plataforma.roles.administrar`; `/empresas` a
+    `plataforma.empresas.administrar`. Ambos permisos ya existían en el seed sin gatear nada.
+  - **`verificarRutasGateadas()`** (`common/verificar-rutas-gateadas.ts`, llamado desde `main.ts`
+    entre `app.init()` y `app.listen()`): recorre los controllers y **aborta el arranque** si alguna
+    ruta no declara nada. Esto es lo que de verdad cierra el problema a futuro — convierte el olvido
+    en un error ruidoso en desarrollo, con el nombre de la ruta, en vez de un 403 tardío y confuso en
+    producción.
+    - ⚠️ Usa `DiscoveryService` + `MetadataScanner`, **no** el router de Express. Los decoradores se
+      pueden poner **a nivel de clase** (`@RequirePermissions` sobre el `@Controller`, como en
+      `usuarios` y `referencias`), y desde el router solo se ve la función handler, sin su clase. Una
+      primera versión leía el router y reportaba **15 falsos positivos** por exactamente eso. Requirió
+      registrar `DiscoveryModule` en `app.module.ts`.
+  - **Semántica del decorador: es Y, no O.** `permisosRequeridos.every(...)` exige TODOS los
+    permisos listados. Hoy ningún endpoint declara más de uno, pero el frontend usa **O** para decidir
+    qué mostrar en la navegación; no confundir ambas. Documentado en el guard.
+  - **Verificado**: el script de auditoría pasó de 8 endpoints sin gate a **0**; con dos usuarios de
+    prueba (ADMIN y COTIZADOR) se confirmó que `/roles`, `/permisos` y `/empresas` dan 200/403 según
+    el rol, que `/auth/me` y `/monedas` pasan con ambos, y que un endpoint ya gateado de antes sigue
+    igual. Y se probó el arranque quitando **a propósito** un `@SoloAutenticado()`: el servidor no
+    levantó y nombró exactamente `GET /monedas/tasas-cambio (MonedasController.listarTasasCambio)`.
 - Frontend: `AuthProvider`/`useAuth` (`apps/web/src/features/auth/auth-context.tsx`) — access
   token SOLO en memoria (nunca `localStorage`), refresh silencioso al montar la app. `apiFetch`
   (`src/lib/api.ts`) reintenta una vez con refresh automático si recibe 401.

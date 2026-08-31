@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { DiscoveryModule, APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { validateEnv } from './config/env.validation';
@@ -26,6 +26,9 @@ import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
+    // Necesario para verificarRutasGateadas() en main.ts: recorre los
+    // controllers para exigir que cada ruta declare su acceso.
+    DiscoveryModule,
     ConfigModule.forRoot({
       isGlobal: true,
       validate: validateEnv,
