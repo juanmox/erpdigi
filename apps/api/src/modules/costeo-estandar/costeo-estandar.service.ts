@@ -8,6 +8,7 @@ import ExcelJS from 'exceljs';
 import { fechaCelda, textoCelda } from '../../common/excel-celda';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import { FilaAplicarConsumoEstandarDto } from './dto/aplicar-importar.dto';
 import { CrearConsumoEstandarDto } from './dto/crear-consumo-estandar.dto';
 import { FilaPreviewConsumoEstandar } from './costeo-estandar.types';
 
@@ -100,8 +101,12 @@ export class CosteoEstandarService {
     vigenteDesde: Date,
     vigenteHasta: Date | null,
     excluirId?: number,
+    // Cliente de transacción opcional: el import resuelve DENTRO de su
+    // transacción, o leería un estado distinto del que va a escribir.
+    tx?: Pick<PrismaService, 'consumoEstandar'>,
   ): Promise<{ idACorregir: number | null; idACerrar: number | null }> {
-    const solapados = await this.prisma.consumoEstandar.findMany({
+    const db = tx ?? this.prisma;
+    const solapados = await db.consumoEstandar.findMany({
       where: {
         idProducto,
         idTalla,
@@ -391,42 +396,149 @@ export class CosteoEstandarService {
     return { filas };
   }
 
+  /**
+   * Aplica el import. NO confía en nada que haya calculado el preview: el
+   * preview corre en el servidor pero su resultado viaja al navegador y vuelve,
+   * así que los ids (`idProducto`, `idTalla`, `reemplazaId`, `corrigeId`) y el
+   * `error` que traiga el cuerpo se ignoran, y todo se resuelve de nuevo acá
+   * contra el estado actual de la base (convención #1).
+   *
+   * Antes se usaban tal cual, y eso permitía dos cosas: con un preview viejo se
+   * editaba en silencio una versión que ya no era la vigente (o reventaba con
+   * un 500 del EXCLUDE), y con un POST armado a mano se podían pisar las
+   * pulgadas de cualquier consumo, incluso de otro producto.
+   */
   async aplicarImportar(
-    filas: FilaPreviewConsumoEstandar[],
+    filas: FilaAplicarConsumoEstandarDto[],
     idUsuarioActor: number,
   ) {
     if (!filas || filas.length === 0)
       throw new BadRequestException('No hay filas para importar');
 
-    const validas = filas.filter((f) => !f.error && f.idProducto && f.idTalla);
+    // Catálogos frescos: los ids del cuerpo no se miran.
+    const [productos, tallas] = await Promise.all([
+      this.prisma.producto.findMany({
+        select: { idProducto: true, codigo: true },
+      }),
+      this.prisma.talla.findMany({ select: { idTalla: true, nombre: true } }),
+    ]);
+    const productoPorCodigo = new Map(
+      productos.map((x) => [x.codigo.trim().toLowerCase(), x.idProducto]),
+    );
+    const tallaPorNombre = new Map(
+      tallas.map((x) => [x.nombre.trim().toLowerCase(), x.idTalla]),
+    );
+
+    const errores: string[] = [];
+    const resueltas: {
+      fila: number;
+      idProducto: number;
+      idTalla: number;
+      pulgadasPapel: number;
+      vigenteDesde: Date;
+      vigenteHasta: Date | null;
+    }[] = [];
+
+    for (const f of filas) {
+      const idProducto = productoPorCodigo.get(
+        String(f.productoCodigo).trim().toLowerCase(),
+      );
+      const idTalla = tallaPorNombre.get(
+        String(f.tallaNombre).trim().toLowerCase(),
+      );
+      if (!idProducto) {
+        errores.push(
+          `Fila ${f.fila}: el producto "${f.productoCodigo}" no existe`,
+        );
+        continue;
+      }
+      if (!idTalla) {
+        errores.push(`Fila ${f.fila}: la talla "${f.tallaNombre}" no existe`);
+        continue;
+      }
+      const vigenteDesde = f.vigenteDesde
+        ? new Date(f.vigenteDesde)
+        : new Date();
+      const vigenteHasta = f.vigenteHasta ? new Date(f.vigenteHasta) : null;
+      if (Number.isNaN(vigenteDesde.getTime())) {
+        errores.push(`Fila ${f.fila}: "Vigente desde" no es una fecha válida`);
+        continue;
+      }
+      if (vigenteHasta && Number.isNaN(vigenteHasta.getTime())) {
+        errores.push(`Fila ${f.fila}: "Vigente hasta" no es una fecha válida`);
+        continue;
+      }
+      if (vigenteHasta && vigenteHasta <= vigenteDesde) {
+        errores.push(
+          `Fila ${f.fila}: "Vigente hasta" debe ser posterior a "Vigente desde"`,
+        );
+        continue;
+      }
+      resueltas.push({
+        fila: f.fila,
+        idProducto,
+        idTalla,
+        pulgadasPapel: f.pulgadasPapel,
+        vigenteDesde,
+        vigenteHasta,
+      });
+    }
+
+    // Un producto+talla repetido dentro del mismo archivo haría que la segunda
+    // fila resolviera contra lo que acaba de escribir la primera.
+    const vistos = new Set<string>();
+    for (const r of resueltas) {
+      const clave = `${r.idProducto}|${r.idTalla}`;
+      if (vistos.has(clave))
+        errores.push(
+          `Fila ${r.fila}: producto + talla repetidos dentro del mismo archivo`,
+        );
+      vistos.add(clave);
+    }
+
+    if (errores.length > 0)
+      throw new BadRequestException({
+        error: 'Hay filas con error, no se aplicó nada',
+        detalle: errores.slice(0, 20),
+        total: errores.length,
+      });
 
     const resultado = await this.prisma.$transaction(async (tx) => {
       let creados = 0;
       let reemplazados = 0;
       let corregidos = 0;
-      for (const f of validas) {
-        if (f.corrigeId) {
+      for (const r of resueltas) {
+        // Se re-resuelve acá adentro, contra el estado real y actual.
+        const { idACorregir, idACerrar } = await this.resolverReemplazo(
+          r.idProducto,
+          r.idTalla,
+          r.vigenteDesde,
+          r.vigenteHasta,
+          undefined,
+          tx,
+        );
+        if (idACorregir) {
           await tx.consumoEstandar.update({
-            where: { idConsumoEstandar: f.corrigeId },
-            data: { pulgadasPapel: f.pulgadasPapel },
+            where: { idConsumoEstandar: idACorregir },
+            data: { pulgadasPapel: r.pulgadasPapel },
           });
           corregidos++;
           continue;
         }
-        if (f.reemplazaId) {
+        if (idACerrar) {
           await tx.consumoEstandar.update({
-            where: { idConsumoEstandar: f.reemplazaId },
-            data: { vigenteHasta: new Date(f.vigenteDesde!) },
+            where: { idConsumoEstandar: idACerrar },
+            data: { vigenteHasta: r.vigenteDesde },
           });
           reemplazados++;
         }
         await tx.consumoEstandar.create({
           data: {
-            idProducto: f.idProducto!,
-            idTalla: f.idTalla!,
-            pulgadasPapel: f.pulgadasPapel,
-            vigenteDesde: new Date(f.vigenteDesde!),
-            vigenteHasta: f.vigenteHasta ? new Date(f.vigenteHasta) : null,
+            idProducto: r.idProducto,
+            idTalla: r.idTalla,
+            pulgadasPapel: r.pulgadasPapel,
+            vigenteDesde: r.vigenteDesde,
+            vigenteHasta: r.vigenteHasta,
             creadoPor: idUsuarioActor,
           },
         });

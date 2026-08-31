@@ -1076,14 +1076,26 @@ para una producción en masa"*. Plan completo en `C:\Users\PETER\.claude\plans\s
   por un producto, así que "Nuevo producto" no tiene nada que ofrecer hasta crear un desarrollo
   nuevo. Solo **4 de los 1,285** tienen receta; el resto quedó en Q0.00 porque el backfill salió de
   `productos.desarrollo` y esos nunca tuvieron receta en el sistema viejo.
-- **Pendientes de decisión, NO corregidos** (hallazgos de code review):
-  1. `costeo-estandar.service.ts:aplicarImportar()` confía en los ids que manda el cliente
-     (`@Body('filas')` sin tipo, así que el `ValidationPipe` no valida nada) — mismo hueco que ya se
-     cerró en `productos.altas()`. Es código anterior a este refactor.
-  2. El `COALESCE(..., 0)` de `v_producto_costo`: un producto cuyo `desarrollo` no matchee reporta
-     **Q0 en silencio**, y como `01_erp` sigue escribiendo esa columna como texto libre, es
-     alcanzable en producción sin ninguna señal. Fue deliberado para preservar el invariante de una
-     fila por producto, pero convendría una alerta visible en el catálogo.
+- **Los 2 hallazgos de code review que habían quedado pendientes, ya cerrados**:
+  1. `costeo-estandar.service.ts:aplicarImportar()` confiaba en los ids del cliente. El controlador
+     tipaba el cuerpo con `FilaPreviewConsumoEstandar`, una **interfaz** — TypeScript la borra al
+     compilar, así que el `ValidationPipe` global no validaba nada. Y el servicio usaba
+     `corrigeId`/`reemplazaId`/`idProducto`/`idTalla`/`error` tal como venían, aunque el preview
+     corre en el servidor pero su resultado viaja al navegador y vuelve. Eso permitía dos cosas: con
+     un preview viejo se editaba en silencio una versión que ya no era la vigente (o reventaba con un
+     500 del EXCLUDE), y con un POST armado a mano se podían pisar las pulgadas de cualquier consumo,
+     incluso de otro producto. Corregido con un DTO de verdad
+     (`dto/aplicar-importar.dto.ts`, clase con decoradores, y solo los campos que el servidor usa) +
+     re-resolución completa server-side: producto y talla por código contra catálogos frescos, fechas
+     revalidadas, detección de producto+talla repetidos dentro del archivo, y `resolverReemplazo()`
+     corriendo **dentro** de la transacción (ganó un parámetro `tx` opcional; antes leía por fuera y
+     podía ver un estado distinto del que iba a escribir). Verificado con curl: alta normal, el
+     ataque con `corrigeId` + producto falso rechazado, pulgadas negativas frenadas por el
+     `ValidationPipe`, repetidos en el mismo archivo rechazados, y la corrección del mismo día
+     dejando una sola fila. El frontend no cambió: manda los campos extra del preview y el
+     `whitelist: true` los descarta.
+  2. El `COALESCE(..., 0)` de `v_producto_costo` **se eliminó** al apagar `01_erp` — ver "Baja de
+     `01_erp`" más abajo. Con la FK, un desarrollo inexistente ya no es representable.
 - **Pendiente de decisión del usuario**: `TEST-PROD-01` y `TEST-BULK-01` son los únicos 2 productos
   sin desarrollo, así que su costo quedó en 0 (`TEST-BULK-01` tenía Q4.85). `CLAUDE.md` los marca
   como "no tocar sin confirmar" — habría que borrarlos o darles un desarrollo. Ningún producto real

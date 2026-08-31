@@ -4,7 +4,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CosteoEstandarService } from './costeo-estandar.service';
-import type { FilaPreviewConsumoEstandar } from './costeo-estandar.types';
+import { AplicarImportarConsumoEstandarDto } from './dto/aplicar-importar.dto';
 import { CrearConsumoEstandarDto } from './dto/crear-consumo-estandar.dto';
 
 @Controller('costeo/estandar')
@@ -43,11 +43,14 @@ export class CosteoEstandarController {
 
   @RequirePermissions('costeo.estandar.administrar')
   @Post('importar/aplicar')
+  // El cuerpo se tipa con una CLASE, no con la interfaz del preview: las
+  // interfaces se borran al compilar, así que el ValidationPipe global no
+  // validaba nada de lo que llegaba acá.
   aplicarImportar(
-    @Body('filas') filas: FilaPreviewConsumoEstandar[],
+    @Body() dto: AplicarImportarConsumoEstandarDto,
     @CurrentUser() usuario: JwtPayload,
   ) {
-    return this.service.aplicarImportar(filas, usuario.sub);
+    return this.service.aplicarImportar(dto.filas, usuario.sub);
   }
 
   @RequirePermissions('costeo.estandar.administrar')
