@@ -1,7 +1,6 @@
 model AreaUso {
   idArea          Int              @id @default(autoincrement()) @map("id_area")
   nombre          String           @unique @db.VarChar(60)
-  productoInsumos ProductoInsumo[]
 
   desarrolloInsumos DesarrolloInsumo[]
 
@@ -117,7 +116,6 @@ model Insumo {
   activo          Boolean          @default(true)
   categoria       CategoriaInsumo  @relation(fields: [idCategoria], references: [idCategoria], onDelete: NoAction, onUpdate: NoAction)
   unidad          UnidadMedida     @relation(fields: [idUnidad], references: [idUnidad], onDelete: NoAction, onUpdate: NoAction)
-  productoInsumos ProductoInsumo[]
 
   /// Relaciones inversas del módulo Costeo Real (costeo.prisma) — costeo
   /// referencia este catálogo por FK, no lo duplica (ver docs/02, decisión D1).
@@ -137,22 +135,10 @@ model Insumo {
 /// —guarda el estado previo, es lo que hace posible el rollback, y 01_erp
 /// (todavía en producción) la sigue leyendo—, pero el ERP nuevo ya no le
 /// escribe. Ver migración 20260826..._desarrollos_duenos_de_receta.
-/// Línea de receta (producto <-> insumo). Única tabla maestra con borrado físico permitido.
-model ProductoInsumo {
-  idProductoInsumo Int      @id @default(autoincrement()) @map("id_producto_insumo")
-  idProducto       Int      @map("id_producto")
-  idInsumo         Int      @map("id_insumo")
-  consumo          Decimal  @default(0) @db.Decimal(14, 6)
-  idArea           Int?     @map("id_area")
-  area             AreaUso? @relation(fields: [idArea], references: [idArea], onDelete: NoAction, onUpdate: NoAction)
-  insumo           Insumo   @relation(fields: [idInsumo], references: [idInsumo], onDelete: NoAction, onUpdate: NoAction)
-  producto         Producto @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade, onUpdate: NoAction)
+// model ProductoInsumo ELIMINADO (2026-08-31): la tabla recetas.producto_insumos
+// se borró al apagar 01_erp. Estaba congelada desde que el desarrollo pasó a ser
+// dueño de la receta, y solo existía como red de seguridad para el legacy.
 
-  @@unique([idProducto, idInsumo, idArea])
-  @@index([idProducto], map: "idx_prodins_producto")
-  @@map("producto_insumos")
-  @@schema("recetas")
-}
 
 /// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model Producto {
@@ -163,29 +149,31 @@ model Producto {
   // excepciones) — un desarrollo es un prototipo que, al aprobarse, se
   // convierte en exactamente un producto.
   //
-  // ⚠️ Apunta a recetas.desarrollos.codigo pero DELIBERADAMENTE NO es una FK
-  // (decisión del usuario, 2026-08-26): 01_erp — todavía en producción —
-  // ESCRIBE esta columna como texto libre al dar de alta/editar productos
-  // (app.js 1195, 1232, 1380, 1900). Con una FK real esas 4 pantallas
-  // empezarían a fallar con 23503. La integridad la valida el backend nuevo
-  // (existe + APROBADO + activo + libre) al crear/editar un producto.
-  // Agregar la FK es una migración de una línea cuando 01_erp se apague (F5).
-  desarrollo          String?             @unique @db.VarChar(40)
+  // FK real desde 2026-08-31, al apagar 01_erp. Mientras el legacy vivía no se
+  // podía poner: escribía esta columna como texto libre en 4 endpoints y la FK
+  // los habría roto con 23503. Ahora la integridad la garantiza la base, no
+  // solo el backend — antes, un código que no resolviera hacía que el producto
+  // apareciera en el catálogo con costo Q0.00 sin ninguna señal.
+  //
+  // @unique = el 1:1 con Desarrollo (confirmado 2026-08-20 contra 1,128 filas
+  // reales de DataDisev3.xlsx: 88 desarrollos únicos, 88 items únicos).
+  desarrollo          String              @unique @db.VarChar(40)
+  desarrolloRef       Desarrollo          @relation(fields: [desarrollo], references: [codigo], onDelete: Restrict, onUpdate: Cascade)
   patron              String?             @db.VarChar(60)
   descripcion         String              @db.VarChar(250)
   tamano              String?             @db.VarChar(60)
   deporte             String?             @db.VarChar(60)
   idCliente           Int?                @map("id_cliente")
   precioVenta         Decimal             @default(0) @map("precio_venta") @db.Decimal(12, 2)
-  /// ⚠️ LEGACY — ya no son autoritativos. La mano de obra vive en
-  /// Desarrollo.minutosMo / .costoMoMinuto desde 2026-08-26. Se conservan solo
-  /// para no romper a 01_erp, que los lee y escribe.
+  /// ⚠️ LEGACY — no son autoritativos: la mano de obra vive en
+  /// Desarrollo.minutosMo / .costoMoMinuto desde 2026-08-26, y nada las lee ni
+  /// las escribe desde que se apagó 01_erp. Quedan como columnas muertas; se
+  /// pueden borrar en una migración aparte cuando convenga.
   minutosMo           Decimal             @default(0) @map("minutos_mo") @db.Decimal(10, 2)
   costoMoMinuto       Decimal             @default(0.33) @map("costo_mo_minuto") @db.Decimal(10, 4)
   activo              Boolean             @default(true)
   creadoEn            DateTime            @default(now()) @map("creado_en") @db.Timestamptz(6)
   detalleCotizaciones CotizacionDetalle[]
-  productoInsumos     ProductoInsumo[]
   cliente             Cliente?            @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
 
   /// Relaciones inversas del módulo Costeo Real (costeo.prisma).
@@ -292,6 +280,10 @@ model Desarrollo {
   cliente   Cliente?           @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
   tallaBase Talla?             @relation(fields: [idTallaBase], references: [idTalla], onDelete: NoAction, onUpdate: NoAction)
   insumos   DesarrolloInsumo[]
+  /// 1:1 real: productos.desarrollo es UNIQUE, así que a lo sumo hay uno.
+  /// Prisma lo modela como lista porque la FK apunta a un campo @unique que no
+  /// es la PK; la unicidad la garantiza la base.
+  productos Producto[]
 
   @@index([estado], map: "idx_desarrollo_estado")
   @@index([idCliente], map: "idx_desarrollo_cliente")

@@ -580,7 +580,9 @@ export class ProductosService {
         );
       if (nuevo !== anterior.desarrollo)
         await this.exigirDesarrolloAsignable(nuevo, id);
-      data.desarrollo = nuevo;
+      // Desde la FK (2026-08-31) esto es una relación, no un escalar: Prisma
+      // pide connect. La base ya rechaza un código inexistente por sí sola.
+      data.desarrolloRef = { connect: { codigo: nuevo } };
     }
 
     try {
@@ -701,7 +703,7 @@ export class ProductosService {
     const desarrollosExistentes = new Set(
       existentes
         .filter((e) => e.desarrollo)
-        .map((e) => e.desarrollo!.trim().toLowerCase()),
+        .map((e) => e.desarrollo.trim().toLowerCase()),
     );
     // Catálogo de desarrollos para resolver la columna del Excel. Como no hay
     // FK, esto es lo único que impide importar productos apuntando a

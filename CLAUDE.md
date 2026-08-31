@@ -4,8 +4,9 @@
 ERP completo nuevo para Digital Textil, S.A. (Digitexsa), Guatemala — fabricante de uniformes
 deportivos. Reemplaza gradualmente al sistema actual (`01_erp`, en
 `C:\Users\PETER\Documents\Jmox\01_erp`), que sigue funcionando 100% intacto y en producción
-mientras tanto. **No se toca `01_erp` bajo ninguna circunstancia hasta el corte final (Fase 5),
-cuando TODOS los módulos de este ERP nuevo estén completos** — no solo el módulo `recetas`.
+mientras tanto. **`01_erp` quedó fuera de servicio el 2026-08-31** (ver "Baja de `01_erp`" más
+abajo): resultó ser estrictamente un subconjunto del ERP nuevo, sin autenticación y sin usuarios
+reales, así que el corte se adelantó en vez de esperar a la Fase 5.
 
 Repo independiente en `C:\dev\digitexsa-erp` (fuera de `Jmox`, que está sincronizado por Google
 Drive for Desktop — un monorepo pnpm+Turborepo genera demasiados archivos para sincronizar ahí
@@ -932,8 +933,8 @@ para una producción en masa"*. Plan completo en `C:\Users\PETER\.claude\plans\s
   1195, edición 1232, y sus dos imports masivos 1380 y 1900). La confirmación del usuario ("ya no
   usamos `01_erp` para recetas") cubría la *edición de recetas*, que es otra pantalla. Poner la FK
   habría roto esos 4 endpoints con `23503`. La integridad la impone el backend nuevo
-  (`exigirDesarrolloAsignable()`); agregar la FK cuando `01_erp` se apague en Fase 5 es una
-  migración de una línea. Documentado con comentario en el schema para que nadie lo "arregle" sin
+  (`exigirDesarrolloAsignable()`). **La FK se agregó el 2026-08-31** al apagar `01_erp` — ver
+  "Baja de `01_erp`" más abajo. Documentado con comentario en el schema para que nadie lo "arregle" sin
   conocer el motivo.
 - **Migración** `20260826120000_desarrollos_duenos_de_receta` (+ su `rollback.sql`), escrita a mano
   como siempre y aplicada con `migrate deploy`: crea `recetas.desarrollos` y
@@ -1088,6 +1089,75 @@ para una producción en masa"*. Plan completo en `C:\Users\PETER\.claude\plans\s
   como "no tocar sin confirmar" — habría que borrarlos o darles un desarrollo. Ningún producto real
   quedó huérfano.
 
+## Baja de `01_erp` (el ERP legacy) — 2026-08-31
+
+`01_erp` quedó **fuera de servicio**, adelantando el corte que el roadmap ponía en Fase 5. El
+usuario lo confirmó tras verificar tres cosas:
+
+- **Es estrictamente un subconjunto**: sus ~40 endpoints son todos de Recetas (insumos, productos,
+  recetas, cotizaciones, tipo de cambio y catálogos de referencia). Cada uno tiene equivalente en el
+  ERP nuevo desde que se completó la Fase 2.
+- **No tiene autenticación.** Cero: sus dependencias son `express` y `pg`, sin JWT, sesiones ni
+  login. Era una app sin ninguna autenticación, en la red interna, escribiendo sobre las mismas
+  tablas que el ERP nuevo protege con RBAC — un camino de escritura que no se podía cerrar desde el
+  ERP nuevo mientras siguiera encendida. Este resultó ser el argumento más fuerte para no esperar.
+- **Nunca tuvo usuarios reales** (confirmado por el usuario: "eran pruebas y nadie lo usa"). El
+  roadmap ataba el corte a "todos los módulos completos", premisa que solo tenía sentido si el
+  legacy cubría algo que el ERP nuevo todavía no.
+
+**Lo que NO se toca**: el schema `recetas` y sus datos siguen intactos, y
+`recetas.fn_siguiente_folio()` se queda — el ERP nuevo la usa para el folio de las cotizaciones.
+"Eliminar `01_erp`" es apagar la app y borrar su repositorio, no la base.
+
+### Migración `20260831120000_fk_desarrollo_y_baja_de_legacy` (+ su `rollback.sql`)
+
+Cierra las tres cosas que habían quedado a medias solo por el acoplamiento con el legacy:
+
+1. **FK real `productos.desarrollo -> desarrollos.codigo`**, con `NOT NULL`, `ON UPDATE CASCADE` y
+   `ON DELETE RESTRICT`. Antes era imposible porque `01_erp` escribía esa columna como texto libre en
+   4 endpoints y la FK los habría roto con `23503`. Precondición verificada antes de aplicar: 1,285
+   productos, 0 con desarrollo NULL, 0 apuntando a un código inexistente.
+2. **`v_producto_costo` sin `COALESCE`**, con `JOIN` en vez de `LEFT JOIN`. Con la FK todo producto
+   resuelve a exactamente un desarrollo, así que el invariante de una fila por producto (el que
+   `productos.service.ts` necesita para su `JOIN`) se conserva sin inventar un 0. **Esto cierra de
+   raíz el hallazgo de code review del Q0 silencioso**: un desarrollo inexistente hacía que el
+   producto apareciera en el catálogo con Costo Q0.00 sin ninguna señal, y ese costo se propagaba a
+   las cotizaciones nuevas como margen del 100%. Ahora la base lo rechaza.
+3. **`DROP TABLE recetas.producto_insumos`** — congelada desde el refactor de desarrollos, existía
+   solo como red de seguridad para el legacy. El `rollback.sql` la recrea vacía y deja comentada la
+   consulta para repoblarla desde `desarrollo_insumos` si hiciera falta.
+
+Verificado tras aplicar: 1,285 productos = 1,285 filas de vista, los 4 costos reales idénticos
+(128.9588 / 47.0583 / 44.7118 / 98.8343), y la FK rechazando tanto un desarrollo inexistente como el
+borrado de un desarrollo que tiene producto. Respaldo `pg_dump --schema=recetas` tomado antes.
+
+### Cambios de código que habilitó
+
+- **Prisma**: se eliminó el modelo `ProductoInsumo` y sus relaciones inversas;
+  `Producto.desarrollo` pasó a `String` (no `String?`) con una `@relation` real hacia
+  `Desarrollo.codigo`, más la inversa `Desarrollo.productos`. Prisma la modela como lista porque la
+  FK apunta a un campo `@unique` que no es la PK; la unicidad (el 1:1) la garantiza la base.
+- `productos.editar()` ahora escribe el desarrollo con `desarrolloRef: { connect: { codigo } }` —
+  con la relación, Prisma ya no acepta el escalar en un `update`.
+- `Producto.minutosMo` / `costoMoMinuto` quedan como columnas **muertas**: nada las lee ni las
+  escribe desde el apagado del legacy. Se pueden borrar en una migración aparte cuando convenga.
+
+### Pendiente en el servidor (NO ejecutado por Claude)
+
+El trabajo de código está hecho y commiteado, pero **el corte en producción sigue pendiente** y debe
+hacerse en este orden:
+
+1. `git push` y desplegar el ERP nuevo con este refactor — producción todavía corre la versión
+   anterior. **Antes: `pg_dump --schema=recetas` en el servidor** (la migración cambia una vista que
+   el legacy lee en vivo).
+2. Validar Recetas completo desde el ERP nuevo en producción.
+3. Recién entonces: `pm2 delete erpapp`, repuntar Nginx (hoy `/` es un catch-all hacia `:3000`;
+   puede pasar a servir el ERP nuevo directamente) y borrar el repositorio de `01_erp`.
+
+Mientras el paso 3 no ocurra, `01_erp` sigue encendido y la FK **lo va a romper** en sus 4 endpoints
+de alta/edición de productos. Eso es aceptable y esperado — nadie lo usa — pero conviene saberlo
+para no diagnosticarlo como un bug nuevo.
+
 ## Convenciones heredadas de `recetas` (aplican a TODO el ERP, no solo a ese módulo)
 `recetas` (Fase 2, ya migrado y committeado) es el módulo de referencia — cualquier módulo nuevo
 debería parecerse a su estructura y respetar las mismas reglas:
@@ -1164,8 +1234,8 @@ minúscula plural.
   decisión de negocio pendiente, diseñar tolerante a asincronía con BullMQ/Redis). **Siguiente
   fase a iniciar.**
 - **Fase 4** — RRHH, Producción, Reportes.
-- **Fase 5** — corte final: solo cuando TODOS los módulos anteriores estén completos y validados,
-  apagar `01_erp` y **borrar su repositorio** (no archivar).
+- **Fase 5** — ~~corte final del legacy~~ **adelantado y ejecutado el 2026-08-31**, ver abajo. Lo
+  que queda de esta fase es el cierre formal del proyecto, no el apagado de `01_erp`.
 
 ## Flujo de trabajo
 - Cambios pequeños y verificables; probar en local (curl + Playwright para UI) antes de dar por

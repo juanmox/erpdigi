@@ -268,7 +268,11 @@ export function TabProductos() {
                 <TableCell className="break-words whitespace-normal">{p.descripcion}</TableCell>
                 <TableCell className="break-words whitespace-normal">
                   {/* La receta vive en el desarrollo: desde acá se abre en
-                      solo lectura, sin devolverle la edición al producto. */}
+                      solo lectura, sin devolverle la edición al producto.
+                      Sigue resolviéndose por código y no por id porque el
+                      listado devuelve el código; la FK (2026-08-31) garantiza
+                      que siempre exista, así que el caso "no encontrado" ya
+                      solo puede darse por una carrera, no por datos sucios. */}
                   {p.desarrollo ? (
                     <button
                       type="button"
