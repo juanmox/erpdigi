@@ -196,7 +196,7 @@ export function TabInsumos() {
                 {filas.map((i) => (
                   <TableRow key={i.idInsumo}>
                     <TableCell className="font-medium">{i.codigo}</TableCell>
-                    <TableCell className="whitespace-normal">{i.descripcion}</TableCell>
+                    <TableCell className="max-w-xs whitespace-normal">{i.descripcion}</TableCell>
                     <TableCell>{i.unidad}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatGTQ(i.costoPromedio)}</TableCell>
                     <TableCell>
@@ -243,7 +243,7 @@ export function TabInsumos() {
         onDescargarPlantilla={() => catalogoApi.plantillaAltaInsumos()}
         columnas={[
           { key: 'codigo', header: 'Código', render: (f) => f.codigo },
-          { key: 'descripcion', header: 'Descripción', className: 'whitespace-normal', render: (f) => f.descripcion },
+          { key: 'descripcion', header: 'Descripción', className: 'max-w-xs whitespace-normal', render: (f) => f.descripcion },
           { key: 'categoria', header: 'Categoría', render: (f) => f.categoria },
           { key: 'unidad', header: 'Unidad', render: (f) => f.unidad },
           {

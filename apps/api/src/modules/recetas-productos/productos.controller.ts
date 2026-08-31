@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -18,10 +17,6 @@ import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CambiarActivoProductoDto } from './dto/cambiar-activo-producto.dto';
 import { CrearProductoDto } from './dto/crear-producto.dto';
 import { EditarProductoDto } from './dto/editar-producto.dto';
-import {
-  AgregarLineaRecetaDto,
-  EditarLineaRecetaDto,
-} from './dto/linea-receta.dto';
 import { ListarProductosDto } from './dto/listar-productos.dto';
 import { ProductosService } from './productos.service';
 
@@ -34,8 +29,6 @@ interface AltaProductoBody {
   tamano?: string | null;
   deporte?: string | null;
   precioVenta?: number;
-  minutosMo?: number;
-  costoMoMinuto?: number;
 }
 
 @Controller('recetas')
@@ -81,21 +74,6 @@ export class ProductosController {
     res.setHeader(
       'Content-Disposition',
       'attachment; filename="plantilla_alta_productos.xlsx"',
-    );
-    res.send(buffer);
-  }
-
-  @RequirePermissions('recetas.importar')
-  @Get('recetas-plantilla')
-  async plantillaRecetas(@Res() res: Response) {
-    const buffer = await this.productosService.plantillaRecetas();
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="plantilla_recetas.xlsx"',
     );
     res.send(buffer);
   }
@@ -148,91 +126,16 @@ export class ProductosController {
   }
 
   // ---------- Líneas de receta ----------
+  //
+  // ELIMINADAS (2026-08-26). La receta ya no pertenece al Producto sino a su
+  // Desarrollo: ver recetas-desarrollos/desarrollos.controller.ts
+  // (GET/POST/PATCH/DELETE /recetas/desarrollos/:id/insumos).
+  // Dejarlas vivas habría sido peor que borrarlas: seguirían escribiendo en
+  // recetas.producto_insumos, que quedó congelada y que ya nadie lee para
+  // calcular costos — pérdida silenciosa de datos.
 
-  @RequirePermissions('recetas.catalogo.ver')
-  @Get('productos/:id/insumos')
-  listarLineasReceta(@Param('id', ParseIntPipe) id: number) {
-    return this.productosService.listarLineasReceta(id);
-  }
-
-  @RequirePermissions('recetas.recetas.editar')
-  @Post('productos/:id/insumos')
-  agregarLineaReceta(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: AgregarLineaRecetaDto,
-    @CurrentUser() usuario: JwtPayload,
-  ) {
-    return this.productosService.agregarLineaReceta(id, dto, usuario.sub);
-  }
-
-  @RequirePermissions('recetas.recetas.editar')
-  @Patch('productos/:id/insumos/:idLinea')
-  editarLineaReceta(
-    @Param('id', ParseIntPipe) id: number,
-    @Param('idLinea', ParseIntPipe) idLinea: number,
-    @Body() dto: EditarLineaRecetaDto,
-    @CurrentUser() usuario: JwtPayload,
-  ) {
-    return this.productosService.editarLineaReceta(
-      id,
-      idLinea,
-      dto,
-      usuario.sub,
-    );
-  }
-
-  @RequirePermissions('recetas.recetas.editar')
-  @Delete('productos/:id/insumos/:idLinea')
-  eliminarLineaReceta(
-    @Param('id', ParseIntPipe) id: number,
-    @Param('idLinea', ParseIntPipe) idLinea: number,
-    @CurrentUser() usuario: JwtPayload,
-  ) {
-    return this.productosService.eliminarLineaReceta(id, idLinea, usuario.sub);
-  }
-
-  @RequirePermissions('recetas.importar')
-  @Get('productos/:id/receta/exportar-plantilla')
-  async exportarPlantillaReceta(
-    @Param('id', ParseIntPipe) id: number,
-    @Res() res: Response,
-  ) {
-    const { buffer, codigo } =
-      await this.productosService.exportarPlantillaReceta(id);
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="receta_${codigo}.xlsx"`,
-    );
-    res.send(buffer);
-  }
-
-  @RequirePermissions('recetas.importar')
-  @Post('importar-recetas/preview')
-  previewImportarRecetas(@Req() req: Request) {
-    return this.productosService.previewImportarRecetas(req.body as Buffer);
-  }
-
-  @RequirePermissions('recetas.importar')
-  @Post('importar-recetas/aplicar')
-  aplicarImportarRecetas(
-    @Body('productos') productos: AltaProductoBody[],
-    @Body('receta')
-    receta: {
-      productoCodigo: string;
-      insumoCodigo: string;
-      consumo: number;
-      area?: string | null;
-    }[],
-    @CurrentUser() usuario: JwtPayload,
-  ) {
-    return this.productosService.aplicarImportarRecetas(
-      productos,
-      receta,
-      usuario.sub,
-    );
-  }
+  // ELIMINADA (2026-08-26): exportar-plantilla armaba su hoja "Receta" desde
+  // recetas.producto_insumos, congelada al mudar el BOM al Desarrollo —
+  // entregaba la receta VIEJA y al re-importarse escribía en la tabla muerta.
+  // Vuelve como "exportar desarrollo" al convertir el flujo (plan, sección F).
 }

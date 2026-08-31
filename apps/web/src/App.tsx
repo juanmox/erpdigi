@@ -79,7 +79,15 @@ function App() {
               path="catalogo"
               element={
                 <RutaConPermiso
-                  permisos={['recetas.insumos.editar', 'recetas.productos.editar', 'recetas.importar']}
+                  permisos={[
+                    'recetas.insumos.editar',
+                    'recetas.productos.editar',
+                    // Un rol que solo pudiera diseñar desarrollos llegaba a la
+                    // API pero nunca a la pantalla que la usa.
+                    'recetas.desarrollos.editar',
+                    'recetas.recetas.editar',
+                    'recetas.importar',
+                  ]}
                 >
                   <CatalogoPage />
                 </RutaConPermiso>

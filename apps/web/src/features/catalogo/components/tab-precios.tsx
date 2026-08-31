@@ -178,7 +178,7 @@ export function TabPrecios() {
                 {filas.map((i) => (
                   <TableRow key={i.idInsumo}>
                     <TableCell className="font-medium">{i.codigo}</TableCell>
-                    <TableCell className="whitespace-normal">{i.descripcion}</TableCell>
+                    <TableCell className="max-w-xs whitespace-normal">{i.descripcion}</TableCell>
                     <TableCell>{i.unidad}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatGTQ(i.costoPromedio)}</TableCell>
                     <TableCell className="text-right">
@@ -213,7 +213,7 @@ export function TabPrecios() {
         onDescargarPlantilla={() => catalogoApi.plantillaPrecios()}
         columnas={[
           { key: 'codigo', header: 'Código', render: (f) => f.codigo },
-          { key: 'descripcion', header: 'Descripción', className: 'whitespace-normal', render: (f) => f.descripcion ?? '—' },
+          { key: 'descripcion', header: 'Descripción', className: 'max-w-xs whitespace-normal', render: (f) => f.descripcion ?? '—' },
           {
             key: 'actual',
             header: 'Costo actual',

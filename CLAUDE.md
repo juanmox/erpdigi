@@ -606,6 +606,63 @@ una** — no avanzar por iniciativa propia.
     navegador** (Playwright/automatización de navegador seguía sin estar disponible en esta
     sesión) — falta una pasada manual del usuario confirmando que los filtros se ven y funcionan
     bien en pantalla.
+  - **Bug real: límite de tamaño de body JSON, encontrado con un import real de 1,281 altas de
+    productos** — al hacer clic en "Aplicar", el usuario recibía `request entity too large` (413).
+    Causa: `main.ts` solo ampliaba el límite de body (`express.raw`, 5mb) en las 6 rutas de subida
+    de Excel (`RUTAS_IMPORT_EXCEL`) — el resto de la API, incluidos **todos** los endpoints
+    "aplicar"/"altas" de todos los imports del proyecto (no solo productos), seguía con el límite
+    **por defecto de Express de 100kb** para JSON normal, nunca se había topado porque ningún import
+    anterior había tenido tantas filas a la vez. Corregido pasando `{ bodyParser: false }` a
+    `NestFactory.create()` y registrando `express.json()`/`express.urlencoded()` propios con límite
+    de 20mb. **Este primer arreglo rompió la subida real de Excel** (segundo bug encontrado
+    probando en el navegador, no con curl): el registro inicial ponía los parsers JSON globales
+    *antes* que las rutas raw de Excel, asumiendo — incorrectamente, ver más abajo — que el orden
+    no importaba porque "los parsers JSON solo actúan sobre `Content-Type: application/json`,
+    las subidas de Excel usan otro content-type". Eso resultó falso: `apiFetch` (`apps/web/src/
+    lib/api.ts`) forzaba `Content-Type: application/json` en *cualquier* body que no fuera
+    `FormData` — incluido el `File` crudo de una subida de Excel — así que el parser JSON global
+    consumía el binario del .xlsx y tiraba `Unexpected token 'P' ... is not valid JSON` ("PK" son
+    los bytes mágicos de un .xlsx, que es un ZIP). Corregido en dos frentes: (1) `apiFetch` ahora
+    tampoco fuerza el content-type cuando el body es un `Blob`/`File` (antes solo excluía
+    `FormData`); (2) en `main.ts`, las rutas raw de Excel se registran *antes* que los parsers JSON
+    globales, para que la coincidencia sea por ruta y no dependa de qué content-type mande el
+    cliente — defensa en profundidad, no solo el fix del cliente. Verificado con curl: un POST de
+    ~285KB sin token dio 401 (no 413, confirma que el tamaño ya no rechaza antes de llegar al guard
+    de autenticación); reproduciendo el bug exacto (el .xlsx real de la plantilla, con
+    `Content-Type: application/json` a propósito, igual que mandaba el navegador) el preview
+    respondió 201 con las filas leídas correctamente, no el error de JSON; y un login normal con
+    JSON chico siguió funcionando. Usuario de prueba borrado al terminar.
+  - **Descripciones largas empujaban la tabla de Productos fuera de la pantalla**, reportado por el
+    usuario tras importar los ~1,281 productos reales: la columna Descripción ya tenía
+    `whitespace-normal` (el wrap sí estaba activo, visible en pantalla), pero sin un ancho máximo —
+    con `table-layout: auto` (el default), una descripción larga seguía empujando el ancho total de
+    la tabla hasta sacar la columna "Acciones" de la vista, sin que el scroll horizontal disponible
+    fuera evidente. Corregido agregando `max-w-xs` junto a `whitespace-normal` en
+    `tab-productos.tsx` (tabla real + diálogo de import). El usuario pidió aplicar la misma
+    corrección al resto de columnas de descripción con el mismo patrón dentro de Gestión de datos:
+    `tab-insumos.tsx` (tabla real + diálogo de import), `tab-precios.tsx` (tabla real + diálogo de
+    import), `modal-import-recetas.tsx` (descripción de producto — no se tocó `insumoCodigo` de esa
+    misma tabla, es un código corto, no una descripción larga), `modal-receta.tsx`. Encontrado el
+    mismo patrón también en Costeo (`costeo-estandar`, `costeo-ordenes`, `costeo-reposiciones`) y en
+    Cotización de Recetas (`card-receta.tsx`, `carrito-acumulados.tsx`, `modal-resumen.tsx`) — no se
+    tocaron, quedan fuera de lo reportado (Gestión de datos), pendiente si el usuario lo pide ahí
+    también.
+  - **`max-w-xs` solo en Descripción dejó la tabla de Productos desbalanceada** (reportado de
+    inmediato tras el punto anterior): Descripción quedó muy angosta, mientras que Cliente —sin
+    ningún límite— seguía muy ancha, y las columnas de la derecha (Estado/Acciones) seguían sin
+    verse completas. El usuario preguntó por ajuste manual de ancho por columna (tipo hoja de
+    cálculo) — es una funcionalidad real de construir (manijas de arrastre + estado por columna, no
+    existe en el componente `Table` de shadcn que usa el proyecto), no un cambio chico; se dejó
+    pendiente para pedirla aparte si hiciera falta. En su lugar, en `tab-productos.tsx` se pasó la
+    tabla a `table-layout: fixed` (`className="table-fixed"` en `<Table>`) con un ancho fijo
+    explícito por columna en cada `<TableHead>` (`w-28` Código, `w-96` Descripción, `w-48` Cliente,
+    `w-16` Talla, `w-24` Deporte/Costo/Estado, `w-28` Precio venta, `w-56` Acciones) — con
+    `table-layout: fixed` el ancho de cada columna ya no depende de "lo que el navegador decida
+    según el contenido", se respeta el asignado y el contenido envuelve (`whitespace-normal`,
+    agregado también a Cliente) o se trunca con elipsis (`truncate`, en Código y Deporte, que no
+    necesitan varias líneas) dentro de ese ancho. Solo se aplicó en `tab-productos.tsx` — es la
+    única tabla de Gestión de datos con Cliente/Talla/Deporte, las demás (Insumos, Precios) tienen
+    menos columnas y no fueron reportadas con este problema; mismo criterio si se pide ahí después.
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
@@ -854,6 +911,182 @@ sin i18n (todo en español).
       queda igual a propósito — cambiarlo en el `upsert` por `codigo` habría creado un rol nuevo en
       vez de renombrar el existente, dejando huérfanas las asignaciones ya hechas a usuarios reales
       de prueba). Refleja mejor que el alcance real del rol es solo la pantalla de Reposiciones.
+
+## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
+Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era
+apenas una columna de texto libre en `recetas.productos`. Eso invertía el proceso real de la
+fábrica: primero se crea un **Desarrollo** (el prototipo, con todos sus insumos), se costea, se
+aprueba, y recién entonces se convierte en un Producto vendible. El usuario lo planteó así: *"una vez
+creado un desarrollo y autorizado podemos asignarlo a un producto… el desarrollo será el prototipo
+para una producción en masa"*. Plan completo en `C:\Users\PETER\.claude\plans\serene-popping-lemur.md`.
+
+- **Decisiones tomadas con el usuario**: el desarrollo es dueño **permanente** de la receta (antes y
+  después de aprobar); estados `BORRADOR` → `APROBADO` (dos, sin revisión intermedia); la **mano de
+  obra se muda al desarrollo** (`minutosMo`/`costoMoMinuto`); Desarrollo ↔ Producto es **1:1**;
+  la pantalla es una **pestaña nueva en Gestión de datos**; asignar desarrollo a un producto es
+  **obligatorio y solo si está aprobado**; el desarrollo registra su **talla base**; `EDITOR` y
+  `ADMIN` pueden aprobar.
+- **⚠️ Sin llave foránea `productos.desarrollo → desarrollos.codigo`, a propósito.** Un agente de
+  planificación afirmó que `01_erp` solo *leía* esa columna; verificándolo a mano contra
+  `01_erp/app.js` resultó que también la **escribe** como texto libre en 4 lugares (alta de producto
+  1195, edición 1232, y sus dos imports masivos 1380 y 1900). La confirmación del usuario ("ya no
+  usamos `01_erp` para recetas") cubría la *edición de recetas*, que es otra pantalla. Poner la FK
+  habría roto esos 4 endpoints con `23503`. La integridad la impone el backend nuevo
+  (`exigirDesarrolloAsignable()`); agregar la FK cuando `01_erp` se apague en Fase 5 es una
+  migración de una línea. Documentado con comentario en el schema para que nadie lo "arregle" sin
+  conocer el motivo.
+- **Migración** `20260826120000_desarrollos_duenos_de_receta` (+ su `rollback.sql`), escrita a mano
+  como siempre y aplicada con `migrate deploy`: crea `recetas.desarrollos` y
+  `recetas.desarrollo_insumos`, backfillea **1,285 desarrollos** (uno por cada `productos.desarrollo`
+  distinto, todos `APROBADO`, con `id_talla_base` resuelto por `LEFT JOIN` contra `recetas.tallas` —
+  los 1,285 resuelven) y copia **47 de las 49** líneas de `producto_insumos` (las otras 2 son de
+  `TEST-BULK-01`, que tiene receta pero no desarrollo), con un bloque `DO $$` que aborta si
+  `copiadas + huérfanas ≠ origen`.
+  - `desarrollo_insumos` usa `UNIQUE ... NULLS NOT DISTINCT (id_desarrollo, id_insumo, id_area)`,
+    que **corrige de origen** un bug latente heredado de `producto_insumos`: ahí, con `NULLS
+    DISTINCT`, se puede insertar dos veces el mismo insumo sin área y el `ON CONFLICT` nunca dispara.
+  - **Dos vistas en vez de una**: `v_desarrollo_costo` (fuente única del costo de un prototipo) y
+    `v_producto_costo` redefinida encima con `CREATE OR REPLACE` — mismas 6 columnas, mismo orden y
+    mismos tipos, que es lo que mantiene a `01_erp` leyendo sin romperse. **Invariante que no se
+    puede romper**: `v_producto_costo` debe devolver exactamente una fila por producto, incluidos
+    los que no tienen desarrollo, porque `productos.service.ts` hace `JOIN` (no `LEFT JOIN`) contra
+    ella — un producto que perdiera su fila desaparecería del catálogo sin ningún error visible. Por
+    eso el `FROM` sigue siendo `recetas.productos` con `LEFT JOIN`s.
+  - `recetas.producto_insumos` **no se toca**: queda congelada como respaldo, como red de seguridad
+    para `01_erp` y como lo que hace posible el rollback.
+- **Backend**: módulo nuevo `apps/api/src/modules/recetas-desarrollos/` (`desarrollos.service.ts` —
+  listar/obtener/crear/editar/aprobar/reabrir + los 4 métodos de BOM re-parentados desde
+  `productos.service.ts`; `desarrollos-import.service.ts` — plantilla/preview/aplicar). Reglas de
+  negocio server-side: aprobar exige al menos una línea de insumo; **reabrir** se rechaza (409) si su
+  producto está activo; el costo se lee siempre de `v_desarrollo_costo`, nunca se suma en el cliente.
+  En `recetas-productos`, `crear()` y `editar()` exigen un desarrollo que exista, esté `APROBADO`,
+  activo y libre; los 4 métodos de BOM y sus rutas se eliminaron.
+- **Bug latente corregido de paso**: `editar()` usaba `EditarProductoDto = PartialType(...)` con
+  `desarrollo: dto.desarrollo?.trim() || null`, así que un `PATCH` parcial que **omitiera** el campo
+  lo ponía en `NULL` — ya venía desasignando el desarrollo (y el cliente, el patrón, la talla y el
+  deporte) en silencio. Ahora solo se escribe lo que de verdad vino.
+- **Import masivo**: el flujo combinado "Productos + Receta" quedó fuera de servicio (escribía el BOM
+  en la tabla congelada) y se reemplazó por **"Importar desarrollos"** — hoja "Desarrollos"
+  (código·descripción·cliente·talla base·minutos MO·costo MO/min·notas) + hoja "Insumos"
+  (desarrollo·insumo·consumo·área) + hoja "Referencias". Mismo preámbulo de 4 filas que el resto
+  (`FILA_INICIO_DATOS = 5`). El import de **altas de productos** sigue existiendo: su columna
+  Desarrollo se resuelve contra `recetas.desarrollos` y una fila con desarrollo inexistente, inactivo
+  o sin aprobar queda pendiente con error explícito. Las columnas "Minutos MO"/"Costo MO/min" de esa
+  plantilla se conservaron (para que los archivos ya armados sigan cargando) pero se rotularon
+  **(ignorado)** y ya no se escriben.
+- **Hueco real cerrado**: `altas()` (el "aplicar" del import de productos) confiaba en las filas que
+  mandaba el cliente — el preview corre en el frontend y no obliga a nada, así que un POST directo
+  podía crear productos apuntando a desarrollos inexistentes o sin aprobar. Ahora revalida
+  server-side contra el catálogo y usa el código canónico del catálogo al insertar, no el del Excel
+  (una diferencia de mayúsculas ya no crea un desarrollo "distinto").
+- **Permisos**: `recetas.desarrollos.crear` / `.editar` / `.aprobar`, nuevos, a `EDITOR` y `ADMIN`.
+  `recetas.recetas.editar` **se conserva** (no se retiró como decía el plan original): sigue gateando
+  las líneas de receta, que ahora viven en el desarrollo — el nombre por fin es literal. Lectura vía
+  `recetas.catalogo.ver`, sin permiso nuevo. Los guards de `/catalogo` (`App.tsx`) y del botón
+  "Gestión de datos" (`cotizacion-page.tsx`) se ampliaron para incluir los permisos de desarrollo.
+- **Frontend**: `catalogo-page.tsx` pasa a 4 pestañas en el orden real del proceso — Precios de
+  insumos · Insumos · **Desarrollos** · Productos. Nuevos `components/tab-desarrollos.tsx`,
+  `modal-desarrollo.tsx`, `modal-receta-desarrollo.tsx` (el editor de BOM, con columnas C.Prom /
+  C.Total, subtotal por categoría y costo unitario al pie — lo que el usuario pidió: "insumos por
+  categoría para determinar el costo") y `modal-import-desarrollos.tsx`. Eliminados `modal-receta.tsx`
+  y `modal-import-recetas.tsx`. En Productos: se fue el botón "Receta", entró una columna Desarrollo
+  clickeable que abre la receta **en solo lectura**, y el campo Desarrollo de `modal-producto.tsx`
+  dejó de ser texto libre — ahora es un `AutocompleteBuscador` limitado a aprobados y libres, y es
+  obligatorio; los inputs de mano de obra se fueron (viven en el desarrollo).
+- **Bug de invalidación corregido**: el editor de receta viejo invalidaba solo `['catalogo','receta',
+  id]`, nunca `['catalogo','productos']`, así que la columna Costo quedaba con el valor viejo. El
+  editor nuevo invalida receta + desarrollos + productos.
+- **Verificación**: typecheck y lint limpios en ambos paquetes. **Paridad exacta de costos confirmada
+  post-migración** contra la línea base de los 4 productos reales (BSN-FB01N 128.9588, BSN-FB02NB
+  47.0583, BSN-YFB02NB 44.7118, BSN-FB01ESPN 98.8343 — idénticos), más el invariante
+  `count(productos) = count(v_producto_costo)` = 1,287. Probado end-to-end con curl usando dos
+  usuarios de prueba desechables (ADMIN y BODEGUERO, creados y borrados en la misma sesión):
+  plantilla (200), preview que arranca en la fila 5 y marca los 6 casos de error (código duplicado,
+  cliente inexistente, insumo repetido para el mismo desarrollo+área, consumo negativo, desarrollo
+  inexistente, insumo inexistente), aplicar solo las válidas, re-import detectando los ya existentes,
+  costo del desarrollo verificado a mano contra SQL, aprobar sin insumos (400) → aprobar (201),
+  crear producto sin desarrollo / con BORRADOR / con inexistente / con uno ya tomado (los 4
+  rechazados) → con el aprobado (OK), receta y mano de obra del producto heredadas del desarrollo,
+  reabrir con producto activo (rechazo) → desactivar → reabrir (OK), altas masivas con desarrollo sin
+  aprobar y sin desarrollo (ambas rechazadas), import de líneas hacia un desarrollo ya existente,
+  403 en las 4 rutas con un rol sin permiso, 401 sin token, y una cotización completa de punta a
+  punta (total 1,289.588 = 128.9588 × 10, snapshot de 11 líneas armado desde el desarrollo; las
+  cotizaciones viejas siguen devolviendo `fuente: 'snapshot'` y la más antigua sigue resolviendo por
+  el fallback `receta_actual`). Toda la data de prueba borrada al terminar — la base volvió a
+  1,287 productos / 1,287 filas de vista / 1,285 desarrollos / 47 líneas de BOM.
+  **Verificado en navegador** en la sesión del 2026-08-31, cuando Playwright pasó a estar disponible (ver más abajo). Queda una
+  pasada manual del usuario por las 4 pestañas antes de darlo por cerrado.
+- **Playwright ya está disponible (2026-08-31)** — `playwright` es devDependency de la raíz y los
+  navegadores ya estaban en cache (`~/AppData/Local/ms-playwright`). Las notas de fases anteriores
+  que dicen "no verificado en navegador, Playwright no disponible" son de sesiones previas: hoy sí
+  se puede verificar visualmente, y conviene hacerlo antes de dar por cerrada cualquier pantalla.
+- **Cuatro hallazgos de UI del usuario sobre la pestaña Desarrollos/Productos, corregidos y
+  verificados en navegador**:
+  1. **Tablas más anchas que la ventana**: `table-fixed` con anchos en rem sumaba ~1,424px, más que
+     una ventana normal con el sidebar abierto, y las columnas de la derecha quedaban fuera de vista
+     sin que el scroll horizontal fuera evidente. Pasadas a **porcentajes** (`w-[8%]`…) con
+     `min-w-[860px]`: la tabla siempre entra y el texto crece hacia abajo. De paso se encontraron dos
+     defectos no reportados: el badge de Estado se solapaba con el botón Editar, y los nombres de
+     cliente de una sola palabra (`DALLASWEAR/WAITRESSVILLE`) se desbordaban pisando columnas
+     vecinas — `whitespace-normal` no parte palabras, hacía falta `break-words`.
+  2. **Filtros**: Productos ganó Cliente/Deporte/Talla (+ "Limpiar filtros") y Desarrollos ganó
+     Cliente. Las opciones se derivan de las filas ya cargadas, no de endpoints nuevos.
+  3. **Buscador de insumos de la receta**: devolvía `[]` con el texto vacío, así que al enfocarlo no
+     se veía más que el placeholder y había que adivinar un código. Ahora lista el catálogo desde el
+     foco, con filtro por Categoría y mostrando costo/unidad por opción.
+  4. **Botón "Colapsar panel" invisible en páginas largas**: el `<nav>` crecía con el alto del
+     contenido, así que `mt-auto` lo empujaba al final. El sidebar pasó a `sticky top-0 h-svh
+     overflow-y-auto`.
+- **`AutocompleteBuscador` ahora se renderiza en un portal — y el primer intento fue un bug propio.**
+  La lista era hija `absolute` del input, así que la recortaba cualquier ancestro con overflow (el
+  `DialogContent` tiene `overflow-y-auto`; un `Card` de shadcn trae `overflow-hidden`). Un primer
+  arreglo agregó un prop `haciaArriba`, que solo movía el recorte de abajo hacia arriba. La solución
+  real fue `createPortal` al `body` con `position: fixed`, midiendo el espacio disponible para elegir
+  lado y alto. **Pero eso introdujo un bug peor, encontrado por code review y confirmado con
+  Playwright**: un Dialog modal de Radix pone `pointer-events: none` en el `body` y solo lo reactiva
+  dentro del `DialogContent`, así que la lista se veía pero **no se podía clickear**, y el clic
+  contaba como interacción externa y **cerraba el modal**. Corregido con `pointerEvents: 'auto'` en
+  la lista y `stopPropagation` del `pointerdown`. Verificado con clic real en los 4 consumidores
+  (receta del desarrollo, alta de producto, consumo estándar, cotización).
+- **Tres bugs más encontrados por code review y corregidos**:
+  1. `tab-productos.tsx:invalidar()` no invalidaba `['catalogo','desarrollos']`, así que tras asignar
+     un desarrollo el selector de "aprobados y libres" seguía ofreciéndolo y el alta siguiente era
+     rechazada por el servidor.
+  2. `modal-import-desarrollos.tsx`: `reiniciar()` hacía `setMensaje(null)` en el mismo lote que el
+     mensaje de éxito; React los agrupa y ganaba el `null`, así que la confirmación del import nunca
+     se veía. `reiniciar(limpiarMensaje = true)` ahora lo conserva tras aplicar.
+  3. `desarrollos.service.ts:editar()` permitía desactivar un desarrollo cuyo producto seguía activo,
+     mientras que `reabrir()` sí lo impedía — dejaba un producto vendible costeado desde un prototipo
+     retirado y no reasignable. Ahora aplica la misma regla (409).
+- **Import de desarrollos: línea repetida ya no tira 500.** `aplicar()` insertaba con un `create()`
+  pelado y el preview solo detectaba insumos repetidos *dentro del archivo*, nunca contra los que el
+  desarrollo ya tenía: el `UNIQUE ... NULLS NOT DISTINCT` lo rechazaba y abortaba la transacción
+  entera. Ahora el preview marca `yaCargada` (visible en la tabla como "Actualiza el consumo
+  existente") y `aplicar()` actualiza el consumo en vez de insertar, devolviendo
+  `{creados, lineasCreadas, lineasActualizadas}`. No se usa `upsert()` de Prisma porque su clave
+  compuesta no matchea filas con `id_area` NULL, que es el caso más común.
+- **Editar la receta de un desarrollo aprobado con producto activo SÍ está permitido** (pregunta del
+  usuario tras probarlo). Es la decisión 1 del plan: el desarrollo es dueño permanente de la receta.
+  La restricción de "desactivá el producto primero" aplica solo a **Reabrir**, que cambia el estado a
+  BORRADOR. Editar la receta es una operación normal de negocio; bloquearla obligaría a sacar el
+  producto del catálogo para corregir un consumo. Las salvaguardas son el banner del modal (nombra el
+  producto afectado), la inmutabilidad de las cotizaciones ya guardadas y la auditoría por línea.
+- **Estado real de los datos**: hay **0 desarrollos aprobados y libres** — los 1,285 ya están tomados
+  por un producto, así que "Nuevo producto" no tiene nada que ofrecer hasta crear un desarrollo
+  nuevo. Solo **4 de los 1,285** tienen receta; el resto quedó en Q0.00 porque el backfill salió de
+  `productos.desarrollo` y esos nunca tuvieron receta en el sistema viejo.
+- **Pendientes de decisión, NO corregidos** (hallazgos de code review):
+  1. `costeo-estandar.service.ts:aplicarImportar()` confía en los ids que manda el cliente
+     (`@Body('filas')` sin tipo, así que el `ValidationPipe` no valida nada) — mismo hueco que ya se
+     cerró en `productos.altas()`. Es código anterior a este refactor.
+  2. El `COALESCE(..., 0)` de `v_producto_costo`: un producto cuyo `desarrollo` no matchee reporta
+     **Q0 en silencio**, y como `01_erp` sigue escribiendo esa columna como texto libre, es
+     alcanzable en producción sin ninguna señal. Fue deliberado para preservar el invariante de una
+     fila por producto, pero convendría una alerta visible en el catálogo.
+- **Pendiente de decisión del usuario**: `TEST-PROD-01` y `TEST-BULK-01` son los únicos 2 productos
+  sin desarrollo, así que su costo quedó en 0 (`TEST-BULK-01` tenía Q4.85). `CLAUDE.md` los marca
+  como "no tocar sin confirmar" — habría que borrarlos o darles un desarrollo. Ningún producto real
+  quedó huérfano.
 
 ## Convenciones heredadas de `recetas` (aplican a TODO el ERP, no solo a ese módulo)
 `recetas` (Fase 2, ya migrado y committeado) es el módulo de referencia — cualquier módulo nuevo

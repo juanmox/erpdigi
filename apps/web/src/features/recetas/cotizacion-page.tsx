@@ -184,7 +184,11 @@ export function CotizacionPage() {
   // Gestión de datos es en realidad parte del flujo de Recetas (catálogo de
   // insumos/productos que alimenta la cotización), así que se movió acá.
   const puedeGestionarDatos =
-    tienePermiso('recetas.insumos.editar') || tienePermiso('recetas.productos.editar') || tienePermiso('recetas.importar')
+    tienePermiso('recetas.insumos.editar') ||
+    tienePermiso('recetas.productos.editar') ||
+    tienePermiso('recetas.desarrollos.editar') ||
+    tienePermiso('recetas.recetas.editar') ||
+    tienePermiso('recetas.importar')
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-4">

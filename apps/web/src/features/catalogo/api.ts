@@ -4,11 +4,13 @@ import type {
   CategoriaInsumo,
   Cliente,
   Deporte,
+  Desarrollo,
+  DesarrolloDetalle,
   FilaPreviewAltaInsumo,
   FilaPreviewAltaProducto,
-  FilaPreviewLineaReceta,
+  FilaPreviewDesarrollo,
+  FilaPreviewInsumoDesarrollo,
   FilaPreviewPrecio,
-  FilaPreviewProductoReceta,
   InsumoCatalogo,
   LineaReceta,
   ProductoCatalogo,
@@ -75,32 +77,59 @@ export const catalogoApi = {
   altasProductos: (altas: AltaProductoBody[]) =>
     apiFetch<{ creados: number }>('/recetas/productos/altas', { method: 'POST', body: JSON.stringify({ altas }) }),
 
-  // líneas de receta
-  lineasReceta: (idProducto: number) => apiFetch<LineaReceta[]>(`/recetas/productos/${idProducto}/insumos`),
-  agregarLineaReceta: (idProducto: number, body: { idInsumo: number; consumo: number; idArea?: number | null }) =>
-    apiFetch<{ idProductoInsumo: number }>(`/recetas/productos/${idProducto}/insumos`, {
+  // desarrollos (dueños de la receta desde 2026-08-26)
+  listarDesarrollos: (params: {
+    q?: string
+    estado?: 'BORRADOR' | 'APROBADO' | 'todos'
+    idCliente?: number
+    sinProducto?: boolean
+    incluirInactivos?: boolean
+    limit?: number
+  } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.q) qs.set('q', params.q)
+    if (params.estado) qs.set('estado', params.estado)
+    if (params.idCliente) qs.set('idCliente', String(params.idCliente))
+    if (params.sinProducto) qs.set('sinProducto', 'true')
+    if (params.incluirInactivos) qs.set('incluirInactivos', 'true')
+    if (params.limit) qs.set('limit', String(params.limit))
+    const s = qs.toString()
+    return apiFetch<{ desarrollos: Desarrollo[]; total: number; limit: number }>(
+      `/recetas/desarrollos${s ? `?${s}` : ''}`,
+    )
+  },
+  obtenerDesarrollo: (id: number) => apiFetch<DesarrolloDetalle>(`/recetas/desarrollos/${id}`),
+  crearDesarrollo: (body: Record<string, unknown>) =>
+    apiFetch<{ idDesarrollo: number }>('/recetas/desarrollos', { method: 'POST', body: JSON.stringify(body) }),
+  editarDesarrollo: (id: number, body: Record<string, unknown>) =>
+    apiFetch(`/recetas/desarrollos/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  aprobarDesarrollo: (id: number) => apiFetch(`/recetas/desarrollos/${id}/aprobar`, { method: 'POST' }),
+  reabrirDesarrollo: (id: number) => apiFetch(`/recetas/desarrollos/${id}/reabrir`, { method: 'POST' }),
+
+  // líneas de receta (del desarrollo)
+  lineasReceta: (idDesarrollo: number) => apiFetch<LineaReceta[]>(`/recetas/desarrollos/${idDesarrollo}/insumos`),
+  agregarLineaReceta: (idDesarrollo: number, body: { idInsumo: number; consumo: number; idArea?: number | null }) =>
+    apiFetch<{ idDesarrolloInsumo: number }>(`/recetas/desarrollos/${idDesarrollo}/insumos`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  editarLineaReceta: (idProducto: number, idLinea: number, body: { consumo: number; idArea?: number | null }) =>
-    apiFetch(`/recetas/productos/${idProducto}/insumos/${idLinea}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  eliminarLineaReceta: (idProducto: number, idLinea: number) =>
-    apiFetch(`/recetas/productos/${idProducto}/insumos/${idLinea}`, { method: 'DELETE' }),
+  editarLineaReceta: (idDesarrollo: number, idLinea: number, body: { consumo: number; idArea?: number | null }) =>
+    apiFetch(`/recetas/desarrollos/${idDesarrollo}/insumos/${idLinea}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  eliminarLineaReceta: (idDesarrollo: number, idLinea: number) =>
+    apiFetch(`/recetas/desarrollos/${idDesarrollo}/insumos/${idLinea}`, { method: 'DELETE' }),
 
-  // import masivo de recetas (multi-producto)
-  previewImportarRecetas: (archivo: File) =>
-    subirArchivo<{ productos: FilaPreviewProductoReceta[]; receta: FilaPreviewLineaReceta[] }>(
-      '/recetas/importar-recetas/preview',
+  // Import masivo de desarrollos + receta. Reemplaza al import combinado
+  // Productos+Receta, que escribía en recetas.producto_insumos (congelada).
+  previewImportarDesarrollos: (archivo: File) =>
+    subirArchivo<{ desarrollos: FilaPreviewDesarrollo[]; lineas: FilaPreviewInsumoDesarrollo[] }>(
+      '/recetas/desarrollos/importar/preview',
       archivo,
     ),
-  aplicarImportarRecetas: (
-    productos: AltaProductoBody[],
-    receta: { productoCodigo: string; insumoCodigo: string; consumo: number; area?: string | null }[],
-  ) =>
-    apiFetch<{ productosCreados: number; lineasAplicadas: number }>('/recetas/importar-recetas/aplicar', {
-      method: 'POST',
-      body: JSON.stringify({ productos, receta }),
-    }),
+  aplicarImportarDesarrollos: (desarrollos: FilaPreviewDesarrollo[], lineas: FilaPreviewInsumoDesarrollo[]) =>
+    apiFetch<{ creados: number; lineasCreadas: number; lineasActualizadas: number }>(
+      '/recetas/desarrollos/importar/aplicar',
+      { method: 'POST', body: JSON.stringify({ desarrollos, lineas }) },
+    ),
 
   // descargas protegidas (requieren Bearer token, se resuelven con fetch+blob)
   exportarInsumos: () => descargarArchivo('/recetas/insumos/export', `insumos_${new Date().toISOString().slice(0, 10)}.xlsx`),
@@ -108,7 +137,6 @@ export const catalogoApi = {
   plantillaPrecios: () => descargarArchivo('/recetas/insumos/plantilla-precios', 'plantilla_precios_insumos.xlsx'),
   exportarProductos: () => descargarArchivo('/recetas/productos/export', `productos_${new Date().toISOString().slice(0, 10)}.xlsx`),
   plantillaAltaProductos: () => descargarArchivo('/recetas/productos/plantilla-alta', 'plantilla_alta_productos.xlsx'),
-  plantillaRecetas: () => descargarArchivo('/recetas/recetas-plantilla', 'plantilla_recetas.xlsx'),
-  exportarPlantillaReceta: (idProducto: number, codigo: string) =>
-    descargarArchivo(`/recetas/productos/${idProducto}/receta/exportar-plantilla`, `receta_${codigo}.xlsx`),
+  plantillaDesarrollos: () =>
+    descargarArchivo('/recetas/desarrollos/plantilla-importar', 'plantilla_desarrollos.xlsx'),
 }

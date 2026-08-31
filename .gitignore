@@ -11,3 +11,11 @@ credentials/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Exports de los Sheets/Excel legacy que se bajan solo para análisis
+/Data*.xlsx
+# Respaldos de assets: la foto del login es de terceros (escudo NFL) y pesa MB
+apps/web/src/assets/OLD-*.png
+
+# Mensaje de commit en preparación, para revisarlo antes de commitear
+/COMMIT_MSG.txt

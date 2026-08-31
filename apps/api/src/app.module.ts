@@ -15,6 +15,7 @@ import { CosteoRollosModule } from './modules/costeo-rollos/costeo-rollos.module
 import { EmpresasModule } from './modules/empresas/empresas.module';
 import { MonedasModule } from './modules/monedas/monedas.module';
 import { CotizacionesModule } from './modules/recetas-cotizaciones/cotizaciones.module';
+import { DesarrollosModule } from './modules/recetas-desarrollos/desarrollos.module';
 import { InsumosModule } from './modules/recetas-insumos/insumos.module';
 import { ProductosModule } from './modules/recetas-productos/productos.module';
 import { ReferenciasModule } from './modules/recetas-referencias/referencias.module';
@@ -40,6 +41,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ReferenciasModule,
     InsumosModule,
     ProductosModule,
+    DesarrollosModule,
     CotizacionesModule,
     CosteoRollosModule,
     CosteoOrdenesModule,

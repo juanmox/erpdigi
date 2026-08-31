@@ -4,17 +4,20 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
 
-export class CrearProductoDto {
+export class CrearDesarrolloDto {
   @IsString()
   @MinLength(1)
+  @MaxLength(40)
   codigo!: string;
 
   @IsString()
   @MinLength(1)
+  @MaxLength(250)
   descripcion!: string;
 
   @IsOptional()
@@ -22,28 +25,25 @@ export class CrearProductoDto {
   @IsInt()
   idCliente?: number | null;
 
+  /// Talla con la que se calculó el consumo del prototipo (referencia).
   @IsOptional()
-  @IsString()
-  desarrollo?: string | null;
-
-  @IsOptional()
-  @IsString()
-  patron?: string | null;
-
-  @IsOptional()
-  @IsString()
-  tamano?: string | null;
-
-  @IsOptional()
-  @IsString()
-  deporte?: string | null;
+  @Type(() => Number)
+  @IsInt()
+  idTallaBase?: number | null;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  precioVenta?: number;
+  minutosMo?: number;
 
-  // minutosMo / costoMoMinuto se quitaron del alta de productos (2026-08-26):
-  // la mano de obra vive en el desarrollo, que es dueño de la receta.
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  costoMoMinuto?: number;
+
+  @IsOptional()
+  @IsString()
+  notas?: string | null;
 }

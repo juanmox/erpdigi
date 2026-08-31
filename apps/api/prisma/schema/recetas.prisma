@@ -3,6 +3,8 @@ model AreaUso {
   nombre          String           @unique @db.VarChar(60)
   productoInsumos ProductoInsumo[]
 
+  desarrolloInsumos DesarrolloInsumo[]
+
   @@map("areas_uso")
   @@schema("recetas")
 }
@@ -28,6 +30,8 @@ model Cliente {
   lineasProductoCosteo    LineaProducto[]
   ordenesProduccionCosteo OrdenProduccion[]
   ordenesFacturacionCosteo OrdenFacturacion[]
+
+  desarrollos Desarrollo[]
 
   @@map("clientes")
   @@schema("recetas")
@@ -122,10 +126,17 @@ model Insumo {
   ofInsumoCosteo                OfInsumo[]
   plantillaInsumoDetalleCosteo  PlantillaInsumoDetalle[]
 
+  desarrolloInsumos DesarrolloInsumo[]
+
   @@map("insumos")
   @@schema("recetas")
 }
 
+/// ⚠️ CONGELADA (2026-08-26). El BOM se mudó a recetas.desarrollo_insumos: el
+/// dueño de la receta es el Desarrollo, no el Producto. Esta tabla NO se borra
+/// —guarda el estado previo, es lo que hace posible el rollback, y 01_erp
+/// (todavía en producción) la sigue leyendo—, pero el ERP nuevo ya no le
+/// escribe. Ver migración 20260826..._desarrollos_duenos_de_receta.
 /// Línea de receta (producto <-> insumo). Única tabla maestra con borrado físico permitido.
 model ProductoInsumo {
   idProductoInsumo Int      @id @default(autoincrement()) @map("id_producto_insumo")
@@ -151,6 +162,14 @@ model Producto {
   // de DataDisev3.xlsx: 88 desarrollos únicos, 88 items únicos, cero
   // excepciones) — un desarrollo es un prototipo que, al aprobarse, se
   // convierte en exactamente un producto.
+  //
+  // ⚠️ Apunta a recetas.desarrollos.codigo pero DELIBERADAMENTE NO es una FK
+  // (decisión del usuario, 2026-08-26): 01_erp — todavía en producción —
+  // ESCRIBE esta columna como texto libre al dar de alta/editar productos
+  // (app.js 1195, 1232, 1380, 1900). Con una FK real esas 4 pantallas
+  // empezarían a fallar con 23503. La integridad la valida el backend nuevo
+  // (existe + APROBADO + activo + libre) al crear/editar un producto.
+  // Agregar la FK es una migración de una línea cuando 01_erp se apague (F5).
   desarrollo          String?             @unique @db.VarChar(40)
   patron              String?             @db.VarChar(60)
   descripcion         String              @db.VarChar(250)
@@ -158,6 +177,9 @@ model Producto {
   deporte             String?             @db.VarChar(60)
   idCliente           Int?                @map("id_cliente")
   precioVenta         Decimal             @default(0) @map("precio_venta") @db.Decimal(12, 2)
+  /// ⚠️ LEGACY — ya no son autoritativos. La mano de obra vive en
+  /// Desarrollo.minutosMo / .costoMoMinuto desde 2026-08-26. Se conservan solo
+  /// para no romper a 01_erp, que los lee y escribe.
   minutosMo           Decimal             @default(0) @map("minutos_mo") @db.Decimal(10, 2)
   costoMoMinuto       Decimal             @default(0.33) @map("costo_mo_minuto") @db.Decimal(10, 4)
   activo              Boolean             @default(true)
@@ -193,6 +215,8 @@ model Talla {
   lineaProduccionTallasCosteo LineaProduccionTalla[]
   consumosPapelCosteo         ConsumoPapel[]
 
+  desarrollosTallaBase Desarrollo[]
+
   @@map("tallas")
   @@schema("recetas")
 }
@@ -206,7 +230,11 @@ model UnidadMedida {
   @@schema("recetas")
 }
 
-/// Vista de solo lectura: costo_unitario = Σ(consumo×costo_promedio) + minutos_mo×costo_mo_minuto.
+/// Vista de solo lectura. Desde 2026-08-26 se apoya en v_desarrollo_costo: el
+/// costo del producto ES el de su desarrollo, así que no pueden divergir.
+/// ⚠️ Debe devolver SIEMPRE una fila por producto (incluidos los que no tienen
+/// desarrollo) — productos.service.ts:listar() hace JOIN, no LEFT JOIN, contra
+/// ella: si un producto perdiera su fila desaparecería del catálogo sin error.
 view ProductoCosto {
   idProducto    Int?     @map("id_producto")
   codigo        String?  @db.VarChar(40)
@@ -216,5 +244,82 @@ view ProductoCosto {
   costoUnitario Decimal? @map("costo_unitario") @db.Decimal
 
   @@map("v_producto_costo")
+  @@schema("recetas")
+}
+
+/// Vista de solo lectura: costo de un prototipo.
+/// costo_unitario = Σ(consumo × costo_promedio) + minutos_mo × costo_mo_minuto.
+/// Es la fuente única del costo — v_producto_costo se construye sobre ésta.
+view DesarrolloCosto {
+  idDesarrollo  Int?     @map("id_desarrollo")
+  codigo        String?  @db.VarChar(40)
+  costoInsumos  Decimal? @map("costo_insumos") @db.Decimal
+  costoManoObra Decimal? @map("costo_mano_obra") @db.Decimal
+  costoUnitario Decimal? @map("costo_unitario") @db.Decimal
+
+  @@map("v_desarrollo_costo")
+  @@schema("recetas")
+}
+
+/// Prototipo de una prenda. Es el dueño PERMANENTE de la receta (BOM) y de la
+/// mano de obra, antes y después de aprobarse — un Producto nunca posee receta
+/// propia. Al aprobarse se asigna a exactamente un Producto (biunívoco, ver
+/// Producto.desarrollo).
+model Desarrollo {
+  idDesarrollo  Int       @id @default(autoincrement()) @map("id_desarrollo")
+  codigo        String    @unique @db.VarChar(40)
+  descripcion   String    @db.VarChar(250)
+  /// BORRADOR·APROBADO — exactamente dos estados.
+  // + SQL: CHECK ("estado" IN ('BORRADOR','APROBADO')) — Prisma no expresa
+  //   CHECK sobre VARCHAR; mismo criterio que los enums de costeo.prisma.
+  estado        String    @default("BORRADOR") @db.VarChar(20)
+  idCliente     Int?      @map("id_cliente")
+  /// Talla con la que se calculó el consumo del prototipo (referencia).
+  idTallaBase   Int?      @map("id_talla_base")
+  minutosMo     Decimal   @default(0) @map("minutos_mo") @db.Decimal(10, 2)
+  costoMoMinuto Decimal   @default(0.33) @map("costo_mo_minuto") @db.Decimal(10, 4)
+  notas         String?
+  /// Nunca borrado físico (convención heredada #4): un desarrollo que ya no se
+  /// usa se retira con activo=false. Es ortogonal a `estado`.
+  activo        Boolean   @default(true)
+  creadoEn      DateTime  @default(now()) @map("creado_en") @db.Timestamptz(6)
+  /// NULL = creado por la migración inicial (no hay un usuario real al que
+  /// atribuirle el backfill de los 1,285 desarrollos históricos).
+  creadoPor     Int?      @map("creado_por")
+  aprobadoEn    DateTime? @map("aprobado_en") @db.Timestamptz(6)
+  aprobadoPor   Int?      @map("aprobado_por")
+
+  cliente   Cliente?           @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
+  tallaBase Talla?             @relation(fields: [idTallaBase], references: [idTalla], onDelete: NoAction, onUpdate: NoAction)
+  insumos   DesarrolloInsumo[]
+
+  @@index([estado], map: "idx_desarrollo_estado")
+  @@index([idCliente], map: "idx_desarrollo_cliente")
+  @@map("desarrollos")
+  @@schema("recetas")
+}
+
+/// Línea de receta del desarrollo. Igual que la vieja producto_insumos, es de
+/// las pocas tablas con borrado físico permitido (excepción ya aprobada para
+/// líneas de receta individuales).
+model DesarrolloInsumo {
+  idDesarrolloInsumo Int     @id @default(autoincrement()) @map("id_desarrollo_insumo")
+  idDesarrollo       Int     @map("id_desarrollo")
+  idInsumo           Int     @map("id_insumo")
+  consumo            Decimal @default(0) @db.Decimal(14, 6)
+  idArea             Int?    @map("id_area")
+
+  desarrollo Desarrollo @relation(fields: [idDesarrollo], references: [idDesarrollo], onDelete: Cascade, onUpdate: NoAction)
+  insumo     Insumo     @relation(fields: [idInsumo], references: [idInsumo], onDelete: NoAction, onUpdate: NoAction)
+  area       AreaUso?   @relation(fields: [idArea], references: [idArea], onDelete: NoAction, onUpdate: NoAction)
+
+  // + SQL: el índice único real se crea con NULLS NOT DISTINCT — Prisma no lo
+  //   expresa. Sin eso (bug real heredado de producto_insumos, ver
+  //   aplicarImportarRecetas) dos líneas del mismo insumo SIN área no
+  //   colisionan y el ON CONFLICT del import nunca dispara para esas filas:
+  //   en vez de actualizar el consumo, duplica la línea.
+  @@unique([idDesarrollo, idInsumo, idArea])
+  @@index([idDesarrollo], map: "idx_desins_desarrollo")
+  @@map("desarrollo_insumos")
   @@schema("recetas")
 }

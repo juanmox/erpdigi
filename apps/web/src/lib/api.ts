@@ -21,7 +21,13 @@ export class ApiError extends Error {
 
 async function rawFetch(path: string, options: RequestInit) {
   const headers = new Headers(options.headers)
-  if (!(options.body instanceof FormData)) {
+  // Los imports Excel mandan un File crudo como body (ver subirArchivo() en
+  // los distintos api.ts de features) — forzar aquí application/json
+  // etiquetaba mal ese binario, y el navegador nunca llegaba a poner el
+  // content-type real del archivo (que sí distingue el parser raw del lado
+  // del servidor). Bug real: "Unexpected token 'P' ... is not valid JSON"
+  // ("PK" son los bytes mágicos de un .xlsx, que es un ZIP).
+  if (!(options.body instanceof FormData) && !(options.body instanceof Blob)) {
     headers.set('Content-Type', 'application/json')
   }
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)

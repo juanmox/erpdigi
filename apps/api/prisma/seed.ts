@@ -21,6 +21,19 @@ const PERMISOS_EDITOR_ADICIONALES = [
   'recetas.productos.crear',
   'recetas.productos.editar',
   'recetas.productos.desactivar',
+  // Desarrollo es desde 2026-08-26 el dueño de la receta: crear/editar el
+  // prototipo y aprobarlo son atribuciones del mismo rol que ya gestiona el
+  // catálogo (decisión del usuario: Editor y Admin aprueban). `aprobar` va
+  // separado de `editar` a propósito — editar el BOM y firmar la aprobación
+  // son actos distintos, aunque hoy los tenga el mismo rol; separarlos ahora
+  // permite crear después un rol "Diseño" que costee pero no apruebe, sin
+  // tocar el schema.
+  'recetas.desarrollos.crear',
+  'recetas.desarrollos.editar',
+  'recetas.desarrollos.aprobar',
+  // Sigue gateando las líneas de receta, que ahora viven en el desarrollo —
+  // el nombre por fin es literal: "editar recetas". Se reutiliza en vez de
+  // crear uno nuevo para no perder las asignaciones ya hechas a usuarios.
   'recetas.recetas.editar',
   'recetas.importar',
 ]

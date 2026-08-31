@@ -77,7 +77,10 @@ export function Sidebar() {
   return (
     <nav
       className={cn(
-        'hidden shrink-0 flex-col gap-5 border-r border-border bg-card py-5 transition-[width] duration-150 lg:flex',
+        // sticky + alto de viewport: sin esto el <nav> crece con el alto de la
+        // página y el botón de colapsar (mt-auto) queda al final del contenido,
+        // invisible hasta hacer scroll hasta el fondo de una tabla larga.
+        'sticky top-0 hidden h-svh shrink-0 flex-col gap-5 overflow-y-auto border-r border-border bg-card py-5 transition-[width] duration-150 lg:flex',
         colapsado ? 'w-[68px] px-2' : 'w-[248px] px-3.5',
       )}
       aria-label="Navegación principal"

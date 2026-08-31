@@ -65,13 +65,18 @@ export class CotizacionesService {
               costo_unitario: Prisma.Decimal;
             }[]
           >`
-            SELECT p.id_producto, p.descripcion, p.minutos_mo, p.costo_mo_minuto,
+            -- Mano de obra del DESARROLLO (2026-08-26): las columnas
+            -- homónimas de productos son legacy de 01_erp.
+            SELECT p.id_producto, p.descripcion,
+                   COALESCE(d.minutos_mo, 0)      AS minutos_mo,
+                   COALESCE(d.costo_mo_minuto, 0) AS costo_mo_minuto,
                    p.desarrollo, p.patron, p.tamano, p.deporte, p.precio_venta,
                    c.codigo AS cliente_codigo, c.nombre AS cliente_nombre,
                    round(v.costo_unitario, 6) AS costo_unitario
             FROM recetas.productos p
             JOIN recetas.v_producto_costo v ON v.id_producto = p.id_producto
             LEFT JOIN recetas.clientes c ON c.id_cliente = p.id_cliente
+            LEFT JOIN recetas.desarrollos d ON d.codigo = p.desarrollo
             WHERE p.codigo = ${item.codigo}
           `;
           if (productos.length === 0) continue;
@@ -112,17 +117,22 @@ export class CotizacionesService {
               costo_total: Prisma.Decimal;
             }[]
           >`
+            -- La receta que se congela en el snapshot es la del DESARROLLO
+            -- del producto (2026-08-26). Debe salir de la misma fuente que
+            -- v_producto_costo, o el total y el detalle no cuadrarían.
             SELECT i.id_insumo, i.codigo, i.descripcion,
                    cat.nombre AS categoria, cat.orden,
                    um.nombre AS unidad, ar.nombre AS area,
-                   pi.consumo, i.costo_promedio,
-                   (pi.consumo * i.costo_promedio) AS costo_total
-            FROM recetas.producto_insumos pi
-            JOIN recetas.insumos i ON i.id_insumo = pi.id_insumo
+                   di.consumo, i.costo_promedio,
+                   (di.consumo * i.costo_promedio) AS costo_total
+            FROM recetas.productos p
+            JOIN recetas.desarrollos d ON d.codigo = p.desarrollo
+            JOIN recetas.desarrollo_insumos di ON di.id_desarrollo = d.id_desarrollo
+            JOIN recetas.insumos i ON i.id_insumo = di.id_insumo
             JOIN recetas.categorias_insumo cat ON cat.id_categoria = i.id_categoria
             JOIN recetas.unidades_medida um ON um.id_unidad = i.id_unidad
-            LEFT JOIN recetas.areas_uso ar ON ar.id_area = pi.id_area
-            WHERE pi.id_producto = ${prod.id_producto}
+            LEFT JOIN recetas.areas_uso ar ON ar.id_area = di.id_area
+            WHERE p.id_producto = ${prod.id_producto}
             ORDER BY cat.orden, i.codigo
           `;
 
@@ -307,17 +317,20 @@ export class CotizacionesService {
             costo_total: Prisma.Decimal;
           }[]
         >`
+          -- Receta actual = la del desarrollo del producto (2026-08-26).
           SELECT cat.nombre AS categoria, cat.orden,
                  i.codigo, i.descripcion,
-                 pi.consumo, um.nombre AS unidad, ar.nombre AS area,
+                 di.consumo, um.nombre AS unidad, ar.nombre AS area,
                  round(i.costo_promedio, 6) AS costo_promedio,
-                 round(pi.consumo * i.costo_promedio, 6) AS costo_total
-          FROM recetas.producto_insumos pi
-          JOIN recetas.insumos i ON i.id_insumo = pi.id_insumo
+                 round(di.consumo * i.costo_promedio, 6) AS costo_total
+          FROM recetas.productos p
+          JOIN recetas.desarrollos d ON d.codigo = p.desarrollo
+          JOIN recetas.desarrollo_insumos di ON di.id_desarrollo = d.id_desarrollo
+          JOIN recetas.insumos i ON i.id_insumo = di.id_insumo
           JOIN recetas.categorias_insumo cat ON cat.id_categoria = i.id_categoria
           JOIN recetas.unidades_medida um ON um.id_unidad = i.id_unidad
-          LEFT JOIN recetas.areas_uso ar ON ar.id_area = pi.id_area
-          WHERE pi.id_producto = ${linea.id_producto}
+          LEFT JOIN recetas.areas_uso ar ON ar.id_area = di.id_area
+          WHERE p.id_producto = ${linea.id_producto}
           ORDER BY cat.orden, i.codigo
         `;
         insumos = ins.map((r) => ({
@@ -333,7 +346,11 @@ export class CotizacionesService {
         }));
         const prodRows = await this.prisma.$queryRaw<
           { minutos_mo: Prisma.Decimal; costo_mo_minuto: Prisma.Decimal }[]
-        >`SELECT minutos_mo, costo_mo_minuto FROM recetas.productos WHERE id_producto = ${linea.id_producto}`;
+        >`SELECT COALESCE(d.minutos_mo, 0) AS minutos_mo,
+                 COALESCE(d.costo_mo_minuto, 0) AS costo_mo_minuto
+            FROM recetas.productos p
+            LEFT JOIN recetas.desarrollos d ON d.codigo = p.desarrollo
+           WHERE p.id_producto = ${linea.id_producto}`;
         if (prodRows.length > 0) {
           const p = prodRows[0];
           manoObra = {
@@ -414,12 +431,13 @@ export class CotizacionesService {
       WITH pedido(codigo, cantidad) AS (VALUES ${valores})
       SELECT cat.nombre AS categoria, cat.orden,
              i.codigo, i.descripcion, um.nombre AS unidad,
-             SUM(pi.consumo * ped.cantidad) AS cantidad_total,
-             SUM(pi.consumo * ped.cantidad * i.costo_promedio) AS costo_total
+             SUM(di.consumo * ped.cantidad) AS cantidad_total,
+             SUM(di.consumo * ped.cantidad * i.costo_promedio) AS costo_total
       FROM pedido ped
       JOIN recetas.productos p ON p.codigo = ped.codigo
-      JOIN recetas.producto_insumos pi ON pi.id_producto = p.id_producto
-      JOIN recetas.insumos i ON i.id_insumo = pi.id_insumo
+      JOIN recetas.desarrollos d ON d.codigo = p.desarrollo
+      JOIN recetas.desarrollo_insumos di ON di.id_desarrollo = d.id_desarrollo
+      JOIN recetas.insumos i ON i.id_insumo = di.id_insumo
       JOIN recetas.categorias_insumo cat ON cat.id_categoria = i.id_categoria
       JOIN recetas.unidades_medida um ON um.id_unidad = i.id_unidad
       GROUP BY cat.nombre, cat.orden, i.codigo, i.descripcion, um.nombre
@@ -433,10 +451,13 @@ export class CotizacionesService {
       }[]
     >`
       WITH pedido(codigo, cantidad) AS (VALUES ${valores})
-      SELECT SUM(p.minutos_mo * ped.cantidad) AS minutos_total,
-             SUM(p.minutos_mo * ped.cantidad * p.costo_mo_minuto) AS costo_total
+      -- LEFT JOIN + COALESCE: un producto sin desarrollo aporta 0 minutos,
+      -- pero no debe desaparecer del resumen.
+      SELECT SUM(COALESCE(d.minutos_mo, 0) * ped.cantidad) AS minutos_total,
+             SUM(COALESCE(d.minutos_mo, 0) * ped.cantidad * COALESCE(d.costo_mo_minuto, 0)) AS costo_total
       FROM pedido ped
       JOIN recetas.productos p ON p.codigo = ped.codigo
+      LEFT JOIN recetas.desarrollos d ON d.codigo = p.desarrollo
     `;
 
     const [venta] = await this.prisma.$queryRaw<
