@@ -991,6 +991,45 @@ sin i18n (todo en español).
     - **Sigue sin construirse**: Fase B (backend de captura), C (la pantalla responsive PC/tablet/
       teléfono) y D (espejo a Google Sheets).
 
+  - **F4 — datos de OP reales cargados (2026-08-31), previo a la Fase B.** El usuario aportó
+    `OrigenConsumo DIGITEXSA Mig.xlsx` (hoja `DatosOrigen`, el formato vivo de Google Sheets que hoy
+    alimenta el cálculo de consumo). Es la misma estructura de 237 columnas de `DataDisev3` pero
+    acotada a lo vigente: **253 líneas, 67 OP, 13 productos, 2 clientes, 4 impresoras**.
+    - **Convertido con `apps/api/scripts/convertir-origen-consumo.mjs`** a la plantilla del import de
+      Órdenes que ya existía, en vez de agregarle al ERP un lector para un formato legacy que va a
+      desaparecer. Resultado: **253/253 filas válidas, cero errores**; aplicado en 1s → 67 OP y 253
+      líneas nuevas (68 OP en total contando la de ejemplo de F3), 729 combinaciones de talla,
+      7,969 piezas.
+    - **Las 10 tallas que usa el archivo caben en las 13 de `TALLAS_IMPORT_LINEAS`**, así que el
+      límite de esa lista (fija en código) no bloqueó nada. Con 155 tallas en el catálogo, sí es algo
+      a revisar cuando aparezca una OP con tallas de hombre/mujer/ladies.
+    - **⚠️ 31 códigos de producto estaban truncados en la base**: les faltaba el paréntesis de cierre
+      (`BBALL-M (1096` en vez de `BBALL-M (1096)`), heredado del import masivo de productos. No es
+      límite de columna — `codigo` es `VARCHAR(40)` y los truncados miden 13-16. El usuario confirmó
+      que el paréntesis sí es parte del código. Corregidos con un UPDATE, tras verificar: cero
+      colisiones con códigos existentes, cero cotizaciones/consumo estándar/líneas de OP afectadas, y
+      **ninguna FK apunta a `productos.codigo`** (todas usan `id_producto`), así que renombrar es
+      seguro. Sin esto, 59 líneas de `UA-FB03MP(M-L-X)` no habrían resuelto.
+    - **Cliente `UNDER ARMOUR` creado** (código 411). Los datos admitían dos lecturas: la columna
+      CLIENTE del legacy mezcla cliente con línea de producto (ver §2.3 de ANEXO_A), y los productos
+      `UA-*` están asignados a BSN SPORTS en la base, lo que sugería que Under Armour fuera una línea
+      de BSN. **El usuario confirmó que es cliente aparte.**
+    - **Dos columnas van deliberadamente vacías en el archivo convertido**:
+      - `Desarrollo`: el origen usa `3082/25` y la base `2500003082` — el mismo desarrollo en dos
+        notaciones. El import valida que coincidan, así que escribirlo habría rechazado las 253
+        filas. El código de producto es la llave confiable y el producto ya tiene su desarrollo
+        registrado (ahora con FK, es autoritativo).
+      - `Línea de producto`: un primer intento puso ahí el nombre del cliente. Como Under Armour es
+        el cliente, eso habría creado una línea espuria — y peor, el import exige que la línea exista
+        para ese cliente, así que habría rechazado todo. Detectado revisando el archivo generado
+        antes de importarlo.
+    - **Dato que condiciona el diseño de la Fase C**: de las 729 combinaciones producto+talla
+      cargadas, **175 (24%) no tienen consumo estándar** — 66 de las 253 líneas están afectadas. El
+      aviso "sin estándar cargado" no es un caso de borde sino algo cotidiano: debe mostrarse como un
+      estado normal de la línea que impide enviarla, no como un error.
+    - Autoría de las OP y líneas reasignada al usuario `admin` (el usuario de prueba desechable no se
+      puede borrar mientras sea `creado_por`, por la FK `RESTRICT`).
+
 ## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
 Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era
 apenas una columna de texto libre en `recetas.productos`. Eso invertía el proceso real de la
