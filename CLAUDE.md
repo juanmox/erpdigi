@@ -1073,6 +1073,43 @@ sin i18n (todo en español).
       conviene elegir los ids a tocar explícitamente, no por agregación.
     - **Falta**: Fase C (pantalla responsive PC/tablet/teléfono) y D (espejo a Google Sheets).
 
+  - **F4 — Fase C (pantalla "Envío de órdenes impresas") completada, 2026-08-31.**
+    `apps/web/src/features/costeo-consumo/`, ruta `/costeo/consumo`, ítem de sidebar "Envío de
+    impresas" gateado por `costeo.consumo.ver`.
+    - **Un solo flujo para los tres tamaños, no tres pantallas.** El usuario pidió que funcionara en
+      PC, tablet y teléfono. En vez de una tabla ancha (que en teléfono obliga a scroll horizontal) o
+      tres implementaciones, la pantalla usa **tarjetas que reflowean**: 1 columna en teléfono, 2 en
+      tablet (`md`), 3 en escritorio (`xl`). La unidad de decisión es la LÍNEA, así que cada tarjeta
+      se basta a sí misma para responder "¿es ésta?". Verificado con Playwright en 390×844, 820×1180
+      y 1500×950: **cero desborde horizontal** en los tres.
+    - **Campos mostrados** (criterio: lo mínimo para confirmar con certeza qué se está descontando):
+      LINE, item, desarrollo, impresora, tipo de papel, tallas con cantidad, y el consumo desglosado
+      en estándar + enguiamiento + en blanco. **Deliberadamente fuera**: fechas de cliente/entrega,
+      prioridad, imagen, estatus y descripción larga — existen en la OP y se ven en Órdenes, pero acá
+      competirían por atención en el momento de descontar papel, y en teléfono son ruido.
+    - **Tres señales, que son las que evitan el error caro**:
+      1. **"Falta estándar"**: badge, las tallas afectadas marcadas una por una en la grilla, botón
+         deshabilitado y el motivo escrito. Con los datos reales aparece en 66 de 253 líneas (24% de
+         las combinaciones), así que se trató como **estado normal**, no como error.
+      2. **"Ya enviada"**: tarjeta atenuada, sin botón. El índice único lo impide igual en la base,
+         pero verlo antes es mejor que un 409.
+      3. **Contraste de enguiamiento**: si lo que Diseño tecleó difiere en más de 0.15 yd del
+         calculado, se avisa. Ese dato antes no se usaba para nada.
+    - La cabecera de la OP es `sticky`: identifica lo que se está por descontar y queda a la vista
+      mientras se recorren las líneas. Trae el resumen (líneas, por enviar, enviadas, sin estándar).
+    - El buscador acepta solo el correlativo (`10345`) o el código completo, reusando
+      `normalizarCodigoCosteo` de F3. `inputMode="numeric"` para que el teléfono abra el teclado
+      numérico.
+    - Al capturar se invalida también la query de Rollos: el consumo descuenta del rollo montado y el
+      panel de Gestión de Rollos mostraría papel disponible desactualizado.
+    - **Verificado con clic real en el navegador** (no solo curl): buscar OP → enviar una línea →
+      mensaje "2 talla(s) enviada(s)" sin errores de consola, y en la base los cálculos exactos
+      (2XL: 2 × 0.9097 = 1.8194; enguiamiento 0.1688), el rollo resuelto solo (montaje 11), la
+      versión del estándar guardada y `procesada_en` marcada. Datos de prueba borrados; las 5
+      reposiciones preexistentes quedaron intactas.
+    - **Falta**: Fase D (espejo a Google Sheets hacia la hoja "Datos"/ConsumosFinal, reusando
+      `GoogleSheetsService`, llenando las columnas que Reposiciones deja vacías).
+
 ## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
 Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era
 apenas una columna de texto libre en `recetas.productos`. Eso invertía el proceso real de la
