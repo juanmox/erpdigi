@@ -37,6 +37,11 @@ export interface Talla {
   idTalla: number
   nombre: string
   orden: number
+  /// Línea de prenda (YOUTH·ADULT·MEN·WOMEN·LADIES_FIT·NUMERICA·PANT·COMBINADA).
+  /// Solo agrupa los selectores; no participa de ningún cálculo.
+  grupo: string | null
+  /// Las 13 tallas de uso cotidiano; van primero en los selectores.
+  frecuente: boolean
 }
 
 export interface Deporte {

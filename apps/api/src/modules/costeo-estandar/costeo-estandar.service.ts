@@ -503,49 +503,111 @@ export class CosteoEstandarService {
         total: errores.length,
       });
 
-    const resultado = await this.prisma.$transaction(async (tx) => {
-      let creados = 0;
-      let reemplazados = 0;
-      let corregidos = 0;
-      for (const r of resueltas) {
-        // Se re-resuelve acá adentro, contra el estado real y actual.
-        const { idACorregir, idACerrar } = await this.resolverReemplazo(
-          r.idProducto,
-          r.idTalla,
-          r.vigenteDesde,
-          r.vigenteHasta,
-          undefined,
-          tx,
-        );
-        if (idACorregir) {
-          await tx.consumoEstandar.update({
-            where: { idConsumoEstandar: idACorregir },
-            data: { pulgadasPapel: r.pulgadasPapel },
+    // Resolución de solapes EN LOTE, antes de abrir la transacción. Hacerlo
+    // fila por fila adentro (una consulta por fila) reventaba el timeout de 5s
+    // de Prisma con el catálogo real de 2,982 filas: P2028. Acá es UNA consulta
+    // para todas, y la transacción queda solo con las escrituras.
+    const idsProducto = [...new Set(resueltas.map((r) => r.idProducto))];
+    const idsTalla = [...new Set(resueltas.map((r) => r.idTalla))];
+    const existentes = await this.prisma.consumoEstandar.findMany({
+      where: { idProducto: { in: idsProducto }, idTalla: { in: idsTalla } },
+      select: {
+        idConsumoEstandar: true,
+        idProducto: true,
+        idTalla: true,
+        vigenteDesde: true,
+        vigenteHasta: true,
+        producto: { select: { codigo: true } },
+      },
+    });
+    const porClave = new Map<string, typeof existentes>();
+    for (const e of existentes) {
+      const k = `${e.idProducto}|${e.idTalla}`;
+      (porClave.get(k) ?? porClave.set(k, []).get(k)!).push(e);
+    }
+
+    // Mismo criterio que resolverReemplazo(), pero en memoria.
+    const plan: {
+      r: (typeof resueltas)[number];
+      idACorregir: number | null;
+      idACerrar: number | null;
+    }[] = [];
+    for (const r of resueltas) {
+      const candidatos = (
+        porClave.get(`${r.idProducto}|${r.idTalla}`) ?? []
+      ).filter(
+        (e) =>
+          (e.vigenteHasta === null || e.vigenteHasta > r.vigenteDesde) &&
+          (r.vigenteHasta === null || e.vigenteDesde < r.vigenteHasta),
+      );
+      if (candidatos.length === 0) {
+        plan.push({ r, idACorregir: null, idACerrar: null });
+        continue;
+      }
+      if (candidatos.length === 1 && candidatos[0].vigenteHasta === null) {
+        const nueva = inicioDelDia(r.vigenteDesde);
+        const actual = inicioDelDia(candidatos[0].vigenteDesde);
+        if (nueva === actual) {
+          plan.push({
+            r,
+            idACorregir: candidatos[0].idConsumoEstandar,
+            idACerrar: null,
           });
-          corregidos++;
           continue;
         }
-        if (idACerrar) {
-          await tx.consumoEstandar.update({
-            where: { idConsumoEstandar: idACerrar },
-            data: { vigenteHasta: r.vigenteDesde },
+        if (nueva > actual) {
+          plan.push({
+            r,
+            idACorregir: null,
+            idACerrar: candidatos[0].idConsumoEstandar,
           });
-          reemplazados++;
+          continue;
         }
-        await tx.consumoEstandar.create({
-          data: {
-            idProducto: r.idProducto,
-            idTalla: r.idTalla,
-            pulgadasPapel: r.pulgadasPapel,
-            vigenteDesde: r.vigenteDesde,
-            vigenteHasta: r.vigenteHasta,
-            creadoPor: idUsuarioActor,
-          },
-        });
-        creados++;
       }
-      return { creados, reemplazados, corregidos };
-    });
+      const c = candidatos[0];
+      throw new ConflictException(
+        `Fila ${r.fila}: ya existe un consumo estándar para "${c.producto.codigo}" + esa talla que se solapa con el rango dado y no se puede reemplazar automáticamente — revisar manualmente.`,
+      );
+    }
+
+    const resultado = await this.prisma.$transaction(
+      async (tx) => {
+        let creados = 0;
+        let reemplazados = 0;
+        let corregidos = 0;
+        for (const { r, idACorregir, idACerrar } of plan) {
+          if (idACorregir) {
+            await tx.consumoEstandar.update({
+              where: { idConsumoEstandar: idACorregir },
+              data: { pulgadasPapel: r.pulgadasPapel },
+            });
+            corregidos++;
+            continue;
+          }
+          if (idACerrar) {
+            await tx.consumoEstandar.update({
+              where: { idConsumoEstandar: idACerrar },
+              data: { vigenteHasta: r.vigenteDesde },
+            });
+            reemplazados++;
+          }
+          await tx.consumoEstandar.create({
+            data: {
+              idProducto: r.idProducto,
+              idTalla: r.idTalla,
+              pulgadasPapel: r.pulgadasPapel,
+              vigenteDesde: r.vigenteDesde,
+              vigenteHasta: r.vigenteHasta,
+              creadoPor: idUsuarioActor,
+            },
+          });
+          creados++;
+        }
+        return { creados, reemplazados, corregidos };
+      },
+      // Solo escrituras, pero son ~3,000: el default de 5s no alcanza.
+      { timeout: 120_000, maxWait: 10_000 },
+    );
 
     await this.auditoria.registrar({
       idUsuario: idUsuarioActor,

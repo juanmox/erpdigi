@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ContenidoSelectTallas } from '@/components/shared/select-tallas'
 import { ApiError } from '@/lib/api'
 import { catalogoApi } from '@/features/catalogo/api'
 import { recetasApi } from '@/features/recetas/api'
@@ -150,13 +151,7 @@ export function ModalConsumoEstandar({ open, onOpenChange }: ModalConsumoEstanda
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Seleccionar…" />
                 </SelectTrigger>
-                <SelectContent>
-                  {tallas?.map((t) => (
-                    <SelectItem key={t.idTalla} value={String(t.idTalla)}>
-                      {t.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
+                <ContenidoSelectTallas tallas={tallas} />
               </Select>
             </div>
             <div className="flex-1">

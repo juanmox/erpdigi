@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ContenidoSelectTallas } from '@/components/shared/select-tallas'
 import { Textarea } from '@/components/ui/textarea'
 import { ApiError } from '@/lib/api'
 import { catalogoApi } from '../api'
@@ -135,14 +136,7 @@ export function ModalDesarrollo({ desarrollo, open, onOpenChange }: Props) {
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Sin talla" />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={SIN_VALOR}>Sin talla</SelectItem>
-                {tallas?.map((t) => (
-                  <SelectItem key={t.idTalla} value={String(t.idTalla)}>
-                    {t.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
+              <ContenidoSelectTallas tallas={tallas} opcionVacia={{ value: SIN_VALOR, label: 'Sin talla' }} />
             </Select>
             <p className="text-muted-foreground mt-1 text-xs">Talla con la que se calculó el consumo.</p>
           </div>

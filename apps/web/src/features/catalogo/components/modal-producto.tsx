@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ContenidoSelectTallas } from '@/components/shared/select-tallas'
 import { ApiError } from '@/lib/api'
 import { formatGTQ } from '@digitexsa-erp/shared-utils'
 import { catalogoApi } from '../api'
@@ -209,14 +210,11 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Sin talla" />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={SIN_VALOR}>Sin talla</SelectItem>
-                {tallas?.map((t) => (
-                  <SelectItem key={t.idTalla} value={t.nombre}>
-                    {t.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
+              <ContenidoSelectTallas
+                tallas={tallas}
+                valorPor="nombre"
+                opcionVacia={{ value: SIN_VALOR, label: 'Sin talla' }}
+              />
             </Select>
           </div>
           <div>

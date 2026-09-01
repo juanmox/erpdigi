@@ -940,6 +940,57 @@ sin i18n (todo en español).
       vez de renombrar el existente, dejando huérfanas las asignaciones ya hechas a usuarios reales
       de prueba). Refleja mejor que el alcance real del rol es solo la pantalla de Reposiciones.
 
+  - **F4 — Fase A (datos del estándar) completada, 2026-08-31.** Es el requisito de la pantalla de
+    captura: sin estándares cargados, F4 calcularía cero para todo.
+    - **2,982 filas de `costeo.ConsumoEstandar` importadas** desde el archivo real del usuario
+      (`ERP plantilla_consumo_estandar.xlsx`, 3,079 filas de datos), cubriendo 381 productos.
+      Verificado que la columna generada `yardas` calcula bien (`TIR145L` talla L: 49.75 pulgadas →
+      1.3819 yd) y que el re-import es idempotente: la segunda corrida devolvió
+      `{creados: 0, corregidos: 2982}` sin duplicar.
+    - **97 filas quedaron fuera**, todas por producto inexistente (21 códigos: `BSNCWP09`, `SBRDS4`,
+      `FBBELT-22`…). Decisión del usuario: no darlos de alta ahora — con el refactor de desarrollos,
+      crear un producto exige un desarrollo aprobado con receta, así que no es una carga trivial.
+      La pantalla de F4 debe avisar explícitamente "sin estándar cargado" cuando toque una de esas.
+    - **⚠️ Bloqueante encontrado: faltaban 142 tallas.** El catálogo tenía 13 (`YXS…4XL`) y el
+      archivo real usa 155 — las 142 faltantes bloqueaban 583 de las 3,079 filas. Son las mismas que
+      F1 dejó fuera con el criterio "se dan de alta conforme aparezca una orden que las necesite";
+      resultó que sí están en uso. Sembradas en `seed.ts` (`TALLAS_ADICIONALES`), sin migración de
+      schema: la más larga tiene 7 caracteres y la columna es `VARCHAR(10)`.
+    - **Selectores de talla agrupados** (`components/shared/select-tallas.tsx`, usado por
+      modal-desarrollo, modal-producto y modal-consumo-estandar). Con 155 opciones una lista plana es
+      inusable. Dos niveles, ambos pedidos/validados por el usuario:
+      1. **"Más usadas" primero**, con las 13 originales. Medido contra el catálogo real: esas 13
+         concentran el **80.4%** del uso (la 14ª, `5XL`, baja de 289 filas a 25) — el corte es
+         nítido, no una impresión. Se descartó la alternativa de "elegir grupo y después talla":
+         obligaría a dos clics siempre, incluso para `L`.
+      2. Debajo, el resto por línea de prenda (`Youth·Adulto·Hombre·Mujer·Ladies Fit·Numérica·
+         Pantalón·Combinada`), usando el `grupo` que ya existía en el modelo desde F1.
+      Cada talla aparece **una sola vez** (las frecuentes no se repiten en su línea: dos ítems con el
+      mismo `value` romperían el `<Select>`). Verificado en navegador: 155 opciones, cero duplicados.
+    - `orden` se unificó en una sola escala (`base*4` dentro del bloque de su grupo) para que cada
+      variante quede junto a su base: `YXS · YS · YS+2 · YS+4 · YM …`. Antes las 13 originales
+      conservaban `orden` 1-13 y quedaban todas antes de las nuevas, dejando `YS+2` lejos de `YS`.
+    - Columna nueva `recetas.tallas.frecuente` (migración `20260831190000_talla_frecuente` + su
+      rollback). Se prefirió una columna a una lista incrustada en el frontend: queda explícita en el
+      modelo y **ajustable con un UPDATE**, sin desplegar, cuando el uso cambie. Es solo de
+      presentación — no participa de ningún cálculo, la combinación producto+talla se resuelve por
+      `nombre`.
+    - **⚠️ Bug propio encontrado al correr el import real**: `aplicarImportar()` reventaba con
+      `P2028` (transacción expirada a los 5s). La causa era el endurecimiento hecho poco antes —
+      re-resolver el solape server-side agregó **una consulta por fila**, o sea ~3,000 idas a la base
+      dentro de la transacción. Con 4 filas de prueba no se notaba. Corregido resolviendo **en lote**:
+      una sola consulta trae todos los solapes, la resolución ocurre en memoria y la transacción
+      queda solo con las escrituras. De 5s (agotado) a **3.6s para 2,982 filas**. Se dejó además
+      `timeout: 120s` como red, porque son ~3,000 escrituras.
+    - **Atribución**: las 2,982 filas quedaron a nombre del usuario `admin`. El usuario desechable no
+      se pudo borrar (`consumo_estandar_creado_por_fkey` es `RESTRICT` — el rastro de auditoría
+      protegiéndose, como debe), así que se reasignó `creado_por` antes de borrarlo.
+    - **Producción NO tiene nada de esto todavía**: ni las 142 tallas, ni la columna `frecuente`, ni
+      los 2,982 estándares. Van cuando se despliegue F4 — la migración y el seed son parte del
+      despliegue, y el import de datos es un paso manual aparte.
+    - **Sigue sin construirse**: Fase B (backend de captura), C (la pantalla responsive PC/tablet/
+      teléfono) y D (espejo a Google Sheets).
+
 ## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
 Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era
 apenas una columna de texto libre en `recetas.productos`. Eso invertía el proceso real de la

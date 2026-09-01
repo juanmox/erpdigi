@@ -342,25 +342,184 @@ const TIPOS_SERVICIO_COSTEO: Array<[codigo: string, nombre: string]> = [
   ['ERROR_ARCHIVOS', 'ERROR EN ARCHIVOS'],
 ]
 
-// grupo de las 13 tallas ya existentes en recetas.tallas (taxonomía sugerida
-// en ANEXO_B §6). Las otras ~145 tallas del anexo NO se cargan todavía —
-// mismo criterio que productos (S5b confirmado): se dan de alta conforme
-// aparezca una orden real que las necesite, no de forma masiva.
-const GRUPO_TALLAS_EXISTENTES: Record<string, string> = {
-  YXS: 'YOUTH',
-  YS: 'YOUTH',
-  YM: 'YOUTH',
-  YL: 'YOUTH',
-  YXL: 'YOUTH',
-  XS: 'ADULT',
-  S: 'ADULT',
-  M: 'ADULT',
-  L: 'ADULT',
-  XL: 'ADULT',
-  '2XL': 'ADULT',
-  '3XL': 'ADULT',
-  '4XL': 'ADULT',
+// grupo de las 13 tallas que ya existían en recetas.tallas (taxonomía de
+// ANEXO_B §6 / PROMPT_CLAUDE_CODE.md:203).
+// Se les reasigna tambien `orden` con la misma escala que TALLAS_ADICIONALES
+// (base*4 dentro del bloque de su grupo), o las 13 originales quedarian todas
+// antes de las nuevas y una variante como YS+2 caeria lejos de su base YS.
+const GRUPO_TALLAS_EXISTENTES: Record<string, { grupo: string; orden: number; frecuente: boolean }> = {
+  YXS: { grupo: 'YOUTH', orden: 100, frecuente: true },
+  YS: { grupo: 'YOUTH', orden: 104, frecuente: true },
+  YM: { grupo: 'YOUTH', orden: 108, frecuente: true },
+  YL: { grupo: 'YOUTH', orden: 112, frecuente: true },
+  YXL: { grupo: 'YOUTH', orden: 116, frecuente: true },
+  XS: { grupo: 'ADULT', orden: 200, frecuente: true },
+  S: { grupo: 'ADULT', orden: 204, frecuente: true },
+  M: { grupo: 'ADULT', orden: 208, frecuente: true },
+  L: { grupo: 'ADULT', orden: 212, frecuente: true },
+  XL: { grupo: 'ADULT', orden: 216, frecuente: true },
+  '2XL': { grupo: 'ADULT', orden: 220, frecuente: true },
+  '3XL': { grupo: 'ADULT', orden: 224, frecuente: true },
+  '4XL': { grupo: 'ADULT', orden: 228, frecuente: true },
 }
+
+// Las 142 tallas restantes de ANEXO_B. En F1 se dejaron fuera con el criterio
+// "se dan de alta conforme aparezca una orden real que las necesite", pero al
+// preparar F4 (Consumo de Papel) resultó que SÍ están en uso: bloqueaban 583 de
+// las 3,079 filas del catálogo real de Consumo Estándar. Todas caben en el
+// VARCHAR(10) de la columna, así que no hizo falta migración.
+//
+// `grupo` es solo para agrupar los selectores en pantalla — no participa de
+// ningún cálculo. La combinación producto+talla se resuelve por `nombre`, así
+// que un grupo mal asignado es cosmético y se corrige editando la fila.
+// Los casos ambiguos (MR, MX, M2, T2, XX) quedaron en su lectura más probable.
+//
+// `orden` respeta la escala real (XS < S < M < L < XL < 2XL < …) y coloca cada
+// variante "+N" justo después de su talla base.
+const TALLAS_ADICIONALES: { nombre: string; orden: number; grupo: string }[] = [
+  { nombre: 'YS+2', orden: 106, grupo: 'YOUTH' },
+  { nombre: 'YS+4', orden: 107, grupo: 'YOUTH' },
+  { nombre: 'YM+2', orden: 110, grupo: 'YOUTH' },
+  { nombre: 'YM+4', orden: 111, grupo: 'YOUTH' },
+  { nombre: 'YL+2', orden: 114, grupo: 'YOUTH' },
+  { nombre: 'YL+4', orden: 115, grupo: 'YOUTH' },
+  { nombre: 'YXL+2', orden: 118, grupo: 'YOUTH' },
+  { nombre: 'YXL+4', orden: 119, grupo: 'YOUTH' },
+  { nombre: '3XS', orden: 188, grupo: 'ADULT' },
+  { nombre: '2XS', orden: 192, grupo: 'ADULT' },
+  { nombre: 'XS+2', orden: 202, grupo: 'ADULT' },
+  { nombre: 'XS+4', orden: 203, grupo: 'ADULT' },
+  { nombre: 'S+1', orden: 205, grupo: 'ADULT' },
+  { nombre: 'S+2', orden: 206, grupo: 'ADULT' },
+  { nombre: 'S+4', orden: 207, grupo: 'ADULT' },
+  { nombre: 'M+1', orden: 209, grupo: 'ADULT' },
+  { nombre: 'M+2', orden: 210, grupo: 'ADULT' },
+  { nombre: 'M+4', orden: 211, grupo: 'ADULT' },
+  { nombre: 'L+2', orden: 214, grupo: 'ADULT' },
+  { nombre: 'L+4', orden: 215, grupo: 'ADULT' },
+  { nombre: 'XL+1', orden: 217, grupo: 'ADULT' },
+  { nombre: 'XL+2', orden: 218, grupo: 'ADULT' },
+  { nombre: 'XL+4', orden: 219, grupo: 'ADULT' },
+  { nombre: '2XL+2', orden: 222, grupo: 'ADULT' },
+  { nombre: '2XL+4', orden: 223, grupo: 'ADULT' },
+  { nombre: '3XL+2', orden: 226, grupo: 'ADULT' },
+  { nombre: '3XL+4', orden: 227, grupo: 'ADULT' },
+  { nombre: '4XL+2', orden: 230, grupo: 'ADULT' },
+  { nombre: '4XL+4', orden: 231, grupo: 'ADULT' },
+  { nombre: '5XL', orden: 232, grupo: 'ADULT' },
+  { nombre: '5XL+2', orden: 234, grupo: 'ADULT' },
+  { nombre: '5XL+4', orden: 235, grupo: 'ADULT' },
+  { nombre: '6XL', orden: 236, grupo: 'ADULT' },
+  { nombre: '6XL+2', orden: 238, grupo: 'ADULT' },
+  { nombre: '6XL+4', orden: 239, grupo: 'ADULT' },
+  { nombre: '7XL', orden: 240, grupo: 'ADULT' },
+  { nombre: '7XL+2', orden: 242, grupo: 'ADULT' },
+  { nombre: '7XL+4', orden: 243, grupo: 'ADULT' },
+  { nombre: 'MS', orden: 304, grupo: 'MEN' },
+  { nombre: 'MS+2', orden: 306, grupo: 'MEN' },
+  { nombre: 'MM', orden: 308, grupo: 'MEN' },
+  { nombre: 'MM+2', orden: 310, grupo: 'MEN' },
+  { nombre: 'MM+4', orden: 311, grupo: 'MEN' },
+  { nombre: 'ML', orden: 312, grupo: 'MEN' },
+  { nombre: 'ML+2', orden: 314, grupo: 'MEN' },
+  { nombre: 'ML+4', orden: 315, grupo: 'MEN' },
+  { nombre: 'MXL', orden: 316, grupo: 'MEN' },
+  { nombre: 'MXL+2', orden: 318, grupo: 'MEN' },
+  { nombre: 'MXL+4', orden: 319, grupo: 'MEN' },
+  { nombre: 'M2XL', orden: 320, grupo: 'MEN' },
+  { nombre: 'M2XL+2', orden: 322, grupo: 'MEN' },
+  { nombre: 'M2XL+4', orden: 323, grupo: 'MEN' },
+  { nombre: 'M3XL', orden: 324, grupo: 'MEN' },
+  { nombre: 'M3XL+2', orden: 326, grupo: 'MEN' },
+  { nombre: 'M3XL+4', orden: 327, grupo: 'MEN' },
+  { nombre: 'M4XL', orden: 328, grupo: 'MEN' },
+  { nombre: 'M4XL+2', orden: 330, grupo: 'MEN' },
+  { nombre: 'M4XL+4', orden: 331, grupo: 'MEN' },
+  { nombre: 'M4XL+6', orden: 331, grupo: 'MEN' },
+  { nombre: 'M5XL', orden: 332, grupo: 'MEN' },
+  { nombre: 'M5XL+2', orden: 334, grupo: 'MEN' },
+  { nombre: 'M5XL+4', orden: 335, grupo: 'MEN' },
+  { nombre: 'M5XL+6', orden: 335, grupo: 'MEN' },
+  { nombre: 'M6XL', orden: 336, grupo: 'MEN' },
+  { nombre: 'M7XL', orden: 340, grupo: 'MEN' },
+  { nombre: 'M7XL+4', orden: 343, grupo: 'MEN' },
+  { nombre: 'WS', orden: 404, grupo: 'WOMEN' },
+  { nombre: 'WS+2', orden: 406, grupo: 'WOMEN' },
+  { nombre: 'WM', orden: 408, grupo: 'WOMEN' },
+  { nombre: 'WM+2', orden: 410, grupo: 'WOMEN' },
+  { nombre: 'WL', orden: 412, grupo: 'WOMEN' },
+  { nombre: 'WL+2', orden: 414, grupo: 'WOMEN' },
+  { nombre: 'WXL', orden: 416, grupo: 'WOMEN' },
+  { nombre: 'WXL+2', orden: 418, grupo: 'WOMEN' },
+  { nombre: 'W2XL', orden: 420, grupo: 'WOMEN' },
+  { nombre: 'W2XL+2', orden: 422, grupo: 'WOMEN' },
+  { nombre: 'W3XL', orden: 424, grupo: 'WOMEN' },
+  { nombre: 'W4XL', orden: 428, grupo: 'WOMEN' },
+  { nombre: 'LF-XS', orden: 500, grupo: 'LADIES_FIT' },
+  { nombre: 'LFXS', orden: 500, grupo: 'LADIES_FIT' },
+  { nombre: 'LXS', orden: 500, grupo: 'LADIES_FIT' },
+  { nombre: 'LXS+2', orden: 502, grupo: 'LADIES_FIT' },
+  { nombre: 'LXS+4', orden: 503, grupo: 'LADIES_FIT' },
+  { nombre: 'LF-S', orden: 504, grupo: 'LADIES_FIT' },
+  { nombre: 'LFS', orden: 504, grupo: 'LADIES_FIT' },
+  { nombre: 'LS', orden: 504, grupo: 'LADIES_FIT' },
+  { nombre: 'LS+2', orden: 506, grupo: 'LADIES_FIT' },
+  { nombre: 'LS+4', orden: 507, grupo: 'LADIES_FIT' },
+  { nombre: 'LF-M', orden: 508, grupo: 'LADIES_FIT' },
+  { nombre: 'LFM', orden: 508, grupo: 'LADIES_FIT' },
+  { nombre: 'LM', orden: 508, grupo: 'LADIES_FIT' },
+  { nombre: 'LM+2', orden: 510, grupo: 'LADIES_FIT' },
+  { nombre: 'LM+4', orden: 511, grupo: 'LADIES_FIT' },
+  { nombre: 'LF-L', orden: 512, grupo: 'LADIES_FIT' },
+  { nombre: 'LFL', orden: 512, grupo: 'LADIES_FIT' },
+  { nombre: 'LL', orden: 512, grupo: 'LADIES_FIT' },
+  { nombre: 'LL+2', orden: 514, grupo: 'LADIES_FIT' },
+  { nombre: 'LL+4', orden: 515, grupo: 'LADIES_FIT' },
+  { nombre: 'LF-XL', orden: 516, grupo: 'LADIES_FIT' },
+  { nombre: 'LFXL', orden: 516, grupo: 'LADIES_FIT' },
+  { nombre: 'LXL', orden: 516, grupo: 'LADIES_FIT' },
+  { nombre: 'LXL+2', orden: 518, grupo: 'LADIES_FIT' },
+  { nombre: 'LXL+4', orden: 519, grupo: 'LADIES_FIT' },
+  { nombre: 'L2XL', orden: 520, grupo: 'LADIES_FIT' },
+  { nombre: 'LF-2XL', orden: 520, grupo: 'LADIES_FIT' },
+  { nombre: 'LF2XL', orden: 520, grupo: 'LADIES_FIT' },
+  { nombre: 'L2XL+2', orden: 522, grupo: 'LADIES_FIT' },
+  { nombre: 'L2XL+4', orden: 523, grupo: 'LADIES_FIT' },
+  { nombre: 'L3XL', orden: 524, grupo: 'LADIES_FIT' },
+  { nombre: 'LF-3XL', orden: 524, grupo: 'LADIES_FIT' },
+  { nombre: 'LF3XL', orden: 524, grupo: 'LADIES_FIT' },
+  { nombre: 'L3XL+2', orden: 526, grupo: 'LADIES_FIT' },
+  { nombre: 'L3XL+4', orden: 527, grupo: 'LADIES_FIT' },
+  { nombre: 'L4XL', orden: 528, grupo: 'LADIES_FIT' },
+  { nombre: 'LF-4XL', orden: 528, grupo: 'LADIES_FIT' },
+  { nombre: 'LF4XL', orden: 528, grupo: 'LADIES_FIT' },
+  { nombre: 'L4XL+2', orden: 530, grupo: 'LADIES_FIT' },
+  { nombre: 'L4XL+4', orden: 531, grupo: 'LADIES_FIT' },
+  { nombre: 'M2', orden: 560, grupo: 'ADULT' },
+  { nombre: 'T2', orden: 560, grupo: 'ADULT' },
+  { nombre: 'XX', orden: 560, grupo: 'ADULT' },
+  { nombre: 'XXL', orden: 560, grupo: 'ADULT' },
+  { nombre: 'XXS', orden: 560, grupo: 'ADULT' },
+  { nombre: 'XXXL', orden: 560, grupo: 'ADULT' },
+  { nombre: 'XXXS', orden: 560, grupo: 'ADULT' },
+  { nombre: 'MR', orden: 660, grupo: 'MEN' },
+  { nombre: 'MX', orden: 660, grupo: 'MEN' },
+  { nombre: 'WR-4', orden: 756, grupo: 'WOMEN' },
+  { nombre: 'WR-2', orden: 758, grupo: 'WOMEN' },
+  { nombre: 'WR', orden: 760, grupo: 'WOMEN' },
+  { nombre: 'WR+2', orden: 762, grupo: 'WOMEN' },
+  { nombre: '10', orden: 960, grupo: 'NUMERICA' },
+  { nombre: '12', orden: 960, grupo: 'NUMERICA' },
+  { nombre: '14', orden: 960, grupo: 'NUMERICA' },
+  { nombre: '16', orden: 960, grupo: 'NUMERICA' },
+  { nombre: '8', orden: 960, grupo: 'NUMERICA' },
+  { nombre: '34Wx34L', orden: 1060, grupo: 'PANT' },
+  { nombre: '38Wx34L', orden: 1060, grupo: 'PANT' },
+  { nombre: '40Wx36L', orden: 1060, grupo: 'PANT' },
+  { nombre: 'L-XL', orden: 1160, grupo: 'COMBINADA' },
+  { nombre: 'LARGE-2', orden: 1160, grupo: 'COMBINADA' },
+  { nombre: 'S-M', orden: 1160, grupo: 'COMBINADA' },
+]
 
 async function upsertPermiso(codigo: string) {
   return prisma.permiso.upsert({
@@ -449,10 +608,20 @@ async function seedCosteo() {
   )
 
   await Promise.all(
-    Object.entries(GRUPO_TALLAS_EXISTENTES).map(([nombre, grupo]) =>
-      prisma.talla.updateMany({ where: { nombre }, data: { grupo } }),
+    Object.entries(GRUPO_TALLAS_EXISTENTES).map(([nombre, v]) =>
+      prisma.talla.updateMany({ where: { nombre }, data: v }),
     ),
   )
+
+  // upsert por nombre (es UNIQUE): re-sembrar corrige orden/grupo sin duplicar
+  // ni tocar el id, que es lo que referencian consumo_estandar y consumo_papel.
+  for (const t of TALLAS_ADICIONALES) {
+    await prisma.talla.upsert({
+      where: { nombre: t.nombre },
+      update: { orden: t.orden, grupo: t.grupo, frecuente: false },
+      create: { ...t, frecuente: false },
+    })
+  }
 
   return { departamentos, defectos, tiposPapel, impresoras, calandras, tiposServicio }
 }

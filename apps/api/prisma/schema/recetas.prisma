@@ -197,6 +197,10 @@ model Talla {
   orden   Int     @default(0)
   /// Agregado para el módulo Costeo Real — YOUTH·ADULT·WOMEN·MEN·LADIES_FIT·PANT·NUMERICA·COMBINADA·AJUSTADA (ver docs/02-MODELO-ER-PROPUESTO.md)
   grupo   String? @db.VarChar(20)
+  /// Las 13 tallas que concentran el 80.4% del catálogo real de consumo
+  /// estándar. Solo agrupa los selectores primero; no participa de ningún
+  /// cálculo y se puede reasignar sin desplegar.
+  frecuente Boolean @default(false)
 
   /// Relaciones inversas del módulo Costeo Real (costeo.prisma).
   consumosEstandarCosteo      ConsumoEstandar[]
