@@ -6,6 +6,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -19,6 +20,17 @@ import {
 @Controller('costeo/consumo-papel')
 export class CosteoConsumoPapelController {
   constructor(private readonly service: CosteoConsumoPapelService) {}
+
+  // Antes que @Get('orden/:codigo') no hace falta (rutas distintas), pero se
+  // deja arriba porque es la entrada natural de la pantalla.
+  @RequirePermissions('costeo.consumo.ver')
+  @Get('pendientes')
+  pendientes(@Query('idImpresora') idImpresora?: string) {
+    const id = idImpresora ? Number(idImpresora) : undefined;
+    return this.service.pendientes(
+      Number.isFinite(id) && id! > 0 ? id : undefined,
+    );
+  }
 
   @RequirePermissions('costeo.consumo.ver')
   @Get('orden/:codigo')

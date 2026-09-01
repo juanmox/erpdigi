@@ -46,3 +46,13 @@ export interface OrdenConsumo {
   }
   lineas: LineaConsumo[]
 }
+
+export interface LineaPendiente {
+  idLineaProduccion: number
+  codigoLine: string
+  codigoOp: string
+  cliente: string | null
+  producto: string
+  impresora: { idImpresora: number; codigo: string } | null
+  totalPiezas: number
+}

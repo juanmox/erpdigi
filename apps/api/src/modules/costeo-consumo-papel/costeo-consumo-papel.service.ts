@@ -211,6 +211,51 @@ export class CosteoConsumoPapelService {
   }
 
   /**
+   * Trabajo pendiente, opcionalmente filtrado por impresora.
+   *
+   * Existe porque sin esto había que saber de memoria qué OP existen: la
+   * pantalla obligaba a teclear un código a ciegas. El operario piensa desde la
+   * máquina que tiene enfrente ("¿qué me toca en la MS 2?"), no desde el número
+   * de orden.
+   *
+   * Devuelve una fila por LÍNEA pendiente, no por OP: una misma orden puede
+   * repartirse entre varias impresoras, así que agrupar por OP mostraría trabajo
+   * que no es de esa máquina.
+   */
+  async pendientes(idImpresora?: number, limite = 200) {
+    const lineas = await this.prisma.lineaProduccion.findMany({
+      where: {
+        ...(idImpresora ? { idImpresora } : {}),
+        // Sin ningún consumo vigente todavía. `procesadaEn` no sirve como
+        // filtro: se marca en el primer envío, aunque queden tallas sueltas.
+        consumosPapel: {
+          none: { origen: 'PRODUCCION', anuladoEn: null },
+        },
+      },
+      include: {
+        ordenProduccion: { include: { cliente: true } },
+        producto: { select: { codigo: true } },
+        impresora: { select: { idImpresora: true, codigo: true } },
+        tallas: { select: { cantidad: true } },
+      },
+      orderBy: [{ impresora: { orden: 'asc' } }, { codigoLine: 'asc' }],
+      take: limite,
+    });
+
+    return {
+      lineas: lineas.map((l) => ({
+        idLineaProduccion: l.idLineaProduccion,
+        codigoLine: l.codigoLine,
+        codigoOp: l.ordenProduccion.codigo,
+        cliente: l.ordenProduccion.cliente?.nombre ?? null,
+        producto: l.producto.codigo,
+        impresora: l.impresora,
+        totalPiezas: l.tallas.reduce((a, t) => a + t.cantidad, 0),
+      })),
+    };
+  }
+
+  /**
    * Registra el consumo de UNA línea (todas sus tallas pendientes).
    *
    * Como en Reposiciones, el rollo NUNCA se teclea: se resuelve con

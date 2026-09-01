@@ -8,6 +8,7 @@ import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
 import { normalizarCodigoCosteo } from '@/lib/codigos-costeo'
 import { costeoConsumoApi } from './api'
+import { PanelPendientes } from './components/panel-pendientes'
 import { TarjetaLinea } from './components/tarjeta-linea'
 
 type Filtro = 'pendientes' | 'todas'
@@ -53,6 +54,7 @@ export function ConsumoPage() {
       // El consumo descuenta del rollo montado: el panel de Gestión de Rollos
       // muestra papel disponible y quedaría desactualizado.
       queryClient.invalidateQueries({ queryKey: ['rollos'] })
+      queryClient.invalidateQueries({ queryKey: ['consumo', 'pendientes'] })
     },
     onError: (e) =>
       setMensaje({
@@ -112,6 +114,16 @@ export function ConsumoPage() {
           {isFetching ? 'Buscando…' : 'Buscar'}
         </Button>
       </div>
+
+      {/* Sin esto había que saber de memoria qué OP existen: la pantalla
+          obligaba a teclear un código a ciegas. */}
+      <PanelPendientes
+        onElegirOp={(op) => {
+          setTexto(op)
+          setCodigo(op)
+          setMensaje(null)
+        }}
+      />
 
       {error && (
         <Alert variant="destructive">

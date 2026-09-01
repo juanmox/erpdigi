@@ -63,21 +63,26 @@ export function EstandarPage() {
             </div>
           </div>
 
-          <Table>
+          {/* Anchos en % con table-fixed: la descripción del producto es larga y
+              sin esto empujaba la tabla más allá del ancho de la ventana,
+              dejando las columnas de fecha fuera de vista. Mismo criterio que
+              las tablas de Gestión de datos. */}
+          <div className="overflow-x-auto rounded-md border">
+          <Table className="w-full table-fixed min-w-[760px]">
             <TableHeader>
               <TableRow>
-                <TableHead>Producto</TableHead>
-                <TableHead>Talla</TableHead>
-                <TableHead className="text-right">Pulgadas</TableHead>
-                <TableHead className="text-right">Yardas</TableHead>
-                <TableHead>Vigente desde</TableHead>
-                <TableHead>Vigente hasta</TableHead>
+                <TableHead className="w-[40%]">Producto</TableHead>
+                <TableHead className="w-[8%]">Talla</TableHead>
+                <TableHead className="w-[11%] text-right">Pulgadas</TableHead>
+                <TableHead className="w-[11%] text-right">Yardas</TableHead>
+                <TableHead className="w-[15%]">Vigente desde</TableHead>
+                <TableHead className="w-[15%]">Vigente hasta</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filas?.map((f) => (
                 <TableRow key={f.idConsumoEstandar}>
-                  <TableCell>
+                  <TableCell className="break-words whitespace-normal">
                     <span className="font-mono">{f.producto.codigo}</span> — {f.producto.descripcion}
                   </TableCell>
                   <TableCell>{f.talla.nombre}</TableCell>
@@ -96,6 +101,7 @@ export function EstandarPage() {
               )}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
 

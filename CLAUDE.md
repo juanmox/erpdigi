@@ -1110,6 +1110,37 @@ sin i18n (todo en español).
     - **Falta**: Fase D (espejo a Google Sheets hacia la hoja "Datos"/ConsumosFinal, reusando
       `GoogleSheetsService`, llenando las columnas que Reposiciones deja vacías).
 
+  - **F4 — 4 hallazgos del usuario probando la pantalla, corregidos (2026-09-01)**:
+    1. **La tabla de Consumo Estándar se cortaba en la columna Talla.** Tenía sus 6 columnas pero sin
+       contenedor con scroll ni anchos fijos: la descripción del producto empujaba la tabla más allá
+       del ancho de la ventana y las columnas de fecha quedaban invisibles, sin señal de que hubiera
+       más. Mismo defecto y mismo arreglo que las tablas de Gestión de datos: `table-fixed` con
+       anchos en porcentaje, `min-w`, contenedor `overflow-x-auto` y `break-words` en la descripción.
+    2. **⚠️ `UA-FB03MP(M-L-X)` aparecía sin consumo estándar — error de secuencia propio.** El import
+       de los 2,982 estándares se corrió ANTES de corregir los 31 códigos truncados, así que las
+       filas de ese producto cayeron entre las 97 rechazadas por "producto no existe" (la base tenía
+       `UA-FB03MP(M-L-X` sin el paréntesis). Al corregir los códigos nunca se reimportó. Resuelto
+       reimportando: +3 filas (M, L y XL — justo las tallas que usan sus líneas de OP), las 2,982
+       existentes corregidas en el lugar sin duplicar, y la OP `26OP010345` pasó de 2 líneas
+       bloqueadas a 0. **De los 31 códigos corregidos solo ése está en el archivo de estándares**;
+       los otros 30 siguen sin estándar por ausencia en el archivo, no por el truncamiento.
+       *Lección*: si se corrigen códigos de producto después de un import que los resuelve por
+       código, hay que reimportar — el import no se entera solo.
+    3. **La pantalla obligaba a adivinar qué OP existen.** Solo tenía el buscador por código, así que
+       sin saber de memoria los números no había forma de encontrar trabajo. Se agregó
+       `GET /costeo/consumo-papel/pendientes?idImpresora=` + `components/panel-pendientes.tsx`: panel
+       arriba con selector de impresora que lista las OP con líneas sin enviar (líneas, piezas,
+       cliente), y un clic abre la orden. Con los datos reales ofrece 53 órdenes.
+       Dos decisiones al construirlo: el backend consulta **líneas y no órdenes**, porque una misma OP
+       puede repartirse entre varias impresoras y agrupar por OP mostraría trabajo de otra máquina; y
+       el criterio de "pendiente" es *no tener ningún consumo vigente*, **no** `procesada_en` — esa
+       marca se pone en el primer envío aunque queden tallas sueltas.
+    4. **Pregunta del usuario: sí queda registrado quién envía.** `consumo_papel.creado_por` es
+       **NOT NULL** (no puede quedar vacío) junto con `creado_en`; al anular se guardan
+       `anulado_por`, `anulado_en` y el motivo. Además se escribe un registro en `core.auditoria`.
+       Verificado contra el schema real. Esa FK es lo bastante estricta como para impedir borrar un
+       usuario que haya creado datos: hay que reasignar `creado_por` primero.
+
 ## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
 Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era
 apenas una columna de texto libre en `recetas.productos`. Eso invertía el proceso real de la
