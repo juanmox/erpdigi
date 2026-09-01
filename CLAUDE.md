@@ -1030,6 +1030,49 @@ sin i18n (todo en español).
     - Autoría de las OP y líneas reasignada al usuario `admin` (el usuario de prueba desechable no se
       puede borrar mientras sea `creado_por`, por la FK `RESTRICT`).
 
+  - **F4 — Fase B (backend de captura) completada, 2026-08-31.** Módulo nuevo
+    `apps/api/src/modules/costeo-consumo-papel/`, con los permisos que ya existían desde F1
+    (`costeo.consumo.ver` / `.capturar` / `.anular` — sin permiso nuevo).
+    - `GET /costeo/consumo-papel/orden/:codigo` — la OP con sus líneas, tallas y cantidades, el
+      estándar vigente resuelto y el consumo YA calculado en el servidor (convención #1). Devuelve
+      por línea tres estados que la pantalla necesita: `completa` (todo enviado), `sinEstandar`
+      (nombres de las tallas sin estándar) y `enviable`.
+    - `POST /costeo/consumo-papel` — captura una línea completa. `PATCH /:id/anular` con el mismo
+      patrón `anulado_en` de Reposiciones.
+    - **Las tres fórmulas salieron del `Código.gs` legacy, no de interpretación** (líneas 183-205):
+      `consumo = estándar_yardas * cantidad` (columna M), `enguiamiento = cantidad * 0.084375`
+      (columna K), `en blanco = cantidad * 0.6` (columna L). **La tercera corrigió un supuesto
+      previo**: el "en blanco" se calcula sobre la CANTIDAD, no sobre el consumo — calcularlo sobre
+      el consumo habría dado un número muy distinto.
+    - El rollo NUNCA se teclea ni se acepta del cliente: se resuelve con `fn_rollo_en(impresora,
+      fecha)` y de ahí sale el tipo de papel, igual que Reposiciones. Si no hay rollo montado en ese
+      instante se rechaza con 409 en vez de guardar un dato indeterminado.
+    - Se guarda `id_consumo_estandar` (corrección #4 de §6.2): el recosteo futuro puede reproducirse
+      con la versión del estándar que regía ese día, no con la de hoy.
+    - `procesada_en` se marca en la línea en vez de borrar el origen (corrección #3).
+    - **Columna nueva `costeo.linea_produccion.factor_enguiamiento`** (migración
+      `20260831210000_linea_factor_enguiamiento` + rollback), default `0.084375`. Es la corrección #2
+      de §6.2: la constante deja de estar incrustada en el código y pasa a ser un default
+      configurable por línea. No confundir con `enguiamiento_yd`, que es el total que Diseño teclea
+      y que F4 usa solo como contraste.
+    - **⚠️ Bug propio, corregido: la idempotencia no puede hacerse con try/catch en Postgres.** El
+      primer intento atrapaba el `P2002` del índice único parcial y seguía con la talla siguiente —
+      patrón que funciona en otros motores, pero en Postgres **una sentencia fallida aborta la
+      transacción entera** (`25P02: current transaction is aborted`), así que reenviar una línea ya
+      procesada devolvía 500. Corregido consultando antes qué tallas ya están enviadas y salteándolas;
+      el índice único sigue siendo la garantía real ante concurrencia. Habría alternativa con
+      SAVEPOINT, pero consultar antes es más simple y además permite informar qué se salteó.
+    - **Verificado con curl contra las 68 OP reales** (usuario desechable, borrado al terminar):
+      lectura de OP con líneas enviables y no enviables, captura exitosa con cálculo verificado a mano
+      contra SQL (2XL: 2 × 0.9097 = 1.8194; enguiamiento 2 × 0.084375 = 0.1688), rechazo 400 de una
+      línea sin estándar nombrando las tallas faltantes, reenvío idempotente
+      (`{creadas: 0, yaEstaban: [...]}`), anulación y doble anulación (409). Datos de prueba borrados.
+    - **Nota de proceso**: durante las pruebas se anuló por error una reposición preexistente (se usó
+      `min(id_consumo_papel)` sin verificar cuál era). Se detectó al revisar los totales por rollo,
+      que no cuadraban, y se revirtió. Al probar sobre una base con datos de sesiones anteriores,
+      conviene elegir los ids a tocar explícitamente, no por agregación.
+    - **Falta**: Fase C (pantalla responsive PC/tablet/teléfono) y D (espejo a Google Sheets).
+
 ## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
 Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era
 apenas una columna de texto libre en `recetas.productos`. Eso invertía el proceso real de la

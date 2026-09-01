@@ -314,6 +314,11 @@ model LineaProduccion {
   enguiamientoYd     Decimal   @default(0) @map("enguiamiento_yd") @db.Decimal(10, 4)
   consumoEnBlanco    Boolean   @default(false) @map("consumo_en_blanco")
   factorEnBlanco     Decimal   @default(0.6) @map("factor_en_blanco") @db.Decimal(6, 4)
+  /// Factor de enguiamiento por pieza. Default = la constante 0.084375 del
+  /// legacy, ahora configurable por línea (corrección #2 de §6.2). No confundir
+  /// con `enguiamientoYd`, que es el total que Diseño teclea y F4 usa solo como
+  /// contraste del calculado.
+  factorEnguiamiento Decimal   @default(0.084375) @map("factor_enguiamiento") @db.Decimal(8, 6)
   fechaData          DateTime? @map("fecha_data") @db.Date
   fechaRecibido      DateTime? @map("fecha_recibido") @db.Date
   fechaCliente       DateTime? @map("fecha_cliente") @db.Date

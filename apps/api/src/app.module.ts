@@ -8,6 +8,7 @@ import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
+import { CosteoConsumoPapelModule } from './modules/costeo-consumo-papel/costeo-consumo-papel.module';
 import { CosteoEstandarModule } from './modules/costeo-estandar/costeo-estandar.module';
 import { CosteoOrdenesModule } from './modules/costeo-ordenes/costeo-ordenes.module';
 import { CosteoReposicionesModule } from './modules/costeo-reposiciones/costeo-reposiciones.module';
@@ -49,6 +50,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CosteoRollosModule,
     CosteoOrdenesModule,
     CosteoReposicionesModule,
+    CosteoConsumoPapelModule,
     CosteoEstandarModule,
   ],
   controllers: [AppController],
