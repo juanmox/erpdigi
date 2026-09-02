@@ -1,5 +1,14 @@
-import { apiFetch } from '@/lib/api'
-import type { EstadoRollo, FacturaConRollos, Impresora, MontajeDetalle, PanelItem, RolloPapel, TipoPapel } from './types'
+import { apiFetch, descargarArchivo } from '@/lib/api'
+import type {
+  EstadoRollo,
+  FacturaConRollos,
+  FilaPreviewIngresoRollo,
+  Impresora,
+  MontajeDetalle,
+  PanelItem,
+  RolloPapel,
+  TipoPapel,
+} from './types'
 
 export const costeoRollosApi = {
   listarImpresoras: () => apiFetch<Impresora[]>('/costeo/rollos/impresoras'),
@@ -45,4 +54,17 @@ export const costeoRollosApi = {
       body: JSON.stringify(body),
     }),
   detalleMontaje: (idMontajeRollo: number) => apiFetch<MontajeDetalle>(`/costeo/rollos/montajes/${idMontajeRollo}`),
+
+  plantillaImportar: () =>
+    descargarArchivo('/costeo/rollos/plantilla-importar', 'plantilla_ingreso_rollos.xlsx'),
+  previewImportar: (archivo: File) =>
+    apiFetch<{ filas: FilaPreviewIngresoRollo[] }>('/costeo/rollos/importar/preview', {
+      method: 'POST',
+      body: archivo,
+    }),
+  aplicarImportar: (filas: FilaPreviewIngresoRollo[]) =>
+    apiFetch<{ facturas: number; rollos: number }>('/costeo/rollos/importar/aplicar', {
+      method: 'POST',
+      body: JSON.stringify({ filas }),
+    }),
 }

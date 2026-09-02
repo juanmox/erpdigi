@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import type { LineaConsumo } from '../types'
 
 /**
@@ -17,11 +18,15 @@ export function TarjetaLinea({
   onEnviar,
   enviando,
   puedeCapturar,
+  seleccionada,
+  onSeleccionar,
 }: {
   linea: LineaConsumo
   onEnviar: () => void
   enviando: boolean
   puedeCapturar: boolean
+  seleccionada: boolean
+  onSeleccionar: (v: boolean) => void
 }) {
   const bloqueada = linea.sinEstandar.length > 0
   // El enguiamiento que tecleó Diseño contra el que sale de la fórmula. Se
@@ -34,23 +39,44 @@ export function TarjetaLinea({
     <div
       className={
         'rounded-lg border p-3 ' +
-        (linea.completa ? 'bg-black/[0.02] dark:bg-white/[0.03]' : 'bg-card')
+        (linea.completa
+          ? 'bg-black/[0.02] dark:bg-white/[0.03]'
+          : seleccionada
+            ? 'border-primary bg-primary/[0.04]'
+            : 'bg-card')
       }
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="font-mono text-sm font-semibold break-all">{linea.codigoLine}</div>
-          <div className="text-muted-foreground text-xs break-words">
-            {linea.producto.codigo} · Desarrollo {linea.producto.desarrollo}
+      {/* Sin flex-wrap: con el checkbox adelante, una descripción larga
+          empujaba el badge a su propia línea y la tarjeta quedaba descuadrada.
+          El badge no se encoge; lo que se angosta es el bloque de texto. */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          {/* Solo lo enviable se puede seleccionar: marcar algo bloqueado o ya
+              enviado solo generaría fallas en el resumen del envío masivo. */}
+          {puedeCapturar && linea.enviable && (
+            <Checkbox
+              checked={seleccionada}
+              onCheckedChange={(v) => onSeleccionar(v === true)}
+              aria-label={`Seleccionar ${linea.codigoLine}`}
+              className="mt-0.5"
+            />
+          )}
+          <div className="min-w-0">
+            <div className="font-mono text-sm font-semibold break-all">{linea.codigoLine}</div>
+            <div className="text-muted-foreground text-xs break-words">
+              {linea.producto.codigo} · Desarrollo {linea.producto.desarrollo}
+            </div>
           </div>
         </div>
-        {linea.completa ? (
-          <Badge variant="secondary">Ya enviada</Badge>
-        ) : bloqueada ? (
-          <Badge variant="destructive">Falta estándar</Badge>
-        ) : (
-          <Badge>Pendiente</Badge>
-        )}
+        <div className="shrink-0">
+          {linea.completa ? (
+            <Badge variant="secondary">Ya enviada</Badge>
+          ) : bloqueada ? (
+            <Badge variant="destructive">Falta estándar</Badge>
+          ) : (
+            <Badge>Pendiente</Badge>
+          )}
+        </div>
       </div>
 
       <div className="text-muted-foreground mt-2 text-xs">

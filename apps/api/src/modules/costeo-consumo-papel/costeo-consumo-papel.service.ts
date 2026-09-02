@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -263,13 +264,68 @@ export class CosteoConsumoPapelService {
    * impresora no tiene rollo montado en ese instante se rechaza, en vez de
    * guardar un dato indeterminado.
    */
-  async capturar(dto: CapturarConsumoDto, idUsuarioActor: number) {
+  /**
+   * Envía varias líneas. Cada una va en SU PROPIA transacción a propósito: si
+   * se seleccionan 50 y 3 fallan (por ejemplo porque su impresora no tenía
+   * rollo montado en ese momento), no tiene sentido perder las 47 buenas. Se
+   * devuelve un resumen de qué entró, qué ya estaba y qué falló con su motivo.
+   */
+  async capturarLote(dto: CapturarConsumoDto, idUsuarioActor: number) {
+    const resultado = {
+      enviadas: [] as { codigoLine: string; tallas: number }[],
+      yaEstaban: [] as { codigoLine: string; tallas: string[] }[],
+      fallidas: [] as {
+        idLineaProduccion: number;
+        codigoLine?: string;
+        motivo: string;
+        /** Marca el caso de "impresora sin rollo montado", que tiene arreglo propio. */
+        sinRollo?: boolean;
+      }[],
+    };
+    for (const id of dto.idsLineaProduccion) {
+      try {
+        const r = await this.capturarUna(id, dto, idUsuarioActor);
+        if (r.creadas > 0)
+          resultado.enviadas.push({
+            codigoLine: r.codigoLine,
+            tallas: r.creadas,
+          });
+        if (r.yaEstaban.length > 0)
+          resultado.yaEstaban.push({
+            codigoLine: r.codigoLine,
+            tallas: r.yaEstaban,
+          });
+      } catch (e) {
+        const respuesta = e instanceof HttpException ? e.getResponse() : null;
+        const cuerpo =
+          respuesta && typeof respuesta === 'object'
+            ? (respuesta as { message?: string; motivo?: string })
+            : null;
+        resultado.fallidas.push({
+          idLineaProduccion: id,
+          motivo:
+            typeof respuesta === 'string'
+              ? respuesta
+              : (cuerpo?.message ??
+                (e instanceof HttpException ? e.message : 'Error inesperado')),
+          sinRollo: cuerpo?.motivo === 'SIN_ROLLO_MONTADO' || undefined,
+        });
+      }
+    }
+    return resultado;
+  }
+
+  private async capturarUna(
+    idLineaProduccion: number,
+    dto: CapturarConsumoDto,
+    idUsuarioActor: number,
+  ) {
     const fecha = dto.fecha ? new Date(dto.fecha) : new Date();
     if (Number.isNaN(fecha.getTime()))
       throw new BadRequestException('Fecha inválida');
 
     const linea = await this.prisma.lineaProduccion.findUnique({
-      where: { idLineaProduccion: dto.idLineaProduccion },
+      where: { idLineaProduccion },
       include: { tallas: { include: { talla: true } }, producto: true },
     });
     if (!linea)
@@ -311,10 +367,20 @@ export class CosteoConsumoPapelService {
         SELECT costeo.fn_rollo_en(${idImpresora}, ${fecha}::timestamptz) AS id_montaje
       `;
       const idMontajeRollo = rollo[0]?.id_montaje ?? null;
-      if (idMontajeRollo == null)
-        throw new ConflictException(
-          'Esa impresora no tenía ningún rollo montado en ese momento: montá el rollo primero, o corregí la fecha',
-        );
+      if (idMontajeRollo == null) {
+        const impresora = await tx.impresora.findUnique({
+          where: { idImpresora },
+          select: { codigo: true },
+        });
+        // Respuesta estructurada, no solo texto: la pantalla necesita
+        // distinguir ESTE fallo de los demás para ofrecer el atajo a Montaje,
+        // y hacerlo comparando el mensaje se rompería al reescribirlo.
+        throw new ConflictException({
+          message: `La impresora ${impresora?.codigo ?? idImpresora} no tiene ningún rollo montado: montá uno en Gestión de Rollos → Montaje. Si la orden se imprimió antes y ese rollo ya se desmontó, ajustá la fecha de impresión.`,
+          motivo: 'SIN_ROLLO_MONTADO',
+          idImpresora,
+        });
+      }
       const montaje = await tx.montajeRollo.findUniqueOrThrow({
         where: { idMontajeRollo },
         include: { rolloPapel: true },

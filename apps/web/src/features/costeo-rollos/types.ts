@@ -93,3 +93,17 @@ export interface PanelItem {
     porcentajeRestante: number | null
   } | null
 }
+
+/** Una fila de la plantilla de ingreso de rollos, ya validada por el servidor. */
+export interface FilaPreviewIngresoRollo {
+  fila: number
+  numeroFactura: string
+  fecha: string
+  fechaTexto: string
+  tipoPapelCodigo: string
+  tipoPapelNombre: string | null
+  cantidadRollos: number | null
+  yardasPorRollo: number | null
+  costoUnitario: number | null
+  error: string | null
+}

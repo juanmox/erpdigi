@@ -4,8 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import ExcelJS from 'exceljs';
+import { fechaCelda, textoCelda } from '../../common/excel-celda';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import { FilaPreviewIngresoRollo } from './costeo-rollos.types';
+import { FilaAplicarIngresoRolloDto } from './dto/aplicar-importar-ingresos.dto';
 import { DesmontarMontajeDto } from './dto/desmontar-montaje.dto';
 import { EditarIngresoDto } from './dto/editar-ingreso.dto';
 import { IngresoFacturaPapelDto } from './dto/ingreso-factura-papel.dto';
@@ -13,6 +17,30 @@ import { ListarRollosDto } from './dto/listar-rollos.dto';
 import { MontarRolloDto } from './dto/montar-rollo.dto';
 
 const INCLUDE_ROLLO = { tipoPapel: true, facturaPapel: true } as const;
+
+const AZUL_DIGITEXSA = 'FF203080';
+
+// La plantilla lleva 4 filas de preámbulo (título, instrucciones, blanco,
+// encabezado) antes de los datos. Arrancar en la 2 leería las instrucciones
+// como si fueran una fila — bug real que ya apareció en los otros imports del
+// proyecto y por eso todos comparten esta constante.
+const FILA_INICIO_DATOS = 5;
+
+function estiloEncabezado(cell: ExcelJS.Cell) {
+  cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  cell.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: AZUL_DIGITEXSA },
+  };
+}
+
+/** Número de celda: null si está vacía, NaN si tiene algo que no es número. */
+function numeroCelda(valor: unknown): number | null {
+  const texto = textoCelda(valor as never).trim();
+  if (!texto) return null;
+  return Number(texto.replace(/,/g, ''));
+}
 
 @Injectable()
 export class CosteoRollosService {
@@ -539,5 +567,316 @@ export class CosteoRollosService {
         },
       };
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Carga masiva de ingresos a bodega
+  //
+  // Una fila = una factura + un tipo de papel + una cantidad de rollos. Se
+  // permite repetir la misma factura en varias filas porque una factura real
+  // del proveedor puede traer más de un tipo de papel; al aplicar, las filas
+  // de una misma factura se agrupan en un solo `factura_papel` y sus rollos
+  // se numeran corridos.
+  // ---------------------------------------------------------------------
+
+  async plantillaImportarIngresos(): Promise<ExcelJS.Buffer> {
+    const tipos = await this.prisma.tipoPapel.findMany({
+      where: { activo: true },
+      orderBy: { codigo: 'asc' },
+    });
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Digitexsa ERP';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Ingresos');
+    ws.mergeCells(1, 1, 1, 6);
+    ws.getCell('A1').value =
+      'Digital Textil, S.A. (Digitexsa) — Ingreso de rollos de papel a bodega';
+    ws.getCell('A1').font = {
+      bold: true,
+      size: 14,
+      color: { argb: AZUL_DIGITEXSA },
+    };
+    ws.mergeCells(2, 1, 2, 6);
+    ws.getCell('A2').value =
+      'Una fila por factura + tipo de papel. Si una misma factura trae varios tipos de papel, repetí el número de factura en una fila por cada tipo (con la misma fecha) — se cargan como una sola factura. ' +
+      'El código de tipo de papel debe existir en el catálogo (ver la hoja "Tipos de papel"); si no existe, la fila queda pendiente y no se crea nada automáticamente. ' +
+      'Una factura cuyo número ya esté cargado se rechaza: para corregirla, usá la pestaña "Corregir ingreso". ' +
+      '"Yardas por rollo" y "Costo unitario" son opcionales — en blanco quedan sin dato y se pueden completar después.';
+    ws.getCell('A2').font = { size: 9, color: { argb: 'FF888888' } };
+
+    const headerRow = ws.getRow(4);
+    headerRow.values = [
+      'Número de factura',
+      'Fecha',
+      'Tipo de papel (código)',
+      'Cantidad de rollos',
+      'Yardas por rollo (opcional)',
+      'Costo unitario (opcional)',
+    ];
+    headerRow.eachCell(estiloEncabezado);
+    [22, 14, 24, 18, 22, 22].forEach((w, i) => (ws.getColumn(i + 1).width = w));
+
+    // Hoja de referencia: sin esto hay que adivinar los códigos, que es justo
+    // lo que deja filas pendientes.
+    const wsRef = wb.addWorksheet('Tipos de papel');
+    const refHeader = wsRef.getRow(1);
+    refHeader.values = ['Código', 'Nombre', 'Gramaje', 'Ancho (pulgadas)'];
+    refHeader.eachCell(estiloEncabezado);
+    [24, 40, 12, 16].forEach((w, i) => (wsRef.getColumn(i + 1).width = w));
+    tipos.forEach((t) =>
+      wsRef.addRow([
+        t.codigo,
+        t.nombre,
+        t.gramaje ? Number(t.gramaje) : null,
+        t.anchoPulgadas ? Number(t.anchoPulgadas) : null,
+      ]),
+    );
+
+    return wb.xlsx.writeBuffer();
+  }
+
+  async previewImportarIngresos(
+    buffer: Buffer,
+  ): Promise<{ filas: FilaPreviewIngresoRollo[] }> {
+    if (!buffer || buffer.length === 0)
+      throw new BadRequestException('Archivo vacío o no recibido');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+    const ws = wb.worksheets[0];
+    if (!ws) throw new BadRequestException('El archivo no tiene hojas');
+
+    const crudo: {
+      fila: number;
+      numeroFactura: string;
+      fecha: Date | null;
+      // El texto crudo distingue "celda vacía" de "tenía algo que no se pudo
+      // interpretar como fecha": fechaCelda() devuelve null en ambos casos y
+      // un typo pasaría por campo faltante en vez de por dato mal escrito.
+      fechaTexto: string;
+      tipoPapelCodigo: string;
+      cantidad: number | null;
+      yardas: number | null;
+      costo: number | null;
+    }[] = [];
+
+    ws.eachRow((row, rowNumber) => {
+      if (rowNumber < FILA_INICIO_DATOS) return;
+      const numeroFactura = textoCelda(row.getCell(1).value).trim();
+      if (!numeroFactura) return;
+      const celdaFecha = row.getCell(2).value;
+      crudo.push({
+        fila: rowNumber,
+        numeroFactura,
+        fecha: fechaCelda(celdaFecha),
+        fechaTexto: textoCelda(celdaFecha).trim(),
+        tipoPapelCodigo: textoCelda(row.getCell(3).value).trim(),
+        cantidad: numeroCelda(row.getCell(4).value),
+        yardas: numeroCelda(row.getCell(5).value),
+        costo: numeroCelda(row.getCell(6).value),
+      });
+    });
+
+    const [tipos, facturasExistentes] = await Promise.all([
+      this.prisma.tipoPapel.findMany({
+        where: { activo: true },
+        select: { idTipoPapel: true, codigo: true, nombre: true },
+      }),
+      this.prisma.facturaPapel.findMany({ select: { numeroFactura: true } }),
+    ]);
+    const tipoPorCodigo = new Map(
+      tipos.map((t) => [t.codigo.toLowerCase(), t]),
+    );
+    const facturasEnBase = new Set(
+      facturasExistentes.map((f) => f.numeroFactura.toLowerCase()),
+    );
+
+    // Fecha por factura dentro del archivo: dos filas de la misma factura con
+    // fechas distintas son un error de tecleo, no dos facturas.
+    const fechaPorFactura = new Map<string, string>();
+    // Fila completa repetida: casi siempre es una fila pegada dos veces, que
+    // duplicaría los rollos en silencio. Repetir la factura con OTRO tipo de
+    // papel (o con otra cantidad) sí es válido y no se marca.
+    const vistas = new Set<string>();
+
+    const filas: FilaPreviewIngresoRollo[] = crudo.map((c) => {
+      const tipo = tipoPorCodigo.get(c.tipoPapelCodigo.toLowerCase());
+      const claveFactura = c.numeroFactura.toLowerCase();
+      let error: string | null = null;
+
+      if (c.numeroFactura.length > 30)
+        error = 'El número de factura no puede pasar de 30 caracteres';
+      else if (!c.fecha)
+        error = c.fechaTexto
+          ? `"Fecha" no se pudo interpretar como fecha: "${c.fechaTexto}"`
+          : 'Falta la fecha';
+      else if (!c.tipoPapelCodigo) error = 'Falta el código de tipo de papel';
+      else if (!tipo)
+        error = `El tipo de papel "${c.tipoPapelCodigo}" no existe o está inactivo`;
+      else if (c.cantidad === null) error = 'Falta la cantidad de rollos';
+      else if (!Number.isInteger(c.cantidad) || c.cantidad <= 0)
+        error = 'La cantidad de rollos debe ser un entero mayor que cero';
+      else if (c.yardas !== null && (Number.isNaN(c.yardas) || c.yardas <= 0))
+        error = 'Las yardas por rollo deben ser un número mayor que cero';
+      else if (c.costo !== null && (Number.isNaN(c.costo) || c.costo < 0))
+        error = 'El costo unitario no puede ser negativo';
+      else if (facturasEnBase.has(claveFactura))
+        error = `La factura "${c.numeroFactura}" ya está cargada — corregila desde "Corregir ingreso"`;
+
+      const fechaIso = c.fecha ? c.fecha.toISOString().slice(0, 10) : '';
+
+      if (!error) {
+        const fechaPrevia = fechaPorFactura.get(claveFactura);
+        if (fechaPrevia && fechaPrevia !== fechaIso)
+          error = `La factura "${c.numeroFactura}" aparece con dos fechas distintas en el archivo`;
+        else fechaPorFactura.set(claveFactura, fechaIso);
+      }
+
+      if (!error) {
+        const huella = [
+          claveFactura,
+          c.tipoPapelCodigo.toLowerCase(),
+          c.cantidad,
+          c.yardas,
+          c.costo,
+        ].join('|');
+        if (vistas.has(huella)) error = 'Fila repetida dentro del archivo';
+        else vistas.add(huella);
+      }
+
+      return {
+        fila: c.fila,
+        numeroFactura: c.numeroFactura,
+        fecha: fechaIso,
+        fechaTexto: c.fechaTexto,
+        tipoPapelCodigo: c.tipoPapelCodigo,
+        tipoPapelNombre: tipo?.nombre ?? null,
+        cantidadRollos: c.cantidad,
+        yardasPorRollo: c.yardas,
+        costoUnitario: c.costo,
+        error,
+      };
+    });
+
+    return { filas };
+  }
+
+  async aplicarImportarIngresos(
+    filas: FilaAplicarIngresoRolloDto[],
+    idUsuarioActor: number,
+  ) {
+    if (filas.length === 0)
+      throw new BadRequestException('No hay filas para aplicar');
+
+    // Todo se re-resuelve acá: el preview corre en el servidor pero su salida
+    // pasa por el navegador, así que ni el tipo de papel ni la inexistencia de
+    // la factura pueden darse por buenos.
+    const tipos = await this.prisma.tipoPapel.findMany({
+      where: { activo: true },
+      select: { idTipoPapel: true, codigo: true },
+    });
+    const tipoPorCodigo = new Map(
+      tipos.map((t) => [t.codigo.toLowerCase(), t.idTipoPapel]),
+    );
+
+    const porFactura = new Map<
+      string,
+      {
+        numeroFactura: string;
+        fecha: Date;
+        grupos: { idTipoPapel: number; fila: FilaAplicarIngresoRolloDto }[];
+      }
+    >();
+
+    for (const f of filas) {
+      const idTipoPapel = tipoPorCodigo.get(f.tipoPapelCodigo.toLowerCase());
+      if (!idTipoPapel)
+        throw new BadRequestException(
+          `El tipo de papel "${f.tipoPapelCodigo}" no existe o está inactivo`,
+        );
+      const fecha = new Date(f.fecha);
+      if (Number.isNaN(fecha.getTime()))
+        throw new BadRequestException(
+          `Fecha inválida en la factura "${f.numeroFactura}"`,
+        );
+      const clave = f.numeroFactura.toLowerCase();
+      const actual = porFactura.get(clave);
+      if (!actual) {
+        porFactura.set(clave, {
+          numeroFactura: f.numeroFactura,
+          fecha,
+          grupos: [{ idTipoPapel, fila: f }],
+        });
+      } else {
+        if (actual.fecha.getTime() !== fecha.getTime())
+          throw new BadRequestException(
+            `La factura "${f.numeroFactura}" viene con dos fechas distintas`,
+          );
+        actual.grupos.push({ idTipoPapel, fila: f });
+      }
+    }
+
+    const yaExisten = await this.prisma.facturaPapel.findMany({
+      where: {
+        numeroFactura: {
+          in: [...porFactura.values()].map((v) => v.numeroFactura),
+        },
+      },
+      select: { numeroFactura: true },
+    });
+    if (yaExisten.length > 0)
+      throw new ConflictException(
+        `Ya existen estas facturas: ${yaExisten.map((f) => f.numeroFactura).join(', ')}`,
+      );
+
+    const creadas = await this.prisma.$transaction(async (tx) => {
+      const ids: { idFacturaPapel: number; numeroFactura: string }[] = [];
+      for (const v of porFactura.values()) {
+        const totalRollos = v.grupos.reduce(
+          (a, g) => a + g.fila.cantidadRollos,
+          0,
+        );
+        const factura = await tx.facturaPapel.create({
+          data: {
+            numeroFactura: v.numeroFactura,
+            fecha: v.fecha,
+            totalRollos,
+            creadoPor: idUsuarioActor,
+          },
+        });
+        let secuencia = 0;
+        const rollos = v.grupos.flatMap((g) =>
+          Array.from({ length: g.fila.cantidadRollos }, () => ({
+            idFacturaPapel: factura.idFacturaPapel,
+            secuencia: ++secuencia,
+            idTipoPapel: g.idTipoPapel,
+            yardasIniciales: g.fila.yardasPorRollo ?? null,
+            costoUnitario: g.fila.costoUnitario ?? null,
+          })),
+        );
+        await tx.rolloPapel.createMany({ data: rollos });
+        ids.push({
+          idFacturaPapel: factura.idFacturaPapel,
+          numeroFactura: factura.numeroFactura,
+        });
+      }
+      return ids;
+    });
+
+    for (const c of creadas) {
+      await this.auditoria.registrar({
+        idUsuario: idUsuarioActor,
+        entidad: 'costeo.factura_papel',
+        idEntidad: String(c.idFacturaPapel),
+        accion: 'CREATE',
+        datosNuevos: { numeroFactura: c.numeroFactura, origen: 'import' },
+      });
+    }
+
+    return {
+      facturas: creadas.length,
+      rollos: filas.reduce((a, f) => a + f.cantidadRollos, 0),
+    };
   }
 }

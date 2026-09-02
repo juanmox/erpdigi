@@ -119,7 +119,11 @@ export function ImportPreviewDialog<F>({
   return (
     <Dialog open={open} onOpenChange={cerrar}>
       <DialogContent className="max-h-[85vh] max-w-4xl overflow-hidden">
-        <div className="flex max-h-[80vh] flex-col">
+        {/* min-w-0: sin esto un hijo flex no baja de su ancho de contenido
+            (min-width:auto por defecto), así que la tabla de preview empujaba
+            el diálogo más ancho que la ventana en pantallas angostas en vez
+            de scrollear adentro de su propio contenedor. */}
+        <div className="flex max-h-[80vh] min-w-0 flex-col">
           <DialogHeader>
             <DialogTitle>{titulo}</DialogTitle>
           </DialogHeader>
@@ -146,7 +150,7 @@ export function ImportPreviewDialog<F>({
                 {filas.length} filas · {seleccion.size} seleccionadas
                 {totalErrores > 0 && <span className="text-destructive"> · {totalErrores} con error (no se pueden aplicar)</span>}
               </p>
-              <div className="flex-1 overflow-auto rounded-md border">
+              <div className="min-w-0 flex-1 overflow-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>

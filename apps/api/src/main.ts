@@ -15,6 +15,7 @@ const RUTAS_IMPORT_EXCEL = [
   '/erp/api/recetas/desarrollos/importar/preview',
   '/erp/api/costeo/ordenes/importar/preview',
   '/erp/api/costeo/estandar/importar/preview',
+  '/erp/api/costeo/rollos/importar/preview',
 ];
 
 async function bootstrap() {

@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/features/auth/auth-context'
 import { TabCorregirIngreso } from './components/tab-corregir-ingreso'
@@ -10,11 +11,22 @@ export function RollosPage() {
   const puedeIngresar = tienePermiso('costeo.rollo.ingresar')
   const puedeMontar = tienePermiso('costeo.rollo.montar') || tienePermiso('costeo.rollo.desmontar')
 
+  // La pestaña viaja en la URL para poder enlazar directo a Montaje desde el
+  // error de "sin rollo montado" de Envío de impresas. Se valida contra los
+  // permisos: un ?tab= a una pestaña que el rol no ve dejaría la página vacía.
+  const [params, setParams] = useSearchParams()
+  const pedida = params.get('tab')
+  const disponibles = ['panel', ...(puedeMontar ? ['montaje'] : []), ...(puedeIngresar ? ['ingreso', 'corregir'] : [])]
+  const tab = pedida && disponibles.includes(pedida) ? pedida : 'panel'
+
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-4">
       <h1 className="text-xl font-semibold text-ink">Gestión de Rollos</h1>
 
-      <Tabs defaultValue="panel">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setParams(v === 'panel' ? {} : { tab: v }, { replace: true })}
+      >
         <TabsList>
           <TabsTrigger value="panel">Panel de estado</TabsTrigger>
           {puedeMontar && <TabsTrigger value="montaje">Montaje</TabsTrigger>}

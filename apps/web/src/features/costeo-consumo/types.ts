@@ -56,3 +56,15 @@ export interface LineaPendiente {
   impresora: { idImpresora: number; codigo: string } | null
   totalPiezas: number
 }
+
+/** Resumen de un envío: el backend procesa cada línea por separado. */
+export interface ResultadoLote {
+  enviadas: { codigoLine: string; tallas: number }[]
+  yaEstaban: { codigoLine: string; tallas: string[] }[]
+  fallidas: {
+    idLineaProduccion: number
+    motivo: string
+    /** La impresora no tenía rollo montado: tiene arreglo propio (montar o ajustar la fecha). */
+    sinRollo?: boolean
+  }[]
+}

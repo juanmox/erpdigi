@@ -1,86 +1,139 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { GrupoColapsable } from '@/components/shared/grupo-colapsable'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { costeoRollosApi } from '@/features/costeo-rollos/api'
+import { Input } from '@/components/ui/input'
 import { costeoConsumoApi } from '../api'
+import type { LineaPendiente } from '../types'
 
-const TODAS = '__todas__'
+interface OpPendiente {
+  codigoOp: string
+  cliente: string | null
+  lineas: number
+  piezas: number
+}
 
 /**
- * Trabajo pendiente, filtrable por impresora.
+ * Trabajo pendiente, agrupado por impresora.
  *
  * Sin esto la pantalla obligaba a teclear un código de OP a ciegas: había que
  * saber de memoria qué órdenes existen. El operario piensa desde la máquina que
  * tiene enfrente ("¿qué me toca en la MS 2?"), no desde el número de orden.
  *
- * Lista LÍNEAS y no órdenes: una misma OP puede repartirse entre varias
- * impresoras, así que agrupar por OP mostraría trabajo de otra máquina.
+ * Se agrupa por impresora y no se muestra una lista plana porque con 53 órdenes
+ * la lista plana era un muro de botones. Cada operario abre su sección.
+ *
+ * Consulta LÍNEAS y las agrupa acá: una misma OP puede repartirse entre varias
+ * impresoras, así que pedirle al backend "órdenes" mezclaría trabajo de otra
+ * máquina dentro de la misma tarjeta.
  */
-export function PanelPendientes({ onElegirOp }: { onElegirOp: (codigoOp: string) => void }) {
-  const [impresora, setImpresora] = useState(TODAS)
+export function PanelPendientes({
+  onElegirOp,
+  onCerrar,
+}: {
+  onElegirOp: (codigoOp: string) => void
+  /** Presente cuando ya hay una OP abierta: el panel deja de ser el foco. */
+  onCerrar?: () => void
+}) {
+  const [busqueda, setBusqueda] = useState('')
 
-  const { data: panel } = useQuery({
-    queryKey: ['rollos', 'panel'],
-    queryFn: () => costeoRollosApi.panel(),
-  })
-  const idImpresora = impresora === TODAS ? undefined : Number(impresora)
   const { data, isFetching } = useQuery({
-    queryKey: ['consumo', 'pendientes', idImpresora ?? 'todas'],
-    queryFn: () => costeoConsumoApi.pendientes(idImpresora),
+    queryKey: ['consumo', 'pendientes'],
+    queryFn: () => costeoConsumoApi.pendientes(),
   })
 
-  const lineas = data?.lineas ?? []
-  // Agrupado por OP solo para presentar: se entra a la pantalla por orden.
-  const porOp = new Map<string, { cliente: string | null; lineas: number; piezas: number }>()
-  for (const l of lineas) {
-    const a = porOp.get(l.codigoOp) ?? { cliente: l.cliente, lineas: 0, piezas: 0 }
-    a.lineas++
-    a.piezas += l.totalPiezas
-    porOp.set(l.codigoOp, a)
-  }
+  // impresora -> OP -> totales. Se agrupa acá porque el backend devuelve líneas.
+  const porImpresora = useMemo(() => {
+    const t = busqueda.trim().toLowerCase()
+    const filtradas = (data?.lineas ?? []).filter(
+      (l: LineaPendiente) =>
+        !t ||
+        l.codigoOp.toLowerCase().includes(t) ||
+        (l.cliente ?? '').toLowerCase().includes(t) ||
+        l.producto.toLowerCase().includes(t),
+    )
+    const m = new Map<string, Map<string, OpPendiente>>()
+    for (const l of filtradas) {
+      const imp = l.impresora?.codigo ?? 'Sin impresora'
+      const ops = m.get(imp) ?? new Map<string, OpPendiente>()
+      const op = ops.get(l.codigoOp) ?? {
+        codigoOp: l.codigoOp,
+        cliente: l.cliente,
+        lineas: 0,
+        piezas: 0,
+      }
+      op.lineas++
+      op.piezas += l.totalPiezas
+      ops.set(l.codigoOp, op)
+      m.set(imp, ops)
+    }
+    return [...m.entries()]
+      .map(([impresora, ops]) => ({ impresora, ops: [...ops.values()] }))
+      .sort((a, b) => a.impresora.localeCompare(b.impresora, 'es'))
+  }, [data, busqueda])
+
+  // Distintas, no la suma por grupo: una OP repartida entre dos impresoras
+  // aparece en ambas secciones y se contaría dos veces.
+  const totalOps = new Set(porImpresora.flatMap((g) => g.ops.map((o) => o.codigoOp))).size
 
   return (
     <div className="space-y-2 rounded-lg border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-semibold">Trabajo pendiente</span>
-        <Select value={impresora} onValueChange={setImpresora}>
-          <SelectTrigger size="sm" className="w-44">
-            <SelectValue placeholder="Impresora" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={TODAS}>Todas las impresoras</SelectItem>
-            {panel?.map((p) => (
-              <SelectItem key={p.impresora.idImpresora} value={String(p.impresora.idImpresora)}>
-                {p.impresora.codigo}
-                {p.montaje ? '' : ' · sin rollo'}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <span className="text-sm font-semibold">
+          Trabajo pendiente{' '}
+          <span className="text-muted-foreground font-normal">
+            ({totalOps} {totalOps === 1 ? 'orden' : 'órdenes'})
+          </span>
+        </span>
+        {onCerrar && (
+          <Button variant="ghost" size="sm" onClick={onCerrar}>
+            Ocultar
+          </Button>
+        )}
       </div>
+
+      <Input
+        value={busqueda}
+        onChange={(e) => setBusqueda(e.target.value)}
+        placeholder="Filtrar por orden, cliente o producto…"
+        className="h-8 max-w-xs"
+      />
 
       {isFetching ? (
         <p className="text-muted-foreground text-xs">Cargando…</p>
-      ) : porOp.size === 0 ? (
+      ) : porImpresora.length === 0 ? (
         <p className="text-muted-foreground text-xs">
-          {idImpresora ? 'Esta impresora no tiene trabajo pendiente.' : 'No hay líneas pendientes.'}
+          {busqueda ? 'Nada coincide con ese filtro.' : 'No hay líneas pendientes.'}
         </p>
       ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {[...porOp.entries()].map(([op, a]) => (
-            <Button
-              key={op}
-              variant="outline"
-              size="sm"
-              className="h-auto flex-col items-start gap-0 py-1.5"
-              onClick={() => onElegirOp(op)}
+        <div className="space-y-1">
+          {porImpresora.map((g) => (
+            <GrupoColapsable
+              // `defaultAbierto` solo se lee al montar, así que la key incluye
+              // si hay búsqueda activa: al filtrar, los grupos se reabren solos
+              // en vez de esconder los resultados detrás de un clic.
+              key={`${g.impresora}-${busqueda ? 'f' : ''}`}
+              titulo={`${g.impresora} · ${g.ops.length} orden${g.ops.length === 1 ? '' : 'es'}`}
+              // Con una sola impresora en pantalla no tiene sentido esconderla.
+              defaultAbierto={porImpresora.length === 1 || !!busqueda}
             >
-              <span className="font-mono text-xs font-semibold">{op}</span>
-              <span className="text-muted-foreground text-[11px]">
-                {a.lineas} lín · {a.piezas} pzs{a.cliente ? ` · ${a.cliente}` : ''}
-              </span>
-            </Button>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {g.ops.map((op) => (
+                  <Button
+                    key={op.codigoOp}
+                    variant="outline"
+                    size="sm"
+                    className="h-auto flex-col items-start gap-0 py-1.5"
+                    onClick={() => onElegirOp(op.codigoOp)}
+                  >
+                    <span className="font-mono text-xs font-semibold">{op.codigoOp}</span>
+                    <span className="text-muted-foreground text-[11px]">
+                      {op.lineas} lín · {op.piezas} pzs{op.cliente ? ` · ${op.cliente}` : ''}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </GrupoColapsable>
           ))}
         </div>
       )}

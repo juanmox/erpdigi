@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { ImportPreviewDialog } from '@/components/shared/import-preview-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiError } from '@/lib/api'
 import { costeoRollosApi } from '../api'
-import type { FacturaConRollos } from '../types'
+import type { FacturaConRollos, FilaPreviewIngresoRollo } from '../types'
 
 const HOY = new Date().toISOString().slice(0, 10)
 
@@ -26,6 +27,7 @@ export function TabIngreso() {
   const [yardasPorRollo, setYardasPorRollo] = useState('')
   const [costoUnitario, setCostoUnitario] = useState('')
 
+  const [importOpen, setImportOpen] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resultado, setResultado] = useState<FacturaConRollos | null>(null)
@@ -78,8 +80,13 @@ export function TabIngreso() {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
           <CardTitle className="text-base">Ingreso a bodega</CardTitle>
+          {/* Cargar factura por factura es razonable para una compra suelta,
+              pero no para poner al día la bodega. */}
+          <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+            Importar plantilla
+          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           {error && (
@@ -179,6 +186,35 @@ export function TabIngreso() {
           </CardContent>
         </Card>
       )}
+
+      <ImportPreviewDialog<FilaPreviewIngresoRollo>
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        titulo="Importar ingresos de rollos"
+        getKey={(f) => f.fila}
+        getError={(f) => f.error}
+        onDescargarPlantilla={() => costeoRollosApi.plantillaImportar()}
+        columnas={[
+          { key: 'fila', header: 'Fila', render: (f) => f.fila },
+          { key: 'factura', header: 'Factura', render: (f) => f.numeroFactura },
+          { key: 'fecha', header: 'Fecha', render: (f) => f.fecha || f.fechaTexto || '—' },
+          {
+            key: 'tipo',
+            header: 'Tipo de papel',
+            className: 'max-w-xs whitespace-normal break-words',
+            render: (f) => f.tipoPapelNombre ?? f.tipoPapelCodigo,
+          },
+          { key: 'cantidad', header: 'Rollos', render: (f) => f.cantidadRollos ?? '—' },
+          { key: 'yardas', header: 'Yd/rollo', render: (f) => f.yardasPorRollo ?? '—' },
+          { key: 'costo', header: 'Costo', render: (f) => f.costoUnitario ?? '—' },
+        ]}
+        onArchivoElegido={async (archivo) => (await costeoRollosApi.previewImportar(archivo)).filas}
+        onAplicar={async (filasValidas) => {
+          const r = await costeoRollosApi.aplicarImportar(filasValidas)
+          queryClient.invalidateQueries({ queryKey: ['costeo-rollos'] })
+          return `${r.facturas} factura(s) y ${r.rollos} rollo(s) cargados`
+        }}
+      />
     </div>
   )
 }

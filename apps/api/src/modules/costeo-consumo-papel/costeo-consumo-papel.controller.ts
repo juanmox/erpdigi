@@ -44,7 +44,7 @@ export class CosteoConsumoPapelController {
     @Body() dto: CapturarConsumoDto,
     @CurrentUser() usuario: JwtPayload,
   ) {
-    return this.service.capturar(dto, usuario.sub);
+    return this.service.capturarLote(dto, usuario.sub);
   }
 
   @RequirePermissions('costeo.consumo.anular')

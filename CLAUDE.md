@@ -1141,6 +1141,86 @@ sin i18n (todo en español).
        Verificado contra el schema real. Esa FK es lo bastante estricta como para impedir borrar un
        usuario que haya creado datos: hay que reasignar `creado_por` primero.
 
+  - **F4 — envío masivo, panel ordenado y carga de rollos por plantilla (2026-09-01/02)**, todo a
+    partir de pruebas del usuario sobre la pantalla real:
+    1. **El panel de pendientes saturaba la pantalla** — listaba las 53 órdenes como un muro plano
+       de botones sobre el resto del contenido. Ahora se agrupa **por impresora** en secciones
+       colapsables (reusa `GrupoColapsable`), que es como piensa el operario ("¿qué me toca en la
+       MS 2?"), tiene buscador propio (orden/cliente/producto) y **se colapsa solo al elegir una
+       orden** — vuelve con "Ver trabajo pendiente". Dos detalles encontrados al verificar: el
+       encabezado contaba órdenes sumando por grupo (una OP repartida entre dos impresoras se
+       contaba dos veces) y decía "1 órdenes". `defaultAbierto` de `GrupoColapsable` **solo se lee
+       al montar**, así que la `key` incluye si hay búsqueda activa: sin eso, filtrar dejaba los
+       resultados escondidos detrás de un clic.
+    2. **Envío masivo** — checkbox por línea, "Seleccionar todas (N)" y "Enviar seleccionadas (N)".
+       Solo se puede marcar lo enviable (marcar algo bloqueado o ya enviado solo generaría fallas
+       en el resumen). Cuando la orden abarca más de una impresora aparece además un botón por
+       máquina, para no mezclarlas sin querer — en los datos reales hoy ninguna OP se reparte, pero
+       el modelo lo permite. El endpoint pasa a recibir `idsLineaProduccion: number[]` (máx. 500) y
+       **procesa cada línea en su propia transacción a propósito**: si se mandan 50 y 3 fallan
+       porque su impresora no tenía rollo montado, no tiene sentido perder las 47 buenas. Devuelve
+       `{enviadas, yaEstaban, fallidas}` y la pantalla agrupa los motivos, que se repiten mucho.
+    3. **La fecha de impresión no tenía control detrás.** El error del servidor ya decía "montá el
+       rollo primero, **o corregí la fecha**", pero no había forma de corregirla: el DTO aceptaba
+       `fecha` desde F4-B y el frontend nunca la mandaba. Es el caso normal de una orden impresa
+       ayer, con ese rollo ya desmontado. Se agregó un campo "Fecha y hora de impresión" (vacío =
+       ahora) en la barra de acciones, con el aviso de que se descuenta del rollo montado **en ese
+       momento**, no del actual. Se manda como instante completo (`toISOString()`) porque
+       `datetime-local` da `2026-09-02T14:30` sin zona y el servidor guarda `timestamptz`. Se
+       limpia al abrir otra orden: una fecha vieja olvidada descontaría del rollo equivocado sin
+       que nada lo delate. Verificado montando y desmontando un rollo de prueba en MS 1: sin fecha
+       falla con el mensaje del usuario, con la fecha del montaje pasado entra y queda ligado a
+       **ese** `id_montaje_rollo`.
+    4. **Gestión de Rollos no tenía import ni plantilla** — era el único módulo sin ellos, y es lo
+       que bloquea todo el flujo: sin rollos no hay montaje, y sin montaje no se puede enviar nada.
+       `GET /costeo/rollos/plantilla-importar` + `importar/preview` + `importar/aplicar`, gateadas
+       las 3 con `costeo.rollo.ingresar` (el mismo permiso que ya exige el alta manual, sin permiso
+       nuevo), registrada la de preview en `RUTAS_IMPORT_EXCEL` de `main.ts`. Frontend: botón
+       "Importar plantilla" en la pestaña Ingreso a bodega, reusando `ImportPreviewDialog`.
+       - **Una fila = factura + tipo de papel + cantidad**, no una fila por factura: una factura
+         real del proveedor puede traer más de un tipo de papel (el `editarIngreso` de F2 ya lo
+         contemplaba por rollo). Repetir el número de factura en varias filas las agrupa en un solo
+         `factura_papel` con los rollos numerados corridos — verificado: 3+2 rollos de dos papeles
+         distintos quedaron como una factura con `total_rollos = 5` y secuencias 1-5.
+       - La plantilla lleva una **hoja "Tipos de papel"** con los códigos activos: sin eso hay que
+         adivinarlos, que es justo lo que deja filas pendientes.
+       - Reglas del preview, una por regla verificada con un archivo de prueba: tipo de papel
+         inexistente/inactivo, fecha no interpretable (distinguida de celda vacía, mismo criterio
+         que Consumo Estándar), cantidad no entera o ≤ 0, costo negativo, factura ya cargada en la
+         base, **misma factura con dos fechas distintas** dentro del archivo, y **fila repetida
+         exacta** (pegar dos veces duplicaría los rollos en silencio; repetirla con otro tipo de
+         papel sí es válido y no se marca).
+       - `aplicar` **re-resuelve todo server-side** (tipo de papel por código, inexistencia de la
+         factura) — el preview corre en el servidor pero su salida pasa por el navegador. Probado
+         con POST directo: tipo inexistente → 400, cantidad negativa → 400, factura de 40
+         caracteres → 400 (la columna es `VARCHAR(30)`), y nada se creó en ninguno de los casos.
+    5. **El error de "sin rollo montado" ahora lleva al arreglo.** El usuario aclaró que esperaba
+       que la fecha fuera simplemente el momento de presionar "Enviar" — y **eso es exactamente lo
+       que pasa por defecto** (`dto.fecha ? new Date(dto.fecha) : new Date()`, el campo nuevo va
+       vacío). Lo que confundía era el mensaje: ponía "montá el rollo primero, o corregí la fecha"
+       con las dos salidas al mismo nivel, cuando montar el rollo es la que aplica casi siempre y
+       ajustar la fecha es la excepción (orden impresa antes, con ese rollo ya desmontado). Ahora
+       el mensaje **nombra la impresora** y ordena las dos salidas, y el aviso de la pantalla trae
+       dos botones: "Ir a montar el rollo" (enlaza a `/costeo/rollos?tab=montaje`) y "Ajustar la
+       fecha de impresión" (abre el campo, sin navegar). El backend lanza una `ConflictException`
+       con **respuesta estructurada** (`{message, motivo: 'SIN_ROLLO_MONTADO', idImpresora}`) y
+       `capturarLote` la propaga como `sinRollo: true` en la falla — comparar el texto del mensaje
+       en el frontend se rompería al reescribirlo. `rollos-page.tsx` pasó a leer la pestaña de
+       `?tab=` (`useSearchParams`, `<Tabs>` controlado), **validada contra los permisos**: un
+       `?tab=montaje` con un rol sin `costeo.rollo.montar` cae en Panel de estado en vez de dejar
+       la página vacía — verificado con un usuario BODEGUERO.
+    6. **Dos defectos de layout corregidos de paso**, ambos preexistentes: el `<Table>` de
+       `ImportPreviewDialog` empujaba el diálogo más ancho que la ventana en pantallas angostas —
+       un hijo flex no baja de su ancho de contenido sin `min-w-0`, así que la tabla no scrolleaba
+       adentro de su contenedor (afecta a los 6 imports del proyecto, no solo a éste); y en
+       `tarjeta-linea.tsx` el `flex-wrap` mandaba el badge de estado a su propia línea cuando la
+       descripción era larga.
+    - Verificado en navegador (Playwright) a 1440, 820 y 390 px, y con curl usando usuarios de
+      prueba desechables (ADMIN y uno sin `costeo.rollo.ingresar` → 403 en las 3 rutas). Toda la
+      data de prueba borrada al terminar. **Nota**: la pantalla de Gestión de Rollos en sí sigue
+      desbordando a 390 px (es de F2, nunca se hizo responsive) — el diálogo de import ya no, pero
+      la página que lo contiene sí; queda pendiente si se quiere usar desde teléfono.
+
 ## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
 Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era
 apenas una columna de texto libre en `recetas.productos`. Eso invertía el proceso real de la
