@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { GrupoColapsable } from '@/components/shared/grupo-colapsable'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,10 +31,16 @@ interface OpPendiente {
 export function PanelPendientes({
   onElegirOp,
   onCerrar,
+  pieVacio,
 }: {
   onElegirOp: (codigoOp: string) => void
   /** Presente cuando ya hay una OP abierta: el panel deja de ser el foco. */
   onCerrar?: () => void
+  /**
+   * Qué ofrecer cuando no hay nada pendiente. Lo arma el padre en vez de este
+   * componente porque depende de permisos y de rutas, que no son asunto suyo.
+   */
+  pieVacio?: ReactNode
 }) {
   const [busqueda, setBusqueda] = useState('')
 
@@ -102,9 +109,15 @@ export function PanelPendientes({
       {isFetching ? (
         <p className="text-muted-foreground text-xs">Cargando…</p>
       ) : porImpresora.length === 0 ? (
-        <p className="text-muted-foreground text-xs">
-          {busqueda ? 'Nada coincide con ese filtro.' : 'No hay líneas pendientes.'}
-        </p>
+        <div className="space-y-2">
+          <p className="text-muted-foreground text-xs">
+            {busqueda ? 'Nada coincide con ese filtro.' : 'No hay líneas pendientes.'}
+          </p>
+          {/* Sin búsqueda activa, "no hay nada" puede significar que todavía no
+              se cargó ninguna orden: ahí el atajo es útil. Con un filtro puesto
+              solo significa que ese filtro no matchea, y ofrecerlo confunde. */}
+          {!busqueda && pieVacio}
+        </div>
       ) : (
         <div className="space-y-1">
           {porImpresora.map((g) => (

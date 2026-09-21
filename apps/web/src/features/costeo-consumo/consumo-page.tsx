@@ -59,6 +59,9 @@ function resumirLote(r: ResultadoLote): {
 export function ConsumoPage() {
   const { tienePermiso } = useAuth()
   const puedeCapturar = tienePermiso('costeo.consumo.capturar')
+  // Las OP se cargan en otro módulo. Sin un camino desde acá, quien no encuentra
+  // su orden no tiene cómo saber dónde se dan de alta.
+  const puedeVerOrdenes = tienePermiso('costeo.orden.ver')
   const queryClient = useQueryClient()
 
   const [texto, setTexto] = useState('')
@@ -170,6 +173,14 @@ export function ConsumoPage() {
 
   const todasSeleccionadas = enviables.length > 0 && seleccion.size === enviables.length
 
+  const atajoOrdenes = puedeVerOrdenes ? (
+    <Button asChild size="sm" variant="outline">
+      <Link to="/costeo/ordenes" className="no-underline">
+        Ir a Órdenes de Producción
+      </Link>
+    </Button>
+  ) : null
+
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4">
       <div>
@@ -211,13 +222,29 @@ export function ConsumoPage() {
         <PanelPendientes
           onElegirOp={abrirOrden}
           onCerrar={data ? () => setPanelAbierto(false) : undefined}
+          pieVacio={
+            atajoOrdenes && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-muted-foreground text-xs">
+                  Si falta trabajo, las órdenes se cargan por plantilla.
+                </span>
+                {atajoOrdenes}
+              </div>
+            )
+          }
         />
       )}
 
       {error && (
         <Alert variant="destructive">
-          <AlertDescription>
-            {error instanceof ApiError ? error.message : 'No se pudo cargar la orden'}
+          <AlertDescription className="space-y-2">
+            <p>{error instanceof ApiError ? error.message : 'No se pudo cargar la orden'}</p>
+            {atajoOrdenes && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs">Las órdenes se cargan por plantilla desde ahí.</span>
+                {atajoOrdenes}
+              </div>
+            )}
           </AlertDescription>
         </Alert>
       )}

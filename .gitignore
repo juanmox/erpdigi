@@ -14,6 +14,11 @@ desktop.ini
 
 # Exports de los Sheets/Excel legacy que se bajan solo para análisis
 /Data*.xlsx
+# Insumos y salidas de los scripts de conversión: traen órdenes, clientes y
+# precios reales. El directorio sí se versiona (vive el script), así que sin
+# esta regla un `git add -A` los subiría al repo.
+apps/api/scripts/*.xlsx
+apps/api/scripts/~$*.xlsx
 # Respaldos de assets: la foto del login es de terceros (escudo NFL) y pesa MB
 apps/web/src/assets/OLD-*.png
 

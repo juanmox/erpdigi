@@ -52,16 +52,32 @@ export class GoogleSheetsService {
     return this.client;
   }
 
-  // Agrega una fila al final de la hoja indicada. Nunca lanza — cualquier
-  // error queda solo en el log del servidor.
+  /** Agrega UNA fila. Atajo sobre agregarFilas() para el caso de a una. */
   async agregarFila(
     spreadsheetId: string | undefined,
     hoja: string,
     valores: (string | number)[],
   ): Promise<void> {
+    return this.agregarFilas(spreadsheetId, hoja, [valores]);
+  }
+
+  /**
+   * Agrega varias filas al final de la hoja en UNA sola llamada a la API.
+   * Importa: un envío masivo de consumo genera una fila por talla (50 líneas
+   * de 6 tallas son 300 filas), y mandarlas de a una gastaría 300 llamadas
+   * contra la cuota de Google por algo que la API acepta de un saque.
+   *
+   * Nunca lanza — cualquier error queda solo en el log del servidor.
+   */
+  async agregarFilas(
+    spreadsheetId: string | undefined,
+    hoja: string,
+    filas: (string | number)[][],
+  ): Promise<void> {
+    if (filas.length === 0) return;
     if (!spreadsheetId) {
       this.logger.warn(
-        `agregarFila("${hoja}") sin spreadsheetId — revisar GOOGLE_SHEETS_ID_* en .env y en env.validation.ts`,
+        `agregarFilas("${hoja}") sin spreadsheetId — revisar GOOGLE_SHEETS_ID_* en .env y en env.validation.ts`,
       );
       return;
     }
@@ -73,8 +89,11 @@ export class GoogleSheetsService {
         range: `${hoja}!A:A`,
         valueInputOption: 'USER_ENTERED',
         insertDataOption: 'INSERT_ROWS',
-        requestBody: { values: [valores] },
+        requestBody: { values: filas },
       });
+      this.logger.log(
+        `Espejo a Google Sheets: ${filas.length} fila(s) en "${hoja}"`,
+      );
     } catch (err) {
       this.logger.error(
         `Error al escribir en Google Sheets (${spreadsheetId}, hoja "${hoja}"): ${err instanceof Error ? err.message : err}`,

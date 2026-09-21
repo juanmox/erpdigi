@@ -1221,6 +1221,114 @@ sin i18n (todo en español).
       desbordando a 390 px (es de F2, nunca se hizo responsive) — el diálogo de import ya no, pero
       la página que lo contiene sí; queda pendiente si se quiere usar desde teléfono.
 
+  - **Despliegue a producción y tres pendientes menores cerrados (2026-09-21)**:
+    1. **`4c3d9f3` desplegado en `192.168.2.13`** (envío masivo, fecha corregible, import de rollos
+       por plantilla). Sin migraciones ni cambios de seed, así que fue `git pull` + build +
+       `pm2 restart`: `migrate deploy` reportó "No pending migrations". Verificado desde fuera —
+       `/` redirige a `/erp/`, el frontend sirve 200 y las tres rutas nuevas de import devuelven
+       401 sin token; en el log de arranque, **110 rutas, todas declarando su acceso**. *Nota al
+       verificar con curl*: mandarle GET a una ruta POST da 404 en Nest y parece "no existe" —
+       hay que usar el método correcto antes de diagnosticar nada.
+    2. **Atajo desde "Envío de impresas" hacia Órdenes de Producción.** Faltaba el camino inverso:
+       quien no encuentra su OP no tenía cómo saber que las órdenes se cargan en otro módulo (el
+       usuario lo buscó en Gestión de Rollos, que es de rollos). Aparece en dos lados, gateado con
+       `costeo.orden.ver`: en el aviso de "no existe la OP" y en el estado vacío del panel de
+       pendientes. En el panel solo se muestra **si no hay búsqueda activa** — con un filtro puesto,
+       "no hay nada" significa que ese filtro no matchea, y ofrecer el atajo ahí confunde.
+       `PanelPendientes` recibe el atajo como prop `pieVacio` en vez de construirlo: depende de
+       permisos y rutas, que no son asunto de ese componente.
+    3. **La tira de pestañas desbordaba la ventana en teléfono** (`components/ui/tabs.tsx`, afecta
+       a Gestión de Rollos y a Gestión de datos, los dos consumidores de `Tabs`). No era el
+       contenido de las pestañas: la tira es `w-fit` y con 4 pestañas medía 430px contra 358
+       disponibles. Ahora se limita al ancho del padre y scrollea, con `shrink-0` en los triggers
+       para que scrollee de verdad en vez de aplastarse (ya traían `whitespace-nowrap`, el texto se
+       habría salido del botón). Cuando las pestañas entran no cambia nada — verificado a 820 y
+       1440 px.
+       - **⚠️ Trampa encontrada a mitad de camino**: con `overflow-x-auto`, el `justify-center` que
+         traía la tira empujaba el primer ítem a un **offset negativo** (medido: la primera pestaña
+         en `x=-17`), fuera del alcance del scroll — se veía cortada y no había forma de llegar a
+         ella. Centrar no hacía nada de todos modos, porque la tira es `w-fit`/`h-fit` y nunca le
+         sobra espacio, así que pasó a `justify-start`. Documentado en el componente, que es un
+         primitivo de shadcn modificado.
+       - De paso, en Gestión de datos las filas de botones de acción de `tab-insumos.tsx` y
+         `tab-precios.tsx` eran `flex gap-2` sin `flex-wrap` y también se salían. Las tres páginas
+         (Rollos, Gestión de datos, Envío de impresas) ahora entran a 390, 820 y 1440 px.
+    4. **`.gitignore`: los `.xlsx` de `apps/api/scripts/` no estaban ignorados.** El directorio se
+       versiona porque ahí vive `convertir-origen-consumo.mjs`, así que el `Origen.xlsx` (693 KB con
+       órdenes, clientes y precios reales) y su salida quedaban como untracked — un `git add -A` los
+       habría subido al repo de GitHub.
+    5. **Decisión del usuario: la plantilla de Órdenes se queda con 13 tallas.** Sigue sin poder
+       cargar una OP con tallas de hombre/mujer/ladies (el catálogo tiene 155), pero con los datos
+       de hoy no bloquea nada. Revisar cuando aparezca una OP que las use.
+
+  - **⚠️ Local y producción divergen en costos — y el que está contaminado es LOCAL (2026-09-21)**.
+    Se comparó insumo por insumo y línea por línea de receta. **Los 25 insumos existen en ambos
+    lados y 24 tienen el mismo precio**; toda la diferencia de costo de los 4 productos reales sale
+    de exactamente dos cosas, ambas del lado local:
+    1. **`174014 WARP 340 GRS` vale `9.99` en local y `44.713811` en producción.** El 9.99 es un
+       valor redondo, sin ninguna fila en `costeo.insumo_costo` que lo respalde — se escribió
+       directo sobre `recetas.insumos.costo_promedio`, saltándose el versionado SCD2. Producción
+       tiene lo que parece un promedio ponderado real.
+    2. **`BSN-FB01N` tiene en local una línea de receta que producción no tiene**: `173001 PAPEL
+       TISSUE, consumo 99, sin área` (`id_desarrollo_insumo = 1`, o sea que viene del backfill de
+       `producto_insumos`, no de una edición reciente). El mismo insumo ya está en esa receta con
+       área "Transferencia" y consumo 1.525, así que el 99 sin área parece un error de captura
+       heredado. Aporta 99 × 0.789543 = **Q78.16**.
+    La aritmética cierra al centavo en los 4 productos, así que no hay ninguna otra diferencia
+    escondida: `BSN-FB01N` local = prod + 78.16 − 20.07; los otros tres = prod − (consumo de 174014
+    × 34.72). Las recetas de `BSN-FB02NB`, `BSN-YFB02NB` y `BSN-FB01ESPN` son **idénticas** en
+    ambos lados (36 líneas, cero diferencias).
+    **Conclusión**: "sincronizar precios" no es empujar local hacia producción — es **limpiar
+    local**. Pendiente de decisión del usuario, porque tocar un precio y borrar una línea de receta
+    cambia el costo de productos reales.
+
+  - **F4 — Fase D (espejo a Google Sheets) completada, 2026-09-21.** Cierra F4. Cada envío de
+    consumo escribe además en la hoja **"Datos"** del libro `ConsumosFinal DIGITEXSAMig`, que es lo
+    que alimenta los Dashboards de Data Studio. *Aclaración que hizo falta*: el espejo no tiene nada
+    que ver con `01_erp` — los Sheets alimentan Data Studio, no la app legacy, así que apagar
+    `01_erp` no lo vuelve innecesario.
+    - **El mapeo se verificó contra la hoja real, no solo contra el `Código.gs`.** Las 15 columnas
+      coinciden exactamente con `copiarDatos()`: `FECHA · LINE · OP · REPO · CLIENTE · IMPRESORA ·
+      ITEM · TIPO DE PAPEL · TALLA · CANT · ENGUIAMIENTO · EN BLANCO · CONSUMO YDS · OBSERVACION ·
+      NRollo`. **Una fila por TALLA**, no por línea.
+    - **Una diferencia encontrada al leer la hoja real**: la columna N se llama `OBSERVACION`, pero
+      el legacy siempre mandaba `""` ahí. El ERP sí tiene ese dato (la observación de la captura),
+      así que ahora se manda. La columna L sigue yendo **vacía** —no `0`— cuando la línea no lleva
+      papel en blanco, igual que el legacy, para no cambiarle el tipo de dato a una columna que los
+      Dashboards ya leen.
+    - **`agregarFilas()` nuevo en `GoogleSheetsService`**, una sola llamada para todo el lote.
+      Importa de verdad: un envío de 50 líneas de 6 tallas son 300 filas, y de a una serían 300
+      llamadas contra la cuota de Google. `agregarFila()` quedó como atajo, así que Reposiciones no
+      cambió. Verificado en el log: un envío de 4 líneas produjo **una** llamada de 13 filas.
+    - **Solo se espejan las tallas que de verdad se crearon.** Las ya enviadas se saltean antes de
+      insertar, y mandarlas igual duplicaría filas en la hoja (el legacy también descarta duplicados).
+      Verificado: reenviar una línea ya enviada devuelve `yaEstaban` y **no agrega ninguna fila**.
+    - **Nunca bloquea el guardado**, misma regla que Reposiciones: se dispara con `void`, después de
+      que la transacción de Postgres cerró, y `GoogleSheetsService` no lanza. **Probado de verdad**,
+      no solo por diseño: apuntando a una pestaña inexistente, el envío devolvió 201 con sus 5
+      tallas guardadas en Postgres y el error quedó solo en el log
+      (`Unable to parse range: ...`).
+    - **Las anulaciones no se reflejan**, igual que en Reposiciones: el legacy solo hace `append` y
+      nunca borra ni marca filas.
+    - **Diferencias deliberadas contra el legacy**: el NRollo va resuelto de verdad
+      (`fn_rollo_en` → formato de `v_rollo_codigo`, ej. `0777-10-8`) en vez de la heurística que se
+      queda en `"Buscando..."`; y **no se borra nada del origen** — el legacy borraba las filas ya
+      procesadas de `DatosOrigen`, acá el origen es la base y la línea solo se marca con
+      `procesada_en` (corrección #3 de §6.2).
+    - **Cómo se verificó sin ensuciar el libro real**: el service account **no puede crear libros
+      nuevos** (403), así que se creó una **pestaña temporal** `QA_FaseD_borrar` en el mismo libro,
+      se apuntó el espejo ahí, se corrieron los envíos reales por la API, se leyeron las filas de
+      vuelta columna por columna y se borró la pestaña al terminar. La hoja `Datos` nunca se tocó.
+      Los consumos de prueba se borraron de Postgres y la base volvió a 252 líneas sin enviar.
+    - ⚠️ **La Forma 2 legacy SIGUE EN USO.** Al leer la hoja real aparecieron filas escritas el
+      **19/09/2026** (dos días antes de construir esto), con OP `26OP027980` y superiores — o sea
+      producción corriente, mientras el ERP tiene cargadas las 68 OP de demo (`26OP0103xx`). Eso
+      significa que **a partir de ahora hay dos escritores sobre la misma hoja**: si una OP se
+      procesa en los dos lados, los Dashboards la cuentan dos veces. No es un problema del código —
+      es una decisión operativa que hay que tomar antes de usar esto en producción: Diseño tiene que
+      dejar de usar la Forma 2 para las OP que se manejen en el ERP. Pendiente de confirmar con el
+      usuario.
+
 ## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
 Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era
 apenas una columna de texto libre en `recetas.productos`. Eso invertía el proceso real de la

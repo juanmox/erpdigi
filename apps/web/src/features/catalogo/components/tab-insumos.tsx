@@ -106,7 +106,7 @@ export function TabInsumos() {
             {insumosFiltrados.length} de {insumos?.length ?? 0} insumos
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {puedeImportar && (
             <>
               <Button variant="outline" size="sm" onClick={() => catalogoApi.plantillaAltaInsumos()}>

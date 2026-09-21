@@ -91,7 +91,7 @@ export function TabPrecios() {
           {insumosFiltrados.length} de {insumos?.length ?? 0} insumos activos
           {cambios.size > 0 && <span> · {cambios.size} cambio(s) sin guardar</span>}
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => catalogoApi.exportarInsumos()}>
             Exportar Excel
           </Button>

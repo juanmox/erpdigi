@@ -5,6 +5,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  formatearFechaSheets,
+  GoogleSheetsService,
+} from '../../common/google-sheets/google-sheets.service';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
@@ -22,6 +26,13 @@ import { CapturarConsumoDto } from './dto/capturar-consumo.dto';
  * se lee: el valor capturado sirve como contraste, no como fuente.
  */
 const FACTOR_ENGUIAMIENTO_DEFAULT = 0.084375;
+
+/**
+ * Una fila de la hoja "Datos" del libro ConsumosFinal, que alimenta los
+ * Dashboards de Data Studio. 15 columnas, una fila POR TALLA — réplica exacta
+ * de lo que armaba copiarDatos() en el Código.gs de la Forma 2 legacy.
+ */
+type FilaDatosSheets = (string | number)[];
 
 export interface TallaCalculada {
   idTalla: number;
@@ -43,6 +54,7 @@ export class CosteoConsumoPapelService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditoria: AuditoriaService,
+    private readonly googleSheets: GoogleSheetsService,
   ) {}
 
   private async resolverOrden(codigoOp: string) {
@@ -282,9 +294,15 @@ export class CosteoConsumoPapelService {
         sinRollo?: boolean;
       }[],
     };
+    // Se juntan las filas de TODO el lote para mandarlas en una sola llamada a
+    // Google: un envío de 50 líneas de 6 tallas son 300 filas, y de a una
+    // serían 300 llamadas contra la cuota.
+    const filasSheets: (string | number)[][] = [];
+
     for (const id of dto.idsLineaProduccion) {
       try {
         const r = await this.capturarUna(id, dto, idUsuarioActor);
+        filasSheets.push(...r.filasSheets);
         if (r.creadas > 0)
           resultado.enviadas.push({
             codigoLine: r.codigoLine,
@@ -312,7 +330,36 @@ export class CosteoConsumoPapelService {
         });
       }
     }
+
+    // Después de que Postgres confirmó todo, y sin `await`: el espejo nunca
+    // bloquea ni revierte el guardado real (misma regla que Reposiciones,
+    // confirmada con el usuario). GoogleSheetsService no lanza; si falla,
+    // queda en el log del servidor.
+    void this.espejarEnGoogleSheets(filasSheets);
+
     return resultado;
+  }
+
+  /**
+   * Espejo hacia la hoja "Datos" del libro ConsumosFinal, que alimenta los
+   * Dashboards de Data Studio. Es el equivalente de lo que hacía copiarDatos()
+   * en la Forma 2 legacy, con dos diferencias deliberadas:
+   *
+   * - El NRollo va resuelto de verdad, no con la heurística del legacy.
+   * - No se borra nada del origen. El legacy borraba las filas de DatosOrigen
+   *   ya procesadas; acá el origen es la base y la línea solo se marca con
+   *   `procesada_en` (corrección #3 de §6.2).
+   *
+   * Las ANULACIONES no se reflejan, igual que en Reposiciones: el legacy solo
+   * hace append y nunca borra ni marca filas. Una anulación en el ERP deja su
+   * fila ya escrita tal cual, para limpiarla a mano si hiciera falta.
+   */
+  private async espejarEnGoogleSheets(filas: (string | number)[][]) {
+    await this.googleSheets.agregarFilas(
+      process.env.GOOGLE_SHEETS_ID_CONSUMOS,
+      'Datos',
+      filas,
+    );
   }
 
   private async capturarUna(
@@ -326,7 +373,13 @@ export class CosteoConsumoPapelService {
 
     const linea = await this.prisma.lineaProduccion.findUnique({
       where: { idLineaProduccion },
-      include: { tallas: { include: { talla: true } }, producto: true },
+      include: {
+        tallas: { include: { talla: true } },
+        producto: true,
+        // Solo para el espejo a Google Sheets: la hoja "Datos" lleva el
+        // cliente y el código de OP en cada fila.
+        ordenProduccion: { include: { cliente: true } },
+      },
     });
     if (!linea)
       throw new NotFoundException('Línea de producción no encontrada');
@@ -383,7 +436,13 @@ export class CosteoConsumoPapelService {
       }
       const montaje = await tx.montajeRollo.findUniqueOrThrow({
         where: { idMontajeRollo },
-        include: { rolloPapel: true },
+        include: {
+          // facturaPapel y tipoPapel: para el NRollo y el tipo de papel que
+          // van en la hoja "Datos". impresora: puede no ser la de la línea,
+          // si el envío vino con `idImpresora` de override.
+          rolloPapel: { include: { facturaPapel: true, tipoPapel: true } },
+          impresora: true,
+        },
       });
 
       // Idempotencia (corrección #5 de §6.2): se consulta qué tallas ya están
@@ -409,6 +468,17 @@ export class CosteoConsumoPapelService {
 
       let creadas = 0;
       const yaEstaban: string[] = [];
+      const filasSheets: FilaDatosSheets[] = [];
+
+      // Mismo formato que costeo.v_rollo_codigo, igual que en Reposiciones: el
+      // NRollo que el ERP ya resolvió, no la búsqueda heurística del legacy
+      // (que en los datos reales se queda en "Buscando..." muy seguido).
+      const nrolloTexto = `${montaje.rolloPapel.facturaPapel.numeroFactura}-${montaje.rolloPapel.facturaPapel.totalRollos}-${montaje.rolloPapel.secuencia}`;
+      const fechaTexto = formatearFechaSheets(fecha);
+      const clienteNombre = linea.ordenProduccion.cliente?.nombre ?? '';
+      const impresoraCodigo = montaje.impresora.codigo;
+      const tipoPapelNombre = montaje.rolloPapel.tipoPapel.nombre;
+
       for (const t of linea.tallas) {
         if (yaEnviadas.has(t.idTalla)) {
           yaEstaban.push(t.talla.nombre);
@@ -441,6 +511,34 @@ export class CosteoConsumoPapelService {
           },
         });
         creadas++;
+
+        // Solo lo que DE VERDAD se creó: las tallas ya enviadas se saltearon
+        // arriba, y mandarlas igual duplicaría filas en la hoja (el legacy
+        // tampoco las reenvía, las descarta como duplicado).
+        filasSheets.push([
+          fechaTexto, // A - Fecha
+          linea.codigoLine, // B - LINE
+          linea.ordenProduccion.codigo, // C - Orden de Producción
+          '', // D - repo (vacío: esto es producción, no reposición)
+          clienteNombre, // E - Cliente
+          impresoraCodigo, // F - IMPRESORA
+          linea.producto.codigo, // G - Item
+          tipoPapelNombre, // H - TIPO DE PAPEL
+          t.talla.nombre, // I - Talla
+          t.cantidad, // J - Cantidad
+          +(t.cantidad * factorEng).toFixed(4), // K - Yardas (enguiamiento)
+          // El legacy deja la celda VACÍA cuando la línea no lleva papel en
+          // blanco, no un 0. Se respeta para no cambiarle el tipo de dato a
+          // la columna que ya leen los Dashboards.
+          linea.consumoEnBlanco
+            ? +(t.cantidad * Number(linea.factorEnBlanco)).toFixed(4)
+            : '', // L - Consumo en blanco
+          consumoYd, // M - CONSUMO YDS
+          // El legacy mandaba "" acá, pero la columna se llama OBSERVACION en
+          // la hoja real y el ERP sí tiene ese dato por captura: se aprovecha.
+          dto.observacion ?? '', // N - OBSERVACION
+          nrolloTexto, // O - NRollo
+        ]);
       }
 
       // Corrección #3: el origen NO se borra, se marca como procesado.
@@ -458,7 +556,7 @@ export class CosteoConsumoPapelService {
         datosNuevos: { codigoLine: linea.codigoLine, creadas, yaEstaban },
       });
 
-      return { creadas, yaEstaban, codigoLine: linea.codigoLine };
+      return { creadas, yaEstaban, codigoLine: linea.codigoLine, filasSheets };
     });
   }
 
