@@ -516,9 +516,15 @@ const TALLAS_ADICIONALES: { nombre: string; orden: number; grupo: string }[] = [
   { nombre: '34Wx34L', orden: 1060, grupo: 'PANT' },
   { nombre: '38Wx34L', orden: 1060, grupo: 'PANT' },
   { nombre: '40Wx36L', orden: 1060, grupo: 'PANT' },
-  { nombre: 'L-XL', orden: 1160, grupo: 'COMBINADA' },
   { nombre: 'LARGE-2', orden: 1160, grupo: 'COMBINADA' },
-  { nombre: 'S-M', orden: 1160, grupo: 'COMBINADA' },
+  // Las 5 combinadas que usa la plantilla de Órdenes, en orden lógico (youth
+  // primero) en vez de compartir todas el 1160, que las dejaba ordenadas
+  // alfabéticamente en el selector de tallas.
+  { nombre: 'YS-YM', orden: 1162, grupo: 'COMBINADA' },
+  { nombre: 'YL-YXL', orden: 1164, grupo: 'COMBINADA' },
+  { nombre: '2XS-XS', orden: 1166, grupo: 'COMBINADA' },
+  { nombre: 'S-M', orden: 1168, grupo: 'COMBINADA' },
+  { nombre: 'L-XL', orden: 1170, grupo: 'COMBINADA' },
 ]
 
 async function upsertPermiso(codigo: string) {

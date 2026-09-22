@@ -33,11 +33,19 @@ de acá (de ahí este archivo) — dos tareas de UI aprobadas conceptualmente:
    (`apps/web/src/features/auth/login-page.tsx`). Panel dividido: foto a pantalla completa a la
    izquierda (`object-cover`, degradado oscuro + filo diagonal dorado de acento) con placa blanca
    del logo real (`apps/web/src/assets/logo-digitexsa.png`) sobrepuesta abajo; formulario a la
-   derecha. **⚠️ La foto actual (`apps/web/src/assets/Football.png`) es temporal/de prueba — muestra
-   de forma visible el escudo de la NFL (marca registrada de terceros) y no es una foto real de
-   Digitexsa. NO debe quedar en ningún build que se comparta ni en producción** — sustituir por una
-   foto propia de uniformes deportivos de Digitexsa antes de eso (mismo tratamiento visual ya
-   sirve, solo cambiar el import en `login-page.tsx`). Paleta resuelta sin abandonar el azul
+   derecha. **Sobre `apps/web/src/assets/Football.png`** (revisado a fondo el 2026-09-22): es una
+   imagen generada por IA que el usuario ya editó — el original está en
+   `Documents\Jmox\Claude\ERP DIGI\Imagenes\`, con tres versiones sucesivas
+   (`Football Sin logo` → `Football Sin valla` → `Football digitexsa`). **La que está en el repo es
+   la última, la más editada**, verificado por sha256. Lo que se editó fue **el fondo**: la pantalla
+   gigante del estadio se tapó y la valla inferior ahora dice TEXSA. Comparando las tres píxel a
+   píxel, la única zona que cambia es esa (bbox 35,290–314,621); el jugador no se tocó.
+   ⚠️ **Queda un emblema en el pecho de la camiseta** —un escudo azul/blanco/rojo, en la posición
+   donde va el de la NFL— **idéntico en las tres versiones**. Ampliado 4x no se lee ninguna marca:
+   es una mancha con forma de escudo, típica de IA. El usuario está al tanto y decidió dejarla. Si
+   alguna vez se quiere quitar, hay que editar la imagen (no hay versión sin ese escudo) o
+   sustituirla por una foto real de Digitexsa: basta cambiar el import en `login-page.tsx`, el
+   degradado oscuro y el filo dorado ya están pensados para ir encima de cualquier imagen. Paleta resuelta sin abandonar el azul
    corporativo: se le
    mostraron 3 opciones de acento cálido (Dorado Varsity / Naranja Cancha / Coral Deportivo, mismo
    patrón "azul intacto + acento secundario más vivo") en un artifact comparador
@@ -1291,6 +1299,39 @@ sin i18n (todo en español).
       verificado con clic real: el botón pasa de `Guardar cambios (0)` deshabilitado a
       `Guardar cambios (1)` al escribir y responde "1 precio(s) actualizado(s)". Ese contador entre
       paréntesis es la señal de si hay algo pendiente de guardar. Ojo: guarda el precio y lo registra
+
+  - **Cinco tallas combinadas agregadas a la plantilla de Órdenes, y decisiones de cierre
+    (2026-09-22)**:
+    1. **La plantilla pasó de 13 a 18 tallas** (30 → 35 columnas). Las nuevas son combinadas —
+       cubren un rango en una sola prenda, no dos prendas: `YS-YM`, `YL-YXL`, `2XS-XS`, `S-M`,
+       `L-XL`. De las cinco, **solo `S-M` y `L-XL` existían** en el catálogo; las otras tres se
+       sembraron (`TALLAS_ADICIONALES` en `seed.ts`), 155 → 158 tallas.
+       - **⚠️ Las tallas nuevas SIEMPRE van al final de `TALLAS_IMPORT_LINEAS`.** El parser lee
+         desde la columna 18 (`IDX_TALLA_INICIO`) y las tallas son las últimas columnas, así que
+         agregar al final deja seguir cargando los archivos ya armados con la plantilla vieja: las
+         columnas que les faltan se leen vacías y se saltan. **Insertar en el medio correría todas
+         las siguientes y haría que un archivo viejo cargue cantidades en la talla equivocada, en
+         silencio** — el peor modo de falla posible acá. Queda advertido en el comentario de la
+         constante.
+       - Verificado con el `destino.xlsx` real de 30 columnas (el convertido de OrigenConsumo): las
+         253 filas siguen leyendo sus tallas idénticas (fila 1 = M 8, L 19, XL 8). Los 253 "errores"
+         que devuelve son el detector de duplicados — ese archivo ya se importó en agosto —, no una
+         regresión. Y con un archivo nuevo usando `YS-YM`/`YL-YXL`/`L-XL`: preview sin errores,
+         aplicar creó la OP, y la base quedó con 4/6/9 contra las tallas correctas. Datos de prueba
+         borrados.
+       - Al grupo `COMBINADA` se le dio un `orden` lógico (youth primero: 1162→1170) en vez de
+         compartir todas el 1160, que las dejaba alfabéticas en el selector de tallas.
+    2. **`Football.png` se queda.** Se llegó a borrar por el aviso de "escudo de la NFL" que traía
+       este archivo desde una sesión anterior, y se revirtió al revisarla de verdad: el usuario ya la
+       había editado (es la última de tres versiones suyas) y el emblema que queda no es una marca
+       legible. Ver el punto 2 de "Pendiente ahora mismo" arriba para el detalle. *Lección*: antes de
+       borrar un asset por un aviso heredado, **mirar el archivo** — el aviso no decía cuál de las
+       versiones del usuario estaba en el repo, y resultó ser la ya corregida.
+    3. **Decisión del usuario: el doble conteo en los Dashboards no es riesgo hoy.** La pantalla de
+       Envío de impresas todavía no se usa en producción, y cuando se use será en un solo lado. El
+       aviso de la Fase D queda como contexto, no como pendiente.
+    4. **Decisión del usuario: el repositorio de `01_erp` NO se borra.** Simplemente no se toca más.
+       Queda como respaldo frío; la app sigue apagada desde el 2026-08-31.
       en `core.auditoria`, pero **no** crea versión en `costeo.insumo_costo`.
 
   - **F4 — Fase D (espejo a Google Sheets) completada, 2026-09-21.** Cierra F4. Cada envío de
