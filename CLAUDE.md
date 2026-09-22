@@ -1261,26 +1261,37 @@ sin i18n (todo en español).
        cargar una OP con tallas de hombre/mujer/ladies (el catálogo tiene 155), pero con los datos
        de hoy no bloquea nada. Revisar cuando aparezca una OP que las use.
 
-  - **⚠️ Local y producción divergen en costos — y el que está contaminado es LOCAL (2026-09-21)**.
-    Se comparó insumo por insumo y línea por línea de receta. **Los 25 insumos existen en ambos
-    lados y 24 tienen el mismo precio**; toda la diferencia de costo de los 4 productos reales sale
-    de exactamente dos cosas, ambas del lado local:
-    1. **`174014 WARP 340 GRS` vale `9.99` en local y `44.713811` en producción.** El 9.99 es un
-       valor redondo, sin ninguna fila en `costeo.insumo_costo` que lo respalde — se escribió
-       directo sobre `recetas.insumos.costo_promedio`, saltándose el versionado SCD2. Producción
-       tiene lo que parece un promedio ponderado real.
-    2. **`BSN-FB01N` tiene en local una línea de receta que producción no tiene**: `173001 PAPEL
-       TISSUE, consumo 99, sin área` (`id_desarrollo_insumo = 1`, o sea que viene del backfill de
-       `producto_insumos`, no de una edición reciente). El mismo insumo ya está en esa receta con
-       área "Transferencia" y consumo 1.525, así que el 99 sin área parece un error de captura
-       heredado. Aporta 99 × 0.789543 = **Q78.16**.
-    La aritmética cierra al centavo en los 4 productos, así que no hay ninguna otra diferencia
-    escondida: `BSN-FB01N` local = prod + 78.16 − 20.07; los otros tres = prod − (consumo de 174014
-    × 34.72). Las recetas de `BSN-FB02NB`, `BSN-YFB02NB` y `BSN-FB01ESPN` son **idénticas** en
-    ambos lados (36 líneas, cero diferencias).
-    **Conclusión**: "sincronizar precios" no es empujar local hacia producción — es **limpiar
-    local**. Pendiente de decisión del usuario, porque tocar un precio y borrar una línea de receta
-    cambia el costo de productos reales.
+  - **Costos de los 4 productos reales: local y producción quedaron iguales (2026-09-22)**. Venían
+    divergiendo desde el despliegue de agosto. Toda la diferencia salía de dos cosas, y **una de las
+    dos la diagnostiqué al revés** — queda anotado para que nadie repita el error:
+    1. **Una línea de receta de más en local, que sí era basura**: `BSN-FB01N` tenía
+       `173001 PAPEL TISSUE, consumo 99, sin área` además de la legítima (`1.525`, área
+       Transferencia). 99 yardas de papel tissue por camiseta no tenía sentido al lado de 1.525, y
+       venía del backfill de `producto_insumos` (`id_desarrollo_insumo = 1`, la fila más antigua de
+       la tabla). Producción nunca la tuvo. **Borrada por el usuario**; aportaba Q78.16.
+    2. **⚠️ El precio de `174014 WARP 340 GRS` NO estaba mal en local: Q9.99 es el precio real**,
+       confirmado por el usuario. Yo había concluido lo contrario —que el bueno era el `44.713811`
+       de producción— razonando que 44.71 "tiene cara de promedio ponderado" y 9.99 es
+       "sospechosamente redondo". **Eso era una inferencia mirando el número, no un dato**, y
+       resultó falsa: el valor viejo de producción era el desactualizado. Producción ya quedó
+       corregida a 9.99.
+    **Estado final, verificado en ambos lados**: `BSN-FB01ESPN 98.8343 · BSN-FB01N 50.7940 ·
+    BSN-FB02NB 47.0583 · BSN-YFB02NB 44.7118`, idénticos. No hace falta tocar nada más, y **si un
+    análisis futuro vuelve a marcar el 9.99 como sospechoso, está equivocado**.
+    - *Lección de método*: "número redondo" no es evidencia de dato de prueba. Cuando el dato es de
+      negocio y no hay forma de verificarlo contra el sistema (acá `costeo.insumo_costo` está vacía
+      —nada la escribe todavía— así que no había historial que consultar), hay que **preguntar antes
+      de recomendar**, no razonar desde la forma del número.
+    - *Lección operativa*: dar una ruta de clics sin nombrar el ambiente hizo que un cambio cayera en
+      producción por error (`192.168.2.13` en vez de `localhost:5173`), justo después de una sesión
+      trabajando contra el servidor. **Nombrar siempre la URL completa en cada paso.** Se detectó
+      comparando `core.auditoria` de los dos lados, que fue lo que reconstruyó la secuencia exacta —
+      vale la pena mirar ahí primero cuando un cambio "no aparece".
+    - La pantalla de Precios (Gestión de datos → Precios de insumos) **no tiene ningún bug**,
+      verificado con clic real: el botón pasa de `Guardar cambios (0)` deshabilitado a
+      `Guardar cambios (1)` al escribir y responde "1 precio(s) actualizado(s)". Ese contador entre
+      paréntesis es la señal de si hay algo pendiente de guardar. Ojo: guarda el precio y lo registra
+      en `core.auditoria`, pero **no** crea versión en `costeo.insumo_costo`.
 
   - **F4 — Fase D (espejo a Google Sheets) completada, 2026-09-21.** Cierra F4. Cada envío de
     consumo escribe además en la hoja **"Datos"** del libro `ConsumosFinal DIGITEXSAMig`, que es lo
@@ -1654,7 +1665,9 @@ Ninguna de las dos cosas falla ruidosamente.
 - **No se pisaron los precios de insumos de producción**: el `ON CONFLICT DO NOTHING` dejó intactos
   los 24 insumos que ya existían y solo agregó el que faltaba. Por eso los costos de producción
   difieren de los de local (BSN-FB01N: Q70.86 allá, Q128.96 acá) — son precios distintos, no un
-  error. Sincronizarlos es un paso aparte, si se decide.
+  error. Sincronizarlos es un paso aparte, si se decide. **Ya resuelto el 2026-09-22** — ver
+  "Costos de los 4 productos reales" más arriba: la diferencia era un precio desactualizado en
+  producción más una línea de receta basura en local, y los dos lados ya dan lo mismo.
 - **Las recetas de los 4 productos reales son las de producción**, no las de local: sus 46 líneas ya
   existían con ids que colisionaron, así que las locales se saltaron. Es lo correcto, son
   consistentes con los precios de allá. Verificado: 10+11+11+14 = 46 líneas, cero duplicados.
