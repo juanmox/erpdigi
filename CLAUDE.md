@@ -738,10 +738,29 @@ el servidor, no la llave personal del usuario). Checkout del servidor en
 - **Node**: el servidor tenía Node 22 del sistema (este repo pide `>=24`) — se instaló Node 24 vía
   `nvm` **para el usuario `erpadmin`, sin sudo**, sin tocar el Node del sistema por si algo más lo
   usa. `pnpm` se activa con `corepack prepare pnpm@11.17.0 --activate` (ya viene con Node ≥16.9).
-- **Deploy de rutina**: `scripts/deploy.sh` (`git pull` → `pnpm install` → `prisma migrate deploy`
-  → build de `api`/`web` → `pm2 restart digitexsa-api`) — pero antes de que ese script sirva hay
-  que activar nvm en la sesión (`export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"`), no está
-  metido en el script todavía.
+- **Deploy de rutina**: `scripts/deploy.sh` (`git pull` → `pnpm install` → **`prisma generate`** →
+  `prisma migrate deploy` → build de `api`/`web` → `pm2 restart digitexsa-api`) — pero antes de que
+  ese script sirva hay que activar nvm en la sesión
+  (`export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"`), no está metido en el script todavía.
+  - **El `prisma generate` explícito se agregó el 2026-09-23**, después de que el mismo fallo
+    rompiera dos despliegues. `apps/api` lo tiene como `postinstall`, pero cuando no hay
+    dependencias nuevas pnpm reporta *"Already up to date"* y **no corre los postinstall**, así que
+    el cliente se queda con el schema viejo y el build revienta con `Property 'X' does not exist`.
+    Lo peligroso es el estado en que deja el servidor: **`migrate deploy` ya corrió** (la base queda
+    migrada) pero el build falla, así que `dist/` y PM2 siguen con la versión anterior. Es un estado
+    seguro mientras la migración sea aditiva, pero hay que terminar el despliegue a mano
+    (`prisma generate` → build → `pm2 restart`).
+  - **⚠️ El cuerpo del script vive dentro de `main()` y `main "$@"` se llama en la última línea.
+    No es estilo.** El script hace `git pull` **de sí mismo**, y bash lee el archivo por partes
+    guardando un offset: si el pull cambia el largo del script a mitad de corrida, la siguiente
+    lectura cae en otro lado. **Medido, no supuesto**: simulando el pull sobre la versión sin
+    wrapper, el script **se cortó justo después del `git pull` y salió con código 0** — se saltó
+    install, migraciones, build y restart, y *reportó éxito*. Ese es el peor modo de falla posible
+    para un deploy: silencioso y con exit 0. Con el cuerpo en `main()`, bash parsea el archivo
+    completo antes de ejecutar nada; la misma simulación corre los 6 pasos hasta "Listo" aunque el
+    archivo se reemplace por uno de 2 líneas. **Nunca sacar el wrapper.**
+    - Corolario: un cambio a `deploy.sh` entra en vigor recién en el **siguiente** despliegue. Para
+      estrenarlo de inmediato, hacer `git pull` a mano en el servidor antes de correrlo.
 - **Gotchas reales encontrados en este primer deploy** (ya corregidos donde aplicaba):
   1. No había ningún paso que corriera `prisma generate` tras `pnpm install` → build fallaba con
      120 errores de TS. Corregido con `"postinstall": "prisma generate"` en `apps/api/package.json`.
