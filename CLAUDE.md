@@ -783,6 +783,28 @@ el servidor, no la llave personal del usuario). Checkout del servidor en
   base para el schema `core` nuevo. Antes del primer `migrate deploy`/aplicar SQL contra la base
   real se hizo `pg_dump --schema=recetas` de respaldo (queda en el home de `erpadmin` en el
   servidor) — recomendable repetirlo antes de cualquier migración futura que si toque `recetas`.
+- **Caché de Nginx: `index.html` no se cachea, los assets sí (corregido el 2026-09-23).** Tras un
+  despliegue, el usuario no veía una pestaña nueva en el servidor aunque **el bundle desplegado sí
+  la traía** — verificado con grep sobre el `.js` real y con un navegador limpio, que sí cargaba la
+  versión nueva. Era el navegador del usuario con el `index.html` viejo cacheado. Dos causas, las
+  dos de config:
+  1. **`index.html` se servía sin ninguna cabecera `Cache-Control`.** Sin ella el navegador aplica
+     *caché heurístico* (inventa un tiempo de vida, típicamente ~10% de la antigüedad del archivo).
+     Como los bundles llevan hash, `index.html` es el ÚNICO archivo que debe revalidarse siempre, y
+     era justo el que se cacheaba a ciegas. Ahora manda `no-cache` — que no impide cachear, obliga a
+     revalidar: con el ETag que ya existía, es un 304 de unos bytes.
+  2. **Cualquier asset inexistente devolvía `index.html` con HTTP 200**, porque
+     `try_files $uri $uri/ /erp/index.html` atrapaba también `/erp/assets/*`. Comprobado pidiendo un
+     nombre inventado: 200 con HTML. Eso convierte un bundle borrado en `Unexpected token '<'` y
+     pantalla en blanco, sin ningún 404 que apunte a la causa. Ahora `/erp/assets/` es un bloque
+     propio con `try_files $uri =404` y `Cache-Control: public, max-age=31536000, immutable`.
+  - Config real en `/etc/nginx/sites-available/erpapp` (backup previo en `erpapp.bak-2026-09-23`);
+    el ejemplo del repo (`infra/nginx/digitexsa-erp.conf.example`) quedó igual. Verificado tras el
+    `reload`: index 200 con `no-cache`, assets con `immutable`, inexistentes con **404**, y la app
+    cargando sin errores de consola.
+  - **`sudo` en ese servidor pide contraseña**, así que Claude no puede tocar Nginx: hay que pasarle
+    los comandos al usuario. El patrón que funcionó fue dejarle el archivo listo en `~/` con `scp`
+    (sin sudo) y darle el `cp` + `nginx -t` + `systemctl reload` para pegar.
 - **`COOKIE_SECURE=false` es obligatorio** en el `.env` de producción mientras no haya HTTPS — si
   se deja que el cookie de refresh token siga a `NODE_ENV=production` por defecto, se marca
   `Secure` y el navegador nunca lo reenvía por HTTP plano, rompiendo el login.

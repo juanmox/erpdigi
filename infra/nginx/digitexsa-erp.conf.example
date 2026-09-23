@@ -18,7 +18,31 @@ location /erp/api/ {
     proxy_set_header    X-Forwarded-Proto $scheme;
 }
 
+# Los assets de Vite llevan hash de contenido en el nombre, así que un archivo con un nombre
+# dado nunca cambia: se cachean un año. Al publicar una versión nueva cambia el hash — o sea el
+# nombre — y el navegador lo pide igual.
+#
+# `try_files $uri =404` es lo importante y NO es opcional: sin este bloque, el fallback de abajo
+# atrapa también las rutas de assets, así que pedir un bundle ya borrado devuelve index.html con
+# HTTP 200. El navegador intenta ejecutar HTML como JavaScript y falla con "Unexpected token '<'"
+# y pantalla en blanco, sin ningún 404 que apunte a la causa. Verificado en el servidor real el
+# 2026-09-23, antes de corregirlo.
+location /erp/assets/ {
+    alias <RUTA_AL_REPO>/apps/web/dist/assets/;
+    try_files $uri =404;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+}
+
+# index.html es el único archivo que NO puede cachearse: es el que apunta a los bundles con hash,
+# así que si queda viejo el navegador sigue cargando la versión anterior de la app aunque el
+# servidor ya tenga la nueva. Pasó el 2026-09-23: una pestaña nueva no aparecía en el navegador
+# pese a estar en el bundle desplegado, y el diagnóstico costó porque el servidor estaba bien.
+#
+# Sin cabecera de caché el navegador aplica caché heurístico: inventa un tiempo de vida. "no-cache"
+# no impide cachear, obliga a revalidar; con el ETag que Nginx ya manda, eso es un 304 de unos
+# bytes.
 location /erp/ {
     alias <RUTA_AL_REPO>/apps/web/dist/;
     try_files $uri $uri/ /erp/index.html;
+    add_header Cache-Control "no-cache";
 }
