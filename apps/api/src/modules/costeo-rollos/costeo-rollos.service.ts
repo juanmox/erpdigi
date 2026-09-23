@@ -373,7 +373,11 @@ export class CosteoRollosService {
     await this.prisma.$transaction(async (tx) => {
       await tx.montajeRollo.update({
         where: { idMontajeRollo },
-        data: { desmontadoEn: ahora, yardasFinales: dto.yardasFinales },
+        data: {
+          desmontadoEn: ahora,
+          yardasFinales: dto.yardasFinales,
+          desmontadoPor: idUsuarioActor,
+        },
       });
       await tx.rolloPapel.update({
         where: { idRolloPapel: montaje.idRolloPapel },
@@ -446,6 +450,21 @@ export class CosteoRollosService {
         ? yardasUsadasFisicas - consumoEsteMontaje
         : null;
 
+    // `creadoPor`/`desmontadoPor` son enteros sin @relation (decisión de F1:
+    // evitar ~12 arrays inversos en core.Usuario), así que los nombres se
+    // resuelven con una consulta aparte en vez de un include.
+    const actores = await this.prisma.usuario.findMany({
+      where: {
+        idUsuario: {
+          in: [montaje.creadoPor, montaje.desmontadoPor].filter(
+            (x): x is number => x != null,
+          ),
+        },
+      },
+      select: { idUsuario: true, username: true, nombreCompleto: true },
+    });
+    const porId = new Map(actores.map((u) => [u.idUsuario, u]));
+
     return {
       ...montaje,
       consumoEsteMontaje,
@@ -454,6 +473,80 @@ export class CosteoRollosService {
       yardasRestantesRollo,
       yardasUsadasFisicas,
       merma,
+      montadoPorUsuario: porId.get(montaje.creadoPor) ?? null,
+      desmontadoPorUsuario:
+        montaje.desmontadoPor != null
+          ? (porId.get(montaje.desmontadoPor) ?? null)
+          : null,
+    };
+  }
+
+  /**
+   * Historial de montajes: quién montó, quién desmontó y cuánto se consumió en
+   * cada sesión. Sin esto el dato existía pero no había dónde verlo — el panel
+   * solo muestra el montaje VIGENTE de cada impresora, así que al desmontar el
+   * registro desaparecía de la vista.
+   *
+   * Es también la base del reporte de transacciones que pidió el usuario.
+   */
+  async historialMontajes(filtro: {
+    idImpresora?: number;
+    soloAbiertos?: boolean;
+    limite?: number;
+  }) {
+    const montajes = await this.prisma.montajeRollo.findMany({
+      where: {
+        idImpresora: filtro.idImpresora,
+        ...(filtro.soloAbiertos ? { desmontadoEn: null } : {}),
+      },
+      include: {
+        impresora: true,
+        rolloPapel: { include: INCLUDE_ROLLO },
+      },
+      orderBy: { montadoEn: 'desc' },
+      take: Math.min(filtro.limite ?? 100, 500),
+    });
+    if (montajes.length === 0) return { montajes: [] };
+
+    const consumoPor = await this.consumoPorMontajeIds(
+      montajes.map((m) => m.idMontajeRollo),
+    );
+
+    // Los nombres se resuelven en un solo lote: `creadoPor`/`desmontadoPor` son
+    // enteros sin @relation (decisión de F1), así que no se pueden `include`.
+    const ids = [
+      ...new Set(
+        montajes.flatMap((m) =>
+          [m.creadoPor, m.desmontadoPor].filter((x): x is number => x != null),
+        ),
+      ),
+    ];
+    const usuarios = await this.prisma.usuario.findMany({
+      where: { idUsuario: { in: ids } },
+      select: { idUsuario: true, username: true, nombreCompleto: true },
+    });
+    const porId = new Map(usuarios.map((u) => [u.idUsuario, u]));
+
+    return {
+      montajes: montajes.map((m) => ({
+        idMontajeRollo: m.idMontajeRollo,
+        impresora: { idImpresora: m.idImpresora, codigo: m.impresora.codigo },
+        rollo: {
+          idRolloPapel: m.idRolloPapel,
+          codigo: `${m.rolloPapel.facturaPapel.numeroFactura}-${m.rolloPapel.facturaPapel.totalRollos}-${m.rolloPapel.secuencia}`,
+          tipoPapel: m.rolloPapel.tipoPapel.nombre,
+        },
+        montadoEn: m.montadoEn,
+        montadoPor: porId.get(m.creadoPor) ?? null,
+        desmontadoEn: m.desmontadoEn,
+        desmontadoPor:
+          m.desmontadoPor != null ? (porId.get(m.desmontadoPor) ?? null) : null,
+        yardasFinales: m.yardasFinales ? Number(m.yardasFinales) : null,
+        consumoEsteMontaje: consumoPor.get(m.idMontajeRollo) ?? 0,
+        /** Lo cerró alguien distinto de quien lo montó. */
+        cambioDeTurno:
+          m.desmontadoPor != null && m.desmontadoPor !== m.creadoPor,
+      })),
     };
   }
 

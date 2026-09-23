@@ -1332,6 +1332,64 @@ sin i18n (todo en español).
        aviso de la Fase D queda como contexto, no como pendiente.
     4. **Decisión del usuario: el repositorio de `01_erp` NO se borra.** Simplemente no se toca más.
        Queda como respaldo frío; la app sigue apagada desde el 2026-08-31.
+
+  - **`montaje_rollo.desmontado_por` — quién cerró el rollo (2026-09-22)**. Pregunta del usuario:
+    si un rollo dura varios días y lo desmonta otro operario, ¿cómo queda registrado? Respuesta que
+    había: **quedaba solo en `core.auditoria`**, no en la tabla — `desmontar()` ya registraba el
+    UPDATE con su `id_usuario`, pero `montaje_rollo` tenía `creado_por` y nada más, así que
+    responder "¿quién cerró este rollo?" exigía SQL a mano y ninguna pantalla lo mostraba.
+    - **No era una decisión, era una asimetría**: las otras tablas con acción de cierre
+      (`consumo_papel`, `reposicion`) sí guardan los dos actores (`creado_por` + `anulado_por`).
+    - **Por qué importa más de lo que parece**: el desmontaje es donde se teclea `yardas_finales`, y
+      de ahí sale la merma (usadas físicas − consumo registrado). Es una cifra de la que alguien
+      responde. El usuario aclaró que en el uso normal cada operario tiene su impresora asignada y
+      monta/desmonta él mismo — los cruces son la excepción —, pero quiere el registro para saber
+      quién hace su trabajo, y **pidió un reporte de estas transacciones para cuando se construya el
+      módulo de Reportes** (pendiente, no hecho acá).
+    - Migración `20260922160000_montaje_desmontado_por` (+ `rollback.sql`): columna nullable con FK
+      `RESTRICT` hacia `core.usuarios`, más `CHECK (desmontado_por IS NULL OR desmontado_en IS NOT
+      NULL)` — impide el estado imposible de "alguien desmontó algo que sigue montado"; no exige lo
+      inverso porque el histórico previo puede no tener autor.
+    - **Backfill desde la auditoría**: el dato ya existía ahí, así que la migración lo recupera con
+      una subconsulta correlacionada sobre `core.auditoria`. En local recuperó el único montaje
+      histórico desmontado. **Producción tenía 0 montajes** (Gestión de Rollos no se ha usado ahí
+      todavía), así que allá la migración es puramente estructural.
+    - **Ventaja real sobre dejarlo solo en auditoría**: la FK `RESTRICT` protege el rastro. En
+      `core.auditoria` el `id_usuario` es `ON DELETE SET NULL` — borrar un usuario borra su nombre
+      del histórico, y se vio pasar con los usuarios de prueba de sesiones anteriores. Con la
+      columna, la base directamente impide borrar a quien desmontó (verificado).
+    - `detalleMontaje()` devuelve ahora `montadoPorUsuario` y `desmontadoPorUsuario` resueltos. Los
+      nombres se traen con una consulta aparte y no con `include` porque `creadoPor`/`desmontadoPor`
+      son enteros **sin `@relation`** a propósito desde F1 (evitar ~12 arrays inversos en
+      `core.Usuario`). El modal de desmontaje muestra "Montado por X" antes de cerrar.
+    - **⚠️ Al aplicar la migración por primera vez falló con `42P10`**: el backfill usaba
+      `UPDATE ... FROM LATERAL (...)` referenciando la tabla destino, que Postgres no permite. El
+      DDL sí se había aplicado, así que la migración quedó **a medias y marcada como no terminada**,
+      lo que bloquea las siguientes. Se resolvió corriendo su `rollback.sql`, marcándola con
+      `prisma migrate resolve --rolled-back`, corrigiendo el SQL y reaplicando. *Lección*: un
+      `migrate deploy` que falla a mitad no deja la base como estaba — hay que revisar qué quedó
+      aplicado antes de reintentar.
+    - Después del cambio de schema hizo falta **`prisma generate` explícito**: el typecheck fallaba
+      con "desmontadoPor no existe". Es el mismo tropiezo ya documentado en el despliegue de agosto.
+    - **Verificado simulando el caso real**: dos usuarios desechables, uno monta y el otro desmonta.
+      La respuesta de la API trae los dos nombres, la base guarda los dos ids, y borrar al que
+      desmontó lo rechaza la FK. Montaje y usuarios de prueba borrados al terminar.
+    - **Pestaña "Historial" nueva en Gestión de Rollos** (`components/tab-historial.tsx` +
+      `GET /costeo/rollos/montajes`, gateada con `costeo.rollo.ver`). El usuario probó montar y
+      desmontar y preguntó dónde veía el resultado: **el dato se guardaba pero no había pantalla**.
+      El Panel de estado solo muestra el montaje VIGENTE de cada impresora, así que al desmontar el
+      registro desaparecía de la vista, y `GET /costeo/rollos/:id` —que sí devuelve el historial del
+      rollo— no lo consumía nadie en el frontend.
+      - Una fila por montaje, del más reciente al más antiguo, con impresora, rollo, quién montó y
+        cuándo, quién desmontó y cuándo, consumo de esa sesión y yardas finales. Filtro por
+        impresora.
+      - Badge **"Cambio de turno"** solo cuando lo cerró alguien distinto del que lo montó. Lo
+        normal es que sea la misma persona (cada operario tiene su impresora), así que se marca la
+        excepción y no el caso corriente — que es justo lo que el usuario quiere poder ubicar.
+      - Los nombres se resuelven en **un solo lote** para toda la lista, y el consumo con el
+        `consumoPorMontajeIds()` que ya existía: nada de una consulta por fila.
+      - Es la base del reporte de transacciones pendiente. Verificado en navegador a 1440 y 390 px,
+        sin desborde ni errores de consola, mostrando los 4 montajes reales de la base.
       en `core.auditoria`, pero **no** crea versión en `costeo.insumo_costo`.
 
   - **F4 — Fase D (espejo a Google Sheets) completada, 2026-09-21.** Cierra F4. Cada envío de

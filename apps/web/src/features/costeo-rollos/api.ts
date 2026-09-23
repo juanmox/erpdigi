@@ -5,6 +5,7 @@ import type {
   FilaPreviewIngresoRollo,
   Impresora,
   MontajeDetalle,
+  MontajeHistorial,
   PanelItem,
   RolloPapel,
   TipoPapel,
@@ -54,6 +55,10 @@ export const costeoRollosApi = {
       body: JSON.stringify(body),
     }),
   detalleMontaje: (idMontajeRollo: number) => apiFetch<MontajeDetalle>(`/costeo/rollos/montajes/${idMontajeRollo}`),
+  historialMontajes: (idImpresora?: number) =>
+    apiFetch<{ montajes: MontajeHistorial[] }>(
+      `/costeo/rollos/montajes${idImpresora ? `?idImpresora=${idImpresora}` : ''}`,
+    ),
 
   plantillaImportar: () =>
     descargarArchivo('/costeo/rollos/plantilla-importar', 'plantilla_ingreso_rollos.xlsx'),

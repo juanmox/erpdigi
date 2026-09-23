@@ -2,6 +2,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/features/auth/auth-context'
 import { TabCorregirIngreso } from './components/tab-corregir-ingreso'
+import { TabHistorial } from './components/tab-historial'
 import { TabIngreso } from './components/tab-ingreso'
 import { TabMontaje } from './components/tab-montaje'
 import { TabPanel } from './components/tab-panel'
@@ -16,7 +17,8 @@ export function RollosPage() {
   // permisos: un ?tab= a una pestaña que el rol no ve dejaría la página vacía.
   const [params, setParams] = useSearchParams()
   const pedida = params.get('tab')
-  const disponibles = ['panel', ...(puedeMontar ? ['montaje'] : []), ...(puedeIngresar ? ['ingreso', 'corregir'] : [])]
+  // 'historial' solo pide costeo.rollo.ver, que es lo mismo que el panel.
+  const disponibles = ['panel', ...(puedeMontar ? ['montaje'] : []), ...(puedeIngresar ? ['ingreso', 'corregir'] : []), 'historial']
   const tab = pedida && disponibles.includes(pedida) ? pedida : 'panel'
 
   return (
@@ -32,6 +34,7 @@ export function RollosPage() {
           {puedeMontar && <TabsTrigger value="montaje">Montaje</TabsTrigger>}
           {puedeIngresar && <TabsTrigger value="ingreso">Ingreso a bodega</TabsTrigger>}
           {puedeIngresar && <TabsTrigger value="corregir">Corregir ingreso</TabsTrigger>}
+          <TabsTrigger value="historial">Historial</TabsTrigger>
         </TabsList>
         <TabsContent value="panel">
           <TabPanel />
@@ -51,6 +54,9 @@ export function RollosPage() {
             <TabCorregirIngreso />
           </TabsContent>
         )}
+        <TabsContent value="historial">
+          <TabHistorial />
+        </TabsContent>
       </Tabs>
     </div>
   )

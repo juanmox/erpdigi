@@ -62,6 +62,10 @@ export interface MontajeDetalle {
   yardasRestantesRollo: number | null
   yardasUsadasFisicas: number | null
   merma: number | null
+  /** Quién montó. Se resuelve en el servidor: la columna guarda solo el id. */
+  montadoPorUsuario: { idUsuario: number; username: string; nombreCompleto: string } | null
+  /** Quién desmontó. null mientras el montaje siga vigente. */
+  desmontadoPorUsuario: { idUsuario: number; username: string; nombreCompleto: string } | null
 }
 
 export interface RolloDeFactura {
@@ -106,4 +110,25 @@ export interface FilaPreviewIngresoRollo {
   yardasPorRollo: number | null
   costoUnitario: number | null
   error: string | null
+}
+
+interface ActorMontaje {
+  idUsuario: number
+  username: string
+  nombreCompleto: string
+}
+
+/** Una fila del historial de montajes (pestaña Historial). */
+export interface MontajeHistorial {
+  idMontajeRollo: number
+  impresora: { idImpresora: number; codigo: string }
+  rollo: { idRolloPapel: number; codigo: string; tipoPapel: string }
+  montadoEn: string
+  montadoPor: ActorMontaje | null
+  desmontadoEn: string | null
+  desmontadoPor: ActorMontaje | null
+  yardasFinales: number | null
+  consumoEsteMontaje: number
+  /** Lo cerró alguien distinto de quien lo montó. */
+  cambioDeTurno: boolean
 }

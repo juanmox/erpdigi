@@ -292,6 +292,10 @@ model MontajeRollo {
   montadoEn      DateTime  @map("montado_en") @db.Timestamptz(3)
   desmontadoEn   DateTime? @map("desmontado_en") @db.Timestamptz(3)
   yardasFinales  Decimal?  @map("yardas_finales") @db.Decimal(12, 4)
+  /// Quién cerró el montaje. NULL mientras siga montado. Sin `@relation` a
+  /// propósito, igual que `creadoPor`: la FK existe en la base pero declararla
+  /// acá llenaría core.Usuario de arrays inversos (ver init_costeo).
+  desmontadoPor  Int?      @map("desmontado_por")
   creadoPor      Int       @map("creado_por")
   creadoEn       DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
 

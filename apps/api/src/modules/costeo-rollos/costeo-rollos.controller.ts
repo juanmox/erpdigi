@@ -74,6 +74,22 @@ export class CosteoRollosController {
     return this.service.aplicarImportarIngresos(dto.filas, usuario.sub);
   }
 
+  // Antes de @Get(':id'), como el resto: si no, 'montajes' entraría por el
+  // parámetro.
+  @RequirePermissions('costeo.rollo.ver')
+  @Get('montajes')
+  historialMontajes(
+    @Query('idImpresora') idImpresora?: string,
+    @Query('soloAbiertos') soloAbiertos?: string,
+    @Query('limite') limite?: string,
+  ) {
+    return this.service.historialMontajes({
+      idImpresora: idImpresora ? Number(idImpresora) : undefined,
+      soloAbiertos: soloAbiertos === 'true',
+      limite: limite ? Number(limite) : undefined,
+    });
+  }
+
   @RequirePermissions('costeo.rollo.ver')
   @Get('panel')
   panel() {

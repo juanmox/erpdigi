@@ -101,6 +101,18 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
               {item.montaje.rolloPapel.secuencia}
             </div>
             <div className="text-ink-muted">{item.montaje.rolloPapel.tipoPapel.nombre}</div>
+            {/* Quién montó queda a la vista al cerrar: normalmente es el mismo
+                operario, pero si el rollo duró varios días pudo cambiar el
+                turno, y el que desmonta es quien teclea las yardas finales de
+                las que sale la merma. */}
+            {detalle?.montadoPorUsuario && (
+              <div className="text-ink-faint mt-1 text-xs">
+                Montado por{' '}
+                <span className="text-ink-muted font-medium">
+                  {detalle.montadoPorUsuario.nombreCompleto}
+                </span>
+              </div>
+            )}
           </div>
 
           <div>
