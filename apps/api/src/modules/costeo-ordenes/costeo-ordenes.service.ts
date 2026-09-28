@@ -7,6 +7,7 @@ import {
 import ExcelJS from 'exceljs';
 import { fechaCelda, textoCelda } from '../../common/excel-celda';
 import { parsearCodigoOp } from '../../common/op-codigo';
+import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import {
@@ -42,7 +43,7 @@ export class CosteoOrdenesService {
     private readonly auditoria: AuditoriaService,
   ) {}
 
-  async buscarPorCodigo(codigo: string) {
+  async buscarPorCodigo(codigo: string, idEmpresa: number, idUsuario: number) {
     const parsed = parsearCodigoOp(codigo);
     if (!parsed)
       throw new BadRequestException(
@@ -51,7 +52,8 @@ export class CosteoOrdenesService {
 
     const orden = await this.prisma.ordenProduccion.findUnique({
       where: {
-        anio_correlativo: {
+        idEmpresa_anio_correlativo: {
+          idEmpresa,
           anio: parsed.anio,
           correlativo: parsed.correlativo,
         },
@@ -66,7 +68,15 @@ export class CosteoOrdenesService {
       },
     });
     if (!orden)
-      throw new NotFoundException(`No existe la orden de producción ${codigo}`);
+      throw new NotFoundException(
+        await mensajeOpNoEncontrada(this.prisma, {
+          codigo,
+          anio: parsed.anio,
+          correlativo: parsed.correlativo,
+          idUsuario,
+          idEmpresaActual: idEmpresa,
+        }),
+      );
     return orden;
   }
 
@@ -129,9 +139,12 @@ export class CosteoOrdenesService {
     idLineaProduccion: number,
     dto: EditarLineaProduccionDto,
     idUsuarioActor: number,
+    idEmpresa: number,
   ) {
-    const linea = await this.prisma.lineaProduccion.findUnique({
-      where: { idLineaProduccion },
+    // findFirst y no findUnique: una línea de otra empresa tiene que verse
+    // como inexistente, no como existente-pero-prohibida.
+    const linea = await this.prisma.lineaProduccion.findFirst({
+      where: { idLineaProduccion, idEmpresa },
     });
     if (!linea)
       throw new NotFoundException('Línea de producción no encontrada');
@@ -154,6 +167,7 @@ export class CosteoOrdenesService {
 
   async previewImportarLineas(
     buffer: Buffer,
+    idEmpresa: number,
   ): Promise<{ filas: FilaPreviewLinea[] }> {
     if (!buffer || buffer.length === 0)
       throw new BadRequestException('Archivo vacío o no recibido');
@@ -236,7 +250,13 @@ export class CosteoOrdenesService {
         this.prisma.impresora.findMany({
           select: { idImpresora: true, codigo: true },
         }),
-        this.prisma.lineaProduccion.findMany({ select: { codigoLine: true } }),
+        // Solo los LINE de ESTA empresa: el código de línea es único por
+        // empresa, así que marcar duplicado contra los de la otra rechazaría
+        // importaciones perfectamente válidas.
+        this.prisma.lineaProduccion.findMany({
+          where: { idEmpresa },
+          select: { codigoLine: true },
+        }),
       ]);
     const clientePorCodigo = new Map(
       clientes.map((c) => [c.codigo.toLowerCase(), c.idCliente]),
@@ -356,6 +376,7 @@ export class CosteoOrdenesService {
   async aplicarImportarLineas(
     filas: FilaPreviewLinea[],
     idUsuarioActor: number,
+    idEmpresa: number,
   ) {
     if (!filas || filas.length === 0)
       throw new BadRequestException('No hay líneas para importar');
@@ -382,7 +403,8 @@ export class CosteoOrdenesService {
         if (!idOrdenPorCodigo.has(f.opTexto)) {
           const existente = await tx.ordenProduccion.findUnique({
             where: {
-              anio_correlativo: {
+              idEmpresa_anio_correlativo: {
+                idEmpresa,
                 anio: f.opAnio,
                 correlativo: f.opCorrelativo,
               },
@@ -393,6 +415,7 @@ export class CosteoOrdenesService {
           } else {
             const creada = await tx.ordenProduccion.create({
               data: {
+                idEmpresa,
                 anio: f.opAnio,
                 correlativo: f.opCorrelativo,
                 idCliente: f.idCliente,
@@ -417,6 +440,9 @@ export class CosteoOrdenesService {
           data: {
             codigoLine: f.codigoLine,
             idOrdenProduccion,
+            // La FK compuesta de la base rechaza cualquier desajuste con la
+            // empresa de la OP; esto solo se lo dice a Prisma.
+            idEmpresa,
             idProducto: f.idProducto,
             idImpresora: f.idImpresora,
             enguiamientoYd: f.enguiamientoYd,

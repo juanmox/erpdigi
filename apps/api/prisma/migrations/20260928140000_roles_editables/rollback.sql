@@ -1,0 +1,12 @@
+-- Rollback de 20260928140000_roles_editables.
+--
+-- Al quitar la columna, el seed vuelve a reconciliar TODOS los roles: cualquier
+-- permiso agregado desde la pantalla y que no esté en `seed.ts` se pierde en la
+-- próxima corrida. Conviene anotar antes qué quedó configurado a mano:
+--
+--   SELECT r.codigo, string_agg(p.codigo, ', ' ORDER BY p.codigo)
+--   FROM core.roles r
+--   JOIN core.rol_permisos rp ON rp.id_rol = r.id_rol
+--   JOIN core.permisos p ON p.id_permiso = rp.id_permiso
+--   WHERE r.personalizado GROUP BY r.codigo;
+ALTER TABLE "core"."roles" DROP COLUMN IF EXISTS "personalizado";

@@ -69,7 +69,7 @@ export function Sidebar() {
     ...(tienePermiso('costeo.rollo.ver') ? [{ to: '/costeo/rollos', codigo: 'CR', etiqueta: 'Gestión de Rollos' }] : []),
     ...(tienePermiso('costeo.orden.ver') ? [{ to: '/costeo/ordenes', codigo: 'OP', etiqueta: 'Órdenes de Producción' }] : []),
     ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones', codigo: 'RE', etiqueta: 'Reposiciones' }] : []),
-    ...(tienePermiso('costeo.consumo.ver') ? [{ to: '/costeo/consumo', codigo: 'EI', etiqueta: 'Envío de impresas' }] : []),
+    ...(tienePermiso('costeo.consumo.ver') ? [{ to: '/costeo/consumo', codigo: 'IO', etiqueta: 'Impresión de OPs' }] : []),
     ...(tienePermiso('costeo.estandar.ver') ? [{ to: '/costeo/estandar', codigo: 'CE', etiqueta: 'Consumo Estándar' }] : []),
   ]
 
@@ -86,15 +86,25 @@ export function Sidebar() {
       )}
       aria-label="Navegación principal"
     >
+      {/* El tile de marca toma el color de la empresa activa (core.empresas.
+          color_marca). Junto con la franja del encabezado es la señal de "en
+          qué empresa estoy" — el usuario pidió poder notarlo de un vistazo para
+          no transaccionar en la empresa equivocada. Si la empresa no tiene
+          color cargado, cae al azul corporativo de siempre. */}
       <div className={cn('flex items-center gap-2.5', colapsado ? 'justify-center px-0' : 'px-2')}>
-        <div className="relative size-[30px] shrink-0 rounded-lg bg-accent-brand">
+        <div
+          className="relative size-[30px] shrink-0 rounded-lg bg-accent-brand"
+          style={empresaActual?.colorMarca ? { backgroundColor: empresaActual.colorMarca } : undefined}
+        >
           <span className="absolute inset-x-[7px] top-[14px] h-[2px] bg-white/90" />
           <span className="absolute inset-y-[7px] left-[14px] w-[2px] bg-white/90" />
         </div>
         {!colapsado && (
-          <div className="flex flex-col leading-tight">
-            <strong className="text-[14.5px] font-bold tracking-tight text-ink">Digitexsa ERP</strong>
-            <span className="text-[11.5px] text-ink-faint">{empresaActual?.nombreComercial ?? empresaActual?.codigo ?? 'Digital Textil, S.A.'}</span>
+          <div className="flex min-w-0 flex-col leading-tight">
+            <strong className="truncate text-[14.5px] font-bold tracking-tight text-ink">
+              {empresaActual?.nombreComercial ?? empresaActual?.codigo ?? 'Digitexsa'} ERP
+            </strong>
+            <span className="text-[11.5px] text-ink-faint">{empresaActual?.codigo ?? 'Digital Textil, S.A.'}</span>
           </div>
         )}
       </div>

@@ -9,6 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { EmpresaActual } from '../auth/decorators/empresa-actual.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CosteoReposicionesService } from './costeo-reposiciones.service';
@@ -21,8 +22,12 @@ export class CosteoReposicionesController {
 
   @RequirePermissions('costeo.reposicion.ver')
   @Get('siguiente-numero')
-  siguienteNumero(@Query('codigoOp') codigoOp: string) {
-    return this.service.siguienteNumero(codigoOp);
+  siguienteNumero(
+    @Query('codigoOp') codigoOp: string,
+    @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.siguienteNumero(codigoOp, idEmpresa, usuario.sub);
   }
 
   @RequirePermissions('costeo.reposicion.ver')
@@ -45,22 +50,40 @@ export class CosteoReposicionesController {
 
   @RequirePermissions('costeo.reposicion.ver')
   @Get()
-  listar(@Query('idOrdenProduccion') idOrdenProduccion?: string) {
+  listar(
+    @EmpresaActual() idEmpresa: number,
+    @Query('idOrdenProduccion') idOrdenProduccion?: string,
+  ) {
     return this.service.listar(
+      idEmpresa,
       idOrdenProduccion ? Number(idOrdenProduccion) : undefined,
     );
   }
 
   @RequirePermissions('costeo.reposicion.ver')
   @Get(':id')
-  obtener(@Param('id', ParseIntPipe) id: number) {
-    return this.service.obtener(id);
+  obtener(
+    @Param('id', ParseIntPipe) id: number,
+    @EmpresaActual() idEmpresa: number,
+  ) {
+    return this.service.obtener(id, idEmpresa);
   }
 
   @RequirePermissions('costeo.reposicion.crear')
   @Post()
-  crear(@Body() dto: CrearReposicionDto, @CurrentUser() usuario: JwtPayload) {
-    return this.service.crear(dto, usuario.sub);
+  crear(
+    @Body() dto: CrearReposicionDto,
+    @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
+  ) {
+    // Permiso OPCIONAL: no puede ir en @RequirePermissions, que exige TODOS
+    // los que lista. Se resuelve acá y el servicio decide con él.
+    return this.service.crear(
+      dto,
+      usuario.sub,
+      idEmpresa,
+      usuario.permisos.includes('costeo.reposicion.impresora_sin_rollo'),
+    );
   }
 
   @RequirePermissions('costeo.reposicion.anular')
@@ -69,7 +92,8 @@ export class CosteoReposicionesController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AnularReposicionDto,
     @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
   ) {
-    return this.service.anular(id, dto, usuario.sub);
+    return this.service.anular(id, dto, usuario.sub, idEmpresa);
   }
 }

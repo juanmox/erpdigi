@@ -11,6 +11,7 @@ import { ReposicionesPage } from '@/features/costeo-reposiciones/reposiciones-pa
 import { RollosPage } from '@/features/costeo-rollos/rollos-page'
 import { InicioPage } from '@/features/inicio/inicio-page'
 import { CotizacionPage } from '@/features/recetas/cotizacion-page'
+import { RolesPage } from '@/features/roles/roles-page'
 import { UsuariosPage } from '@/features/usuarios/usuarios-page'
 
 function RutaProtegida({ children }: { children: React.ReactNode }) {
@@ -139,6 +140,14 @@ function App() {
               element={
                 <RutaConPermiso permisos={['plataforma.usuarios.administrar']}>
                   <UsuariosPage />
+                </RutaConPermiso>
+              }
+            />
+            <Route
+              path="roles"
+              element={
+                <RutaConPermiso permisos={['plataforma.roles.administrar']}>
+                  <RolesPage />
                 </RutaConPermiso>
               }
             />

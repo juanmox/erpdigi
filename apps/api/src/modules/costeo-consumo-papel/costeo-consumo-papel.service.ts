@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   NotFoundException,
@@ -10,6 +11,7 @@ import {
   GoogleSheetsService,
 } from '../../common/google-sheets/google-sheets.service';
 import { parsearCodigoOp } from '../../common/op-codigo';
+import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { CapturarConsumoDto } from './dto/capturar-consumo.dto';
@@ -57,7 +59,11 @@ export class CosteoConsumoPapelService {
     private readonly googleSheets: GoogleSheetsService,
   ) {}
 
-  private async resolverOrden(codigoOp: string) {
+  private async resolverOrden(
+    codigoOp: string,
+    idEmpresa: number,
+    idUsuario: number,
+  ) {
     const parsed = parsearCodigoOp(codigoOp);
     if (!parsed)
       throw new BadRequestException(
@@ -65,14 +71,24 @@ export class CosteoConsumoPapelService {
       );
     const orden = await this.prisma.ordenProduccion.findUnique({
       where: {
-        anio_correlativo: {
+        idEmpresa_anio_correlativo: {
+          idEmpresa,
           anio: parsed.anio,
           correlativo: parsed.correlativo,
         },
       },
       include: { cliente: true, lineaProducto: true },
     });
-    if (!orden) throw new NotFoundException(`No existe la OP "${codigoOp}"`);
+    if (!orden)
+      throw new NotFoundException(
+        await mensajeOpNoEncontrada(this.prisma, {
+          codigo: codigoOp,
+          anio: parsed.anio,
+          correlativo: parsed.correlativo,
+          idUsuario,
+          idEmpresaActual: idEmpresa,
+        }),
+      );
     return orden;
   }
 
@@ -87,8 +103,8 @@ export class CosteoConsumoPapelService {
    *   en blanco    = cantidad * 0.6, si la línea lo marca   (columna L)
    * Ojo con la última: es sobre la CANTIDAD, no sobre el consumo.
    */
-  async obtenerOrden(codigoOp: string) {
-    const orden = await this.resolverOrden(codigoOp);
+  async obtenerOrden(codigoOp: string, idEmpresa: number, idUsuario: number) {
+    const orden = await this.resolverOrden(codigoOp, idEmpresa, idUsuario);
 
     const lineas = await this.prisma.lineaProduccion.findMany({
       where: { idOrdenProduccion: orden.idOrdenProduccion },
@@ -235,9 +251,11 @@ export class CosteoConsumoPapelService {
    * repartirse entre varias impresoras, así que agrupar por OP mostraría trabajo
    * que no es de esa máquina.
    */
-  async pendientes(idImpresora?: number, limite = 200) {
+  async pendientes(idEmpresa: number, idImpresora?: number, limite = 200) {
     const lineas = await this.prisma.lineaProduccion.findMany({
       where: {
+        // Sin esto el panel ofrecía trabajo pendiente de la otra empresa.
+        idEmpresa,
         ...(idImpresora ? { idImpresora } : {}),
         // Sin ningún consumo vigente todavía. `procesadaEn` no sirve como
         // filtro: se marca en el primer envío, aunque queden tallas sueltas.
@@ -282,7 +300,21 @@ export class CosteoConsumoPapelService {
    * rollo montado en ese momento), no tiene sentido perder las 47 buenas. Se
    * devuelve un resumen de qué entró, qué ya estaba y qué falló con su motivo.
    */
-  async capturarLote(dto: CapturarConsumoDto, idUsuarioActor: number) {
+  async capturarLote(
+    dto: CapturarConsumoDto,
+    idUsuarioActor: number,
+    idEmpresa: number,
+    puedeFechaManual: boolean,
+  ) {
+    // El caso normal es descontar contra el rollo montado AHORA: `dto.fecha`
+    // llega vacía y `capturarUna` usa `new Date()`. Mandar una fecha es la
+    // excepción —registrar algo impreso antes, contra un rollo ya desmontado—
+    // y desde 2026-09-28 exige `costeo.consumo.fecha_manual`. Se valida acá y
+    // no solo ocultando el campo en la pantalla: el cuerpo lo arma el cliente.
+    if (dto.fecha && !puedeFechaManual)
+      throw new ForbiddenException(
+        'No tenés permiso para registrar con una fecha distinta a la actual',
+      );
     const resultado = {
       enviadas: [] as { codigoLine: string; tallas: number }[],
       yaEstaban: [] as { codigoLine: string; tallas: string[] }[],
@@ -301,7 +333,7 @@ export class CosteoConsumoPapelService {
 
     for (const id of dto.idsLineaProduccion) {
       try {
-        const r = await this.capturarUna(id, dto, idUsuarioActor);
+        const r = await this.capturarUna(id, dto, idUsuarioActor, idEmpresa);
         filasSheets.push(...r.filasSheets);
         if (r.creadas > 0)
           resultado.enviadas.push({
@@ -366,13 +398,17 @@ export class CosteoConsumoPapelService {
     idLineaProduccion: number,
     dto: CapturarConsumoDto,
     idUsuarioActor: number,
+    idEmpresa: number,
   ) {
     const fecha = dto.fecha ? new Date(dto.fecha) : new Date();
     if (Number.isNaN(fecha.getTime()))
       throw new BadRequestException('Fecha inválida');
 
-    const linea = await this.prisma.lineaProduccion.findUnique({
-      where: { idLineaProduccion },
+    // findFirst con la empresa: los ids llegan del cliente, así que sin este
+    // filtro un POST armado a mano podría descontar papel contra una línea de
+    // la otra empresa.
+    const linea = await this.prisma.lineaProduccion.findFirst({
+      where: { idLineaProduccion, idEmpresa },
       include: {
         tallas: { include: { talla: true } },
         producto: true,
@@ -564,9 +600,10 @@ export class CosteoConsumoPapelService {
     idConsumoPapel: number,
     motivo: string | undefined,
     idUsuarioActor: number,
+    idEmpresa: number,
   ) {
-    const actual = await this.prisma.consumoPapel.findUnique({
-      where: { idConsumoPapel },
+    const actual = await this.prisma.consumoPapel.findFirst({
+      where: { idConsumoPapel, ordenProduccion: { idEmpresa } },
     });
     if (!actual) throw new NotFoundException('Consumo no encontrado');
     if (actual.anuladoEn)

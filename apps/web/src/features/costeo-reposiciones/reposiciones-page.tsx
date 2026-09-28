@@ -47,6 +47,7 @@ export function ReposicionesPage() {
   const queryClient = useQueryClient()
   const { usuario, tienePermiso } = useAuth()
   const puedeAnular = tienePermiso('costeo.reposicion.anular')
+  const puedeImpresoraSinRollo = tienePermiso('costeo.reposicion.impresora_sin_rollo')
 
   const [codigoOp, setCodigoOp] = useState('')
   const [opBuscada, setOpBuscada] = useState<string | null>(null)
@@ -69,6 +70,12 @@ export function ReposicionesPage() {
     queryKey: ['costeo-rollos', 'impresoras'],
     queryFn: () => costeoRollosApi.listarImpresoras(),
   })
+  // Misma queryKey que usa PanelImpresoras, así que react-query lo sirve de
+  // caché y no hay una segunda llamada.
+  const { data: panelRollos } = useQuery({
+    queryKey: ['costeo-rollos', 'panel'],
+    queryFn: () => costeoRollosApi.panel(),
+  })
   const { data: siguienteNumero } = useQuery({
     queryKey: ['costeo-reposiciones', 'siguiente-numero', opBuscada],
     queryFn: () => costeoReposicionesApi.siguienteNumero(opBuscada!),
@@ -79,6 +86,19 @@ export function ReposicionesPage() {
     queryFn: () => costeoReposicionesApi.listar(ordenInfo!.idOrdenProduccion),
     enabled: !!ordenInfo,
   })
+
+  // El selector solo ofrece impresoras con un rollo montado AHORA: elegir una
+  // sin rollo terminaba siempre en un 409 al guardar, porque el servidor
+  // resuelve el rollo con fn_rollo_en y no acepta uno indeterminado. Registrar
+  // sobre una impresora sin rollo es la excepción (una reposición de algo que
+  // pasó antes, con ese rollo ya desmontado) y exige permiso de administrador;
+  // el servidor valida lo mismo, esto no es solo cosmética.
+  const idsConRollo = new Set(
+    (panelRollos ?? []).filter((p) => p.montaje).map((p) => p.impresora.idImpresora),
+  )
+  const impresorasElegibles = puedeImpresoraSinRollo
+    ? (impresoras ?? [])
+    : (impresoras ?? []).filter((i) => idsConRollo.has(i.idImpresora))
 
   async function buscarOp() {
     if (!codigoOp.trim()) return
@@ -277,14 +297,19 @@ export function ReposicionesPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={SIN_VALOR}>Sin impresora</SelectItem>
-                      {impresoras?.map((i) => (
+                      {impresorasElegibles.map((i) => (
                         <SelectItem key={i.idImpresora} value={String(i.idImpresora)}>
                           {i.codigo}
+                          {puedeImpresoraSinRollo && !idsConRollo.has(i.idImpresora) && ' · sin rollo'}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="mt-1 text-[11px] text-ink-faint">El tipo de papel se autocompleta del rollo montado en esa impresora al guardar.</p>
+                  <p className="mt-1 text-[11px] text-ink-faint">
+                    {puedeImpresoraSinRollo
+                      ? 'El tipo de papel se autocompleta del rollo montado en esa impresora al guardar. Las marcadas "sin rollo" solo resuelven si la fecha apunta a un momento en que sí lo tenían.'
+                      : 'Solo se listan las impresoras con un rollo montado. El tipo de papel se autocompleta de ese rollo al guardar.'}
+                  </p>
                 </div>
                 <div>
                   <Label className="mb-1 block text-xs">Yardas papel</Label>

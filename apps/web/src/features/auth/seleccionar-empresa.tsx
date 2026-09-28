@@ -25,19 +25,26 @@ export function SeleccionarEmpresa() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Elegí una empresa</CardTitle>
-          <CardDescription>Tu usuario tiene acceso a más de una empresa.</CardDescription>
+          <CardDescription>
+            Tu usuario tiene acceso a más de una empresa. Dentro de cada una vas a tener todos los
+            roles que se te asignaron ahí, y podés cambiar de empresa sin cerrar sesión.
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {empresasDisponibles.map((e) => (
             <Button
               key={e.idEmpresa}
               variant="outline"
-              className="justify-between"
+              className="h-auto flex-col items-start gap-0.5 py-2.5 text-left"
               disabled={enviando !== null}
               onClick={() => elegir(e.idEmpresa)}
             >
-              <span>{e.nombreComercial ?? e.codigo}</span>
-              <span className="text-muted-foreground text-xs">{e.rol}</span>
+              <span className="font-medium">{e.nombreComercial ?? e.codigo}</span>
+              {/* Los roles se listan como información, no como opciones: entrar a
+                  la empresa da todos a la vez. */}
+              <span className="text-muted-foreground text-xs whitespace-normal">
+                {e.roles.join(' · ')}
+              </span>
             </Button>
           ))}
           {error && <p className="text-sm text-destructive">{error}</p>}

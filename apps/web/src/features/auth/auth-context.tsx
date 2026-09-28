@@ -7,7 +7,10 @@ export interface EmpresaDisponible {
   idEmpresa: number
   codigo: string
   nombreComercial: string | null
-  rol: string
+  /** TODOS los roles del usuario en esa empresa: nunca se elige uno solo. */
+  roles: string[]
+  /** #RRGGBB de marca. Null si la empresa todavía no tiene color asignado. */
+  colorMarca: string | null
 }
 
 export interface Usuario {

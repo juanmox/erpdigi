@@ -16,7 +16,10 @@ export interface EmpresaDisponible {
   idEmpresa: number;
   codigo: string;
   nombreComercial: string | null;
-  rol: string;
+  /** TODOS los roles activos del usuario en esa empresa, no uno solo. */
+  roles: string[];
+  /** #RRGGBB de `core.empresas.color_marca`, para distinguirlas en pantalla. */
+  colorMarca: string | null;
 }
 
 export interface SesionEmitida {
@@ -43,19 +46,43 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
+  /**
+   * Una entrada por EMPRESA, no por asignación.
+   *
+   * `usuario_empresa_rol` es una tripleta (usuario, empresa, rol), asi que un
+   * usuario con 3 roles en la misma empresa tiene 3 filas. Devolver una por
+   * fila rompía dos cosas: la pantalla de selección mostraba la misma empresa
+   * repetida y parecía un selector de ROL, y `login()` —que compara contra 1
+   * para autoseleccionar— obligaba a elegir aunque hubiera una sola empresa.
+   *
+   * Los roles nunca fueron excluyentes: `claimsParaEmpresa` ya une los
+   * permisos de todos los roles que el usuario tiene en la empresa elegida.
+   * Lo que faltaba era decirlo así en la respuesta.
+   */
   private async empresasActivasDe(
     idUsuario: number,
   ): Promise<EmpresaDisponible[]> {
     const asignaciones = await this.prisma.usuarioEmpresaRol.findMany({
       where: { idUsuario, activo: true, empresa: { activo: true } },
       include: { empresa: true, rol: true },
+      orderBy: [{ idEmpresa: 'asc' }, { rol: { codigo: 'asc' } }],
     });
-    return asignaciones.map((a) => ({
-      idEmpresa: a.empresa.idEmpresa,
-      codigo: a.empresa.codigo,
-      nombreComercial: a.empresa.nombreComercial,
-      rol: a.rol.codigo,
-    }));
+    const porEmpresa = new Map<number, EmpresaDisponible>();
+    for (const a of asignaciones) {
+      const ya = porEmpresa.get(a.empresa.idEmpresa);
+      if (ya) {
+        if (!ya.roles.includes(a.rol.codigo)) ya.roles.push(a.rol.codigo);
+        continue;
+      }
+      porEmpresa.set(a.empresa.idEmpresa, {
+        idEmpresa: a.empresa.idEmpresa,
+        codigo: a.empresa.codigo,
+        nombreComercial: a.empresa.nombreComercial,
+        roles: [a.rol.codigo],
+        colorMarca: a.empresa.colorMarca,
+      });
+    }
+    return [...porEmpresa.values()];
   }
 
   private async claimsParaEmpresa(idUsuario: number, idEmpresa: number) {
@@ -141,6 +168,8 @@ export class AuthService {
       data: { ultimoLoginEn: new Date() },
     });
 
+    // Se pregunta solo cuando hay más de una EMPRESA. Tener varios roles en la
+    // misma empresa no es una elección: se usan todos a la vez.
     const idEmpresa =
       empresasDisponibles.length === 1
         ? empresasDisponibles[0].idEmpresa

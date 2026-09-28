@@ -76,7 +76,7 @@ export class CosteoRollosController {
 
   // Antes de @Get(':id'), como el resto: si no, 'montajes' entraría por el
   // parámetro.
-  @RequirePermissions('costeo.rollo.ver')
+  @RequirePermissions('costeo.rollo.historial')
   @Get('montajes')
   historialMontajes(
     @Query('idImpresora') idImpresora?: string,

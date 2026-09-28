@@ -13,9 +13,19 @@ export function registerRefreshHandler(fn: () => Promise<boolean>) {
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  /**
+   * `motivo` del cuerpo de error, cuando el servidor manda uno.
+   *
+   * Sirve para que la pantalla distinga CASOS sin comparar el texto del
+   * mensaje, que se rompe en cuanto alguien lo reescribe. Mismo patron que ya
+   * usaba `SIN_ROLLO_MONTADO`, que hasta ahora solo viajaba dentro de
+   * respuestas 2xx (el resumen de `capturarLote`) y no en excepciones.
+   */
+  motivo?: string
+  constructor(status: number, message: string, motivo?: string) {
     super(message)
     this.status = status
+    this.motivo = motivo
   }
 }
 
@@ -49,7 +59,11 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
   if (!res.ok) {
     const cuerpo = await res.json().catch(() => ({}) as Record<string, unknown>)
     const mensaje = typeof cuerpo.message === 'string' ? cuerpo.message : `Error ${res.status}`
-    throw new ApiError(res.status, mensaje)
+    throw new ApiError(
+      res.status,
+      mensaje,
+      typeof cuerpo.motivo === 'string' ? cuerpo.motivo : undefined,
+    )
   }
 
   if (res.status === 204) return undefined as T
@@ -62,7 +76,11 @@ export async function descargarArchivo(path: string, nombreArchivo: string): Pro
   if (!res.ok) {
     const cuerpo = await res.json().catch(() => ({}) as Record<string, unknown>)
     const mensaje = typeof cuerpo.message === 'string' ? cuerpo.message : `Error ${res.status}`
-    throw new ApiError(res.status, mensaje)
+    throw new ApiError(
+      res.status,
+      mensaje,
+      typeof cuerpo.motivo === 'string' ? cuerpo.motivo : undefined,
+    )
   }
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)

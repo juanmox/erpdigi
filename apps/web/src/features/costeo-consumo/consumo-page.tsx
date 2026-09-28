@@ -59,6 +59,10 @@ function resumirLote(r: ResultadoLote): {
 export function ConsumoPage() {
   const { tienePermiso } = useAuth()
   const puedeCapturar = tienePermiso('costeo.consumo.capturar')
+  // Registrar contra una fecha distinta a la de ahora es la EXCEPCIÓN: descuenta
+  // del rollo que estaba montado en ese momento, no del actual. Sin el permiso
+  // el control no aparece y el servidor rechaza cualquier fecha en el cuerpo.
+  const puedeFechaManual = tienePermiso('costeo.consumo.fecha_manual')
   // Las OP se cargan en otro módulo. Sin un camino desde acá, quien no encuentra
   // su orden no tiene cómo saber dónde se dan de alta.
   const puedeVerOrdenes = tienePermiso('costeo.orden.ver')
@@ -184,7 +188,7 @@ export function ConsumoPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4">
       <div>
-        <h1 className="text-xl font-semibold">Envío de órdenes impresas</h1>
+        <h1 className="text-xl font-semibold">Impresión de OPs</h1>
         <p className="text-muted-foreground text-sm">
           Descuenta el papel consumido por orden de producción.
         </p>
@@ -239,7 +243,12 @@ export function ConsumoPage() {
         <Alert variant="destructive">
           <AlertDescription className="space-y-2">
             <p>{error instanceof ApiError ? error.message : 'No se pudo cargar la orden'}</p>
-            {atajoOrdenes && (
+            {/* Si la OP existe pero en otra de tus empresas, el arreglo es
+                cambiar de empresa — ofrecer además "ir a cargarla" sería un
+                segundo consejo que contradice al primero. Se distingue por
+                `motivo` y no por el texto del mensaje, que se rompe en cuanto
+                alguien lo reescribe. */}
+            {atajoOrdenes && !(error instanceof ApiError && error.motivo === 'OP_EN_OTRA_EMPRESA') && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs">Las órdenes se cargan por plantilla desde ahí.</span>
                 {atajoOrdenes}
@@ -262,7 +271,7 @@ export function ConsumoPage() {
                     Ir a montar el rollo
                   </Link>
                 </Button>
-                {!fechaAbierta && (
+                {puedeFechaManual && !fechaAbierta && (
                   <Button size="sm" variant="ghost" onClick={() => setFechaAbierta(true)}>
                     Ajustar la fecha de impresión
                   </Button>
@@ -328,13 +337,15 @@ export function ConsumoPage() {
                   ))}
 
                 <div className="ml-auto flex items-center gap-2">
-                  <Button
-                    variant={fechaImpresion ? 'secondary' : 'ghost'}
-                    size="sm"
-                    onClick={() => setFechaAbierta((v) => !v)}
-                  >
-                    {fechaImpresion ? 'Fecha ajustada' : 'Fecha…'}
-                  </Button>
+                  {puedeFechaManual && (
+                    <Button
+                      variant={fechaImpresion ? 'secondary' : 'ghost'}
+                      size="sm"
+                      onClick={() => setFechaAbierta((v) => !v)}
+                    >
+                      {fechaImpresion ? 'Fecha ajustada' : 'Fecha…'}
+                    </Button>
+                  )}
                   {seleccion.size > 0 && (
                     <Button variant="ghost" size="sm" onClick={() => setSeleccion(new Set())}>
                       Limpiar
@@ -353,7 +364,7 @@ export function ConsumoPage() {
               </div>
             )}
 
-            {puedeCapturar && (fechaAbierta || fechaImpresion) && (
+            {puedeCapturar && puedeFechaManual && (fechaAbierta || fechaImpresion) && (
               <div className="flex flex-wrap items-end gap-2 border-t pt-2">
                 <div>
                   <Label htmlFor="fecha-impresion" className="mb-1 block text-xs">

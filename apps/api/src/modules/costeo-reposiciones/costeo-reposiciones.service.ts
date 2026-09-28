@@ -9,6 +9,7 @@ import {
   GoogleSheetsService,
 } from '../../common/google-sheets/google-sheets.service';
 import { parsearCodigoOp } from '../../common/op-codigo';
+import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { AnularReposicionDto } from './dto/anular-reposicion.dto';
@@ -54,7 +55,11 @@ export class CosteoReposicionesService {
     });
   }
 
-  private async resolverOrden(codigoOp: string) {
+  private async resolverOrden(
+    codigoOp: string,
+    idEmpresa: number,
+    idUsuario: number,
+  ) {
     const parsed = parsearCodigoOp(codigoOp);
     if (!parsed)
       throw new BadRequestException(
@@ -62,7 +67,8 @@ export class CosteoReposicionesService {
       );
     const orden = await this.prisma.ordenProduccion.findUnique({
       where: {
-        anio_correlativo: {
+        idEmpresa_anio_correlativo: {
+          idEmpresa,
           anio: parsed.anio,
           correlativo: parsed.correlativo,
         },
@@ -71,13 +77,23 @@ export class CosteoReposicionesService {
     });
     if (!orden)
       throw new NotFoundException(
-        `No existe la orden de producción ${codigoOp}`,
+        await mensajeOpNoEncontrada(this.prisma, {
+          codigo: codigoOp,
+          anio: parsed.anio,
+          correlativo: parsed.correlativo,
+          idUsuario,
+          idEmpresaActual: idEmpresa,
+        }),
       );
     return orden;
   }
 
-  async siguienteNumero(codigoOp: string) {
-    const orden = await this.resolverOrden(codigoOp);
+  async siguienteNumero(
+    codigoOp: string,
+    idEmpresa: number,
+    idUsuario: number,
+  ) {
+    const orden = await this.resolverOrden(codigoOp, idEmpresa, idUsuario);
     const agg = await this.prisma.reposicion.aggregate({
       where: { idOrdenProduccion: orden.idOrdenProduccion },
       _max: { numeroRepo: true },
@@ -89,17 +105,22 @@ export class CosteoReposicionesService {
     };
   }
 
-  listar(idOrdenProduccion?: number) {
+  listar(idEmpresa: number, idOrdenProduccion?: number) {
     return this.prisma.reposicion.findMany({
-      where: { idOrdenProduccion },
+      // Sin `idOrdenProduccion` esto listaba TODAS las reposiciones, de las dos
+      // empresas. El filtro va por la OP porque la reposición no lleva empresa
+      // propia: la hereda de su orden.
+      where: { idOrdenProduccion, ordenProduccion: { idEmpresa } },
       include: INCLUDE_REPOSICION,
       orderBy: { fecha: 'desc' },
     });
   }
 
-  async obtener(idReposicion: number) {
-    const reposicion = await this.prisma.reposicion.findUnique({
-      where: { idReposicion },
+  async obtener(idReposicion: number, idEmpresa: number) {
+    // findFirst y no findUnique: una reposición de otra empresa debe verse
+    // como inexistente, no como existente-pero-prohibida.
+    const reposicion = await this.prisma.reposicion.findFirst({
+      where: { idReposicion, ordenProduccion: { idEmpresa } },
       include: INCLUDE_REPOSICION,
     });
     if (!reposicion) throw new NotFoundException('Reposición no encontrada');
@@ -112,8 +133,17 @@ export class CosteoReposicionesService {
   // tiene rollo montado en ese instante, se rechaza — nunca se guarda una
   // reposición con el rollo indeterminado (reemplaza el "Buscando..." del
   // legacy por "se resuelve exacto, o se rechaza").
-  async crear(dto: CrearReposicionDto, idUsuarioActor: number) {
-    const orden = await this.resolverOrden(dto.codigoOp);
+  async crear(
+    dto: CrearReposicionDto,
+    idUsuarioActor: number,
+    idEmpresa: number,
+    puedeImpresoraSinRollo: boolean,
+  ) {
+    const orden = await this.resolverOrden(
+      dto.codigoOp,
+      idEmpresa,
+      idUsuarioActor,
+    );
     const fecha = new Date(dto.fecha);
     const yardasPapel = dto.yardasPapel ?? 0;
 
@@ -124,6 +154,21 @@ export class CosteoReposicionesService {
         let nrolloTexto = '';
 
         if (dto.idImpresora != null) {
+          // Sin el permiso de excepción la impresora tiene que tener rollo
+          // montado AHORA, no solo en la fecha que se mandó. La pantalla ya
+          // filtra el selector a esas impresoras, pero sin este chequeo la
+          // regla se esquivaría con solo retroceder la fecha del formulario.
+          if (!puedeImpresoraSinRollo) {
+            const ahora = await tx.$queryRaw<{ id_montaje: number | null }[]>`
+          SELECT costeo.fn_rollo_en(${dto.idImpresora}, now()) AS id_montaje
+        `;
+            if ((ahora[0]?.id_montaje ?? null) == null) {
+              throw new ConflictException(
+                'Esa impresora no tiene ningún rollo montado. Elegí una que sí lo tenga, o pedile a un administrador el permiso para registrar sobre una impresora sin rollo.',
+              );
+            }
+          }
+
           const resultado = await tx.$queryRaw<{ id_montaje: number | null }[]>`
           SELECT costeo.fn_rollo_en(${dto.idImpresora}, ${fecha}::timestamptz) AS id_montaje
         `;
@@ -211,7 +256,7 @@ export class CosteoReposicionesService {
       },
     });
 
-    const detalle = await this.obtener(idReposicion);
+    const detalle = await this.obtener(idReposicion, idEmpresa);
 
     // Espejo hacia los dos Google Sheets legacy que todavía alimentan Data
     // Studio — en segundo plano, nunca bloquea ni puede fallar el guardado
@@ -297,9 +342,10 @@ export class CosteoReposicionesService {
     idReposicion: number,
     dto: AnularReposicionDto,
     idUsuarioActor: number,
+    idEmpresa: number,
   ) {
-    const reposicion = await this.prisma.reposicion.findUnique({
-      where: { idReposicion },
+    const reposicion = await this.prisma.reposicion.findFirst({
+      where: { idReposicion, ordenProduccion: { idEmpresa } },
     });
     if (!reposicion) throw new NotFoundException('Reposición no encontrada');
     if (reposicion.anuladoEn)
@@ -335,6 +381,6 @@ export class CosteoReposicionesService {
       datosNuevos: { anuladoEn: ahora, motivo: dto.motivo },
     });
 
-    return this.obtener(idReposicion);
+    return this.obtener(idReposicion, idEmpresa);
   }
 }

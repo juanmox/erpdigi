@@ -1340,6 +1340,7 @@ sin i18n (todo en español).
       verificado con clic real: el botón pasa de `Guardar cambios (0)` deshabilitado a
       `Guardar cambios (1)` al escribir y responde "1 precio(s) actualizado(s)". Ese contador entre
       paréntesis es la señal de si hay algo pendiente de guardar. Ojo: guarda el precio y lo registra
+      en `core.auditoria`, pero **no** crea versión en `costeo.insumo_costo`.
 
   - **Cinco tallas combinadas agregadas a la plantilla de Órdenes, y decisiones de cierre
     (2026-09-22)**:
@@ -1415,8 +1416,28 @@ sin i18n (todo en español).
     - **Verificado simulando el caso real**: dos usuarios desechables, uno monta y el otro desmonta.
       La respuesta de la API trae los dos nombres, la base guarda los dos ids, y borrar al que
       desmontó lo rechaza la FK. Montaje y usuarios de prueba borrados al terminar.
-    - **Pestaña "Historial" nueva en Gestión de Rollos** (`components/tab-historial.tsx` +
-      `GET /costeo/rollos/montajes`, gateada con `costeo.rollo.ver`). El usuario probó montar y
+    - **Por qué "Yardas finales" arranca VACÍO en el desmontaje (pregunta del usuario, 2026-09-23)**.
+    Propuso precargarlo con el restante calculado para no tecleárselo a mano. **No se hizo, y no es
+    por seguridad**: ese campo es la lectura **física** del rollo, y la merma sale exactamente de su
+    diferencia contra lo que el sistema calculó
+    (`merma = (yardasAlIniciar − yardasFinales) − consumoEsteMontaje`). Precargarlo con el restante
+    —que es `yardasAlIniciar − consumoEsteMontaje`— da **merma 0 por construcción**: cualquiera que
+    confirme sin mirar deja un 0, y la métrica entera pierde sentido. Es el caso clásico de un
+    default que parece cómodo y anula la medición que justifica el campo.
+    - Lo que **sí** se hizo, porque la fricción que señaló es real: un atajo de un clic
+      —*"Coincide con lo calculado (1040.43 yd) — usalo solo si no hubo merma"*— que llena el campo
+      con el restante. Mismo ahorro de tecleo, pero como **acto deliberado**, no como valor que
+      aparece solo.
+    - La merma ya se recalculaba en vivo al teclear; ahora además **avisa cuando es negativa**
+      ("Negativa: revisá la lectura"). Una merma negativa significa que se usó menos papel del
+      registrado como consumido — no es desperdicio, es un dato que no cuadra: o la lectura está
+      mal, o se cargó consumo de más.
+    - Verificado con clic real: campo vacío al abrir, merma "—" sin lectura, el atajo deja 0.00,
+      una lectura menor da merma positiva (1030 → +10.43) y una mayor la marca en rojo
+      (1080 → −39.57).
+
+  - **Pestaña "Historial" nueva en Gestión de Rollos** (`components/tab-historial.tsx` +
+      `GET /costeo/rollos/montajes`, gateada con `costeo.rollo.historial`). El usuario probó montar y
       desmontar y preguntó dónde veía el resultado: **el dato se guardaba pero no había pantalla**.
       El Panel de estado solo muestra el montaje VIGENTE de cada impresora, así que al desmontar el
       registro desaparecía de la vista, y `GET /costeo/rollos/:id` —que sí devuelve el historial del
@@ -1431,7 +1452,250 @@ sin i18n (todo en español).
         `consumoPorMontajeIds()` que ya existía: nada de una consulta por fila.
       - Es la base del reporte de transacciones pendiente. Verificado en navegador a 1440 y 390 px,
         sin desborde ni errores de consola, mostrando los 4 montajes reales de la base.
-      en `core.auditoria`, pero **no** crea versión en `costeo.insumo_costo`.
+
+  - **Historial restringido, pantalla renombrada y acceso de operarios (2026-09-25)**, todo a
+    partir de pruebas del usuario con un usuario real por rol:
+    1. **Permiso nuevo `costeo.rollo.historial`.** El usuario pidió que el Historial fuera por ahora
+       solo para administradores; estaba gateado con `costeo.rollo.ver`, que es lo mismo que el
+       Panel de estado, así que lo veía cualquier operario. Vive en `PERMISOS_COSTEO`, con lo cual
+       lo reciben ADMIN y ADMIN_IT_COSTEO y ningún rol granular de planta (esos listan sus permisos
+       uno por uno). Abrirlo después es agregarlo a un rol desde `/usuarios`, sin tocar código. La
+       pestaña del frontend se oculta con el mismo permiso — el endpoint ya rechazaba, pero la
+       pestaña se veía igual (mismo patrón de bug ya corregido antes en Ingreso a bodega).
+    2. **"Envío de impresas" → "Impresión de OPs"** en el sidebar y en el `<h1>` de la página. El
+       código de dos letras del ítem pasó de `EI` a `IO`, que había quedado del nombre viejo.
+    3. **Operador Impresión y Diseño ganaron `costeo.consumo.ver` + `costeo.consumo.capturar`.**
+       El usuario notó que no veían "Impresión de OPs": montaban el rollo pero no podían registrar
+       lo que imprimían, que es justamente su trabajo. Sin `costeo.consumo.anular` (corregir un
+       envío ya hecho es de supervisión) y **sin `costeo.orden.ver`** — las OP las cargan
+       Diseño/Analista por import, no el operario; el efecto visible es que no les aparece el
+       atajo "Ir a Órdenes de Producción" cuando una OP no existe.
+
+  - **Login: un usuario con varios roles en la misma empresa los usa TODOS a la vez
+    (2026-09-25)**. El usuario reportó que a `santiago` —3 roles en Digitexsa + 1 en la otra
+    empresa— el login le pedía elegir **uno**, y para cambiar de tarea tenía que cerrar sesión y
+    volver a entrar.
+    - **El diagnóstico fue el contrario de lo que parecía**: `claimsParaEmpresa()` **ya unía** los
+      roles y permisos de todas las asignaciones del usuario en la empresa elegida. El bug estaba
+      en `empresasActivasDe()`, que devolvía **una fila por asignación** en vez de una por empresa,
+      con un campo `rol` en singular. Consecuencias: la pantalla mostraba la misma empresa repetida
+      3 veces y parecía un **selector de rol**, y `login()` —que autoselecciona cuando hay
+      exactamente 1 entrada— lo obligaba a elegir aunque hubiera **una sola empresa**. Es decir,
+      elegir "OPERADOR_IMPRESION" ya le daba los 3 roles; lo que estaba mal era lo que la pantalla
+      le decía.
+    - `EmpresaDisponible.rol: string` pasó a `roles: string[]` (backend y frontend), agrupando por
+      empresa. La pantalla de selección lista los roles como **información**, no como opciones.
+    - **Cambiar de empresa sin cerrar sesión**: ítem nuevo en el desplegable del círculo de
+      iniciales (`shell.tsx`), visible solo con más de una empresa. Llama al mismo
+      `/auth/seleccionar-empresa`, que reemite el token con los permisos de la empresa nueva, y
+      limpia la caché de react-query (los datos cargados eran de la empresa anterior).
+    - **Multi-empresa sí sigue pidiendo elegir, y debe seguir haciéndolo**: el `idEmpresa` del JWT
+      es el alcance de la sesión (hoy solo sella `core.auditoria`, pero el diseño es multi-tenant).
+      Lo que se eliminó es la pregunta cuando no hay nada que elegir.
+    - **Verificado** con un usuario desechable que replicaba a `santiago` (3 roles en empresa 1 + 1
+      en empresa 2, creado y borrado en la misma sesión): con 2 empresas el login devuelve 2
+      opciones —no 4— cada una con sus roles, y al elegir Digitexsa el token trae los 3 roles y los
+      9 permisos unidos; quitándole la segunda empresa, el login entra **directo** sin pantalla de
+      selección. En navegador: el encabezado muestra los 3 roles, el sidebar los 5 ítems que
+      corresponden, y el cambio a la otra empresa desde el desplegable dejó el sidebar en 3 ítems
+      con un solo rol, sin cerrar sesión.
+    - ⚠️ **Tras desplegar esto, los usuarios tienen que cerrar sesión y volver a entrar**: los
+      permisos viajan en los claims del JWT, así que un token emitido antes del reseed no trae los
+      `costeo.consumo.*` nuevos. Mismo caso ya documentado en el despliegue del 2026-08-31.
+
+  - **Costeo separado por empresa — el `idEmpresa` por fin decide qué datos se ven (2026-09-28)**.
+    Estrenando el cambio de empresa del avatar, el usuario vio que parado en Digitalpro le
+    aparecían las órdenes de Digitexsa.
+    - **No era un filtro mal puesto: NO HABÍA separación por empresa en ningún dato.** `id_empresa`
+      existía en 3 tablas, las tres de `core` (`empresas`, `usuario_empresa_rol`, `auditoria`). Ni
+      una de `recetas` ni de `costeo` la tenía, así que el `idEmpresa` del token decidía permisos y
+      sello de auditoría, **nunca qué datos veías**. El selector no creó el problema, lo hizo
+      visible — y el riesgo de transaccionar en la empresa equivocada ya existía sin él.
+    - **Alcance decidido por el usuario, no inferido**: se separa **solo Costeo**; `recetas`
+      (clientes, productos, desarrollos, insumos, cotizaciones) queda como **catálogo corporativo
+      compartido**. Y la **planta es una sola con equipos compartidos**: `impresora`, `tipo_papel`,
+      `calandra`, `factura_papel`, `rollo_papel` y `montaje_rollo` **no** se parten.
+      `consumo_estandar` tampoco — es una propiedad del producto, y los productos son compartidos.
+    - **Consecuencia deliberada de compartir la planta**: el "Restante" de un rollo en el panel de
+      Gestión de Rollos suma el consumo de **las dos** empresas. Es lo correcto (el papel físico es
+      uno solo), pero conviene saberlo antes de diagnosticarlo como un error de cuentas.
+    - Migración `20260928120000_costeo_por_empresa` (+ `rollback.sql`), con respaldo de `core` y
+      `costeo` antes de aplicar. `id_empresa` va en **`orden_produccion`** (la raíz: consumos y
+      reposiciones lo heredan por su OP) y en **`linea_produccion`**.
+      - La columna en `linea_produccion` **no es simetría**: (a) `codigo_line` era UNIQUE global y
+        el LINE viene del pedido del cliente, así que dos empresas podrían repetirlo; (b) la
+        consulta de trabajo pendiente de Impresión de OPs recorre líneas, no órdenes.
+      - **FK compuesta `(id_orden_produccion, id_empresa)` → `orden_produccion`**, no una FK suelta
+        a `core.empresas`: es lo que garantiza *en la base* que la empresa de una línea sea siempre
+        la de su orden. Requiere un UNIQUE sobre ese par en la raíz (redundante como restricción,
+        pero Postgres lo exige para apuntarle una FK).
+      - **El correlativo de la OP no lo genera el ERP** — viene del código que se importa
+        (`26OP010439`), o sea del sistema con el que Diseño ya trabaja. Por eso `UNIQUE (anio,
+        correlativo)` pasó a `(id_empresa, anio, correlativo)`: cada empresa trae su numeración y
+        Digitalpro debe poder tener su `26OP000001`. Es **más permisivo** que lo anterior, así que
+        no puede invalidar datos existentes.
+      - `OrdenProduccion.codigo` **perdió el `@unique` de Prisma**, que además nunca existió en la
+        base (`idx_op_codigo` siempre fue un btree común). Declararlo era una mentira que habilitaba
+        un `findUnique({codigo})` sin respaldo real.
+    - **Propiedad que hizo segura la migración de código**: cambiar el `@@unique` rompió la
+      compilación en los 4 `findUnique({ anio_correlativo })`, o sea que el compilador obligó a
+      visitar cada punto de entrada. Los tres servicios (`costeo-ordenes`, `costeo-reposiciones`,
+      `costeo-consumo-papel`) resuelven la OP por un único punto, así que el filtro quedó
+      concentrado. Donde el id llega del cliente (`editarLineaProduccion`, `capturarUna`, `anular`,
+      `obtener`) se usa **`findFirst` con la empresa y no `findUnique`**: un registro de la otra
+      empresa tiene que verse como **inexistente**, no como existente-pero-prohibido.
+    - **`@EmpresaActual()`** (`auth/decorators/empresa-actual.decorator.ts`): decorador de parámetro
+      que resuelve `idEmpresa` del JWT y tira **403** si es null (el estado entre el login y la
+      selección de empresa). Va como parámetro del handler a propósito — si el servicio lo pide, el
+      controlador está obligado a declararlo, así que no se puede olvidar en silencio y terminar con
+      un `where` sin filtro.
+    - **Verificado de punta a punta** con un usuario desechable con ADMIN en las dos empresas: sin
+      empresa seleccionada → 403; en Digitexsa la OP `26OP010345` con sus 5 líneas, 200 líneas
+      pendientes y 11 reposiciones; en Digitalpro **la misma OP da 404**, 0 pendientes y 0
+      reposiciones. En SQL: la FK compuesta rechaza mover una línea a otra empresa, el LINE sigue
+      siendo único dentro de la empresa, y dos empresas ya pueden tener el mismo `26OP000001`.
+    - **Fuera de alcance a propósito**: `costeo.orden_facturacion` y `costeo.empleado` están vacías
+      y sin módulo construido (F5 y RRHH) — su tenencia se decide cuando se diseñen, no adivinando
+      hoy. `/usuarios` sigue listando todos los usuarios (es administración de plataforma).
+    - ⚠️ **Pendiente de decisión si Digitalpro llega a producir**: el espejo a Google Sheets escribe
+      a los libros de Digitexsa que alimentan Data Studio. Hoy no importa porque Digitalpro no tiene
+      datos, pero su consumo caería en los mismos libros.
+
+  - **Identidad visual por empresa (2026-09-28)**. Pedido del usuario junto con lo anterior: "evitar
+    confusiones que posiblemente repercutan gravemente al hacer una transacción de una empresa en
+    otra".
+    - Columna nueva `core.empresas.color_marca` (`VARCHAR(7)` + CHECK de formato `#RRGGBB`), en la
+      misma migración. En la base y no incrustado en el frontend, mismo criterio que
+      `recetas.tallas.frecuente`: se ajusta con un UPDATE, sin desplegar. Digitexsa `#203080` (el
+      azul que ya era `--accent-brand`), Digitalpro `#0f766e` — deliberadamente lejano en tono, no
+      una variante del azul.
+    - Tres señales a la vez: **franja** de color arriba del encabezado (periférica, se ve sin
+      mirarla), **chip** con el nombre de la empresa teñido con su color, y el **tile del sidebar**
+      con el mismo color. El nombre va escrito en el chip **a propósito**: una señal de color sola
+      no sirve para quien no distingue bien los colores. El título del sidebar pasó de "Digitexsa
+      ERP" fijo al de la empresa activa.
+    - **Falta el logo por empresa**: solo existe `logo-digitexsa.png` en el repo. Cuando el usuario
+      dé un archivo para Digitalpro, entra igual que el color (columna en `core.empresas` + `<img>`
+      en el tile del sidebar).
+
+  - **Dos excepciones con permiso propio, en vez de estar siempre disponibles (2026-09-28)**. El
+    usuario pidió que ciertas acciones "solo se puedan hacer si un administrador las habilita".
+    Elegido de las tres opciones planteadas: **permiso asignable desde `/usuarios`**, no un
+    interruptor global ni un flujo de aprobación caso por caso.
+    1. **`costeo.consumo.fecha_manual`** — habilita el campo "Fecha y hora de impresión" de
+       Impresión de OPs. Sin él no se ve el control (ni el atajo del aviso de "sin rollo montado") y
+       **el servidor rechaza con 403 cualquier `fecha` en el cuerpo**. El caso normal no cambia:
+       sin fecha se descuenta del rollo montado ahora.
+    2. **`costeo.reposicion.impresora_sin_rollo`** — el selector de impresora de Reposiciones ahora
+       ofrece **solo las que tienen un rollo montado ahora**; antes listaba las 14 y elegir una sin
+       rollo terminaba siempre en un 409 al guardar. Con el permiso se ven todas, marcadas
+       "· sin rollo".
+       - **El servidor valida lo mismo, no es cosmética**: sin el permiso exige rollo montado
+         **ahora**, no solo en la fecha enviada — si no, la regla se esquivaba retrocediendo la
+         fecha del formulario. El mensaje de rechazo nombra las dos salidas (elegir otra impresora,
+         o pedir el permiso).
+    - Los dos viven en `PERMISOS_COSTEO`, así que los reciben **ADMIN y ADMIN_IT_COSTEO** y ningún
+      rol de planta (esos listan sus permisos uno por uno). Verificado con SQL tras el reseed.
+    - **Son permisos OPCIONALES, así que no pueden ir en `@RequirePermissions`** (que exige TODOS
+      los que lista — ver la nota de semántica Y del guard). Se resuelven en el controlador desde
+      `usuario.permisos` y se pasan al servicio como booleano.
+    - **Verificado con curl y con clic real**: operario con fecha → 403 / sin fecha → 201; admin con
+      fecha → 201. Operario sobre impresora sin rollo → 409 con el mensaje nuevo; admin sobre la
+      misma → pasa ese chequeo y cae en el 409 original de "no hay rollo en ese momento" (correcto:
+      el permiso no inventa un rollo, deja apuntar a una fecha en que sí lo había); operario sobre
+      impresora con rollo → reposición creada. En navegador el operario ve exactamente `MS 3` y
+      `MS 5` —las dos con rollo montado, confirmado contra SQL— y el admin las 14.
+
+  - **Pantalla de Roles y permisos — y la corrección que la motivó (2026-09-28)**. El usuario
+    preguntó "¿cómo habilito la fecha a un usuario en Impresión de OPs?" y la respuesta honesta era
+    **que no se podía**. Yo había escrito que el permiso era "asignable desde `/usuarios`", y eso
+    era **inexacto**: `/usuarios` asigna **roles**, no permisos; los permisos de cada rol vivían
+    solo en `seed.ts`, y `/roles`/`/permisos` eran de solo lectura (`@Get` nada más). La única
+    salida por interfaz era darle un rol enorme (ADMIN_IT_COSTEO trae los 27 permisos de Costeo)
+    para habilitar uno solo.
+    - ⚠️ **El atajo obvio era una trampa**: insertar la fila a mano en `core.rol_permisos` funciona
+      hasta el próximo seed. `upsertRolConPermisos()` **reconcilia** (borra todo permiso que no esté
+      en su lista — se corrigió así a propósito en una sesión anterior), o sea que el ajuste
+      desaparecería en silencio en el siguiente despliegue.
+    - **Columna nueva `core.roles.personalizado`** (migración `20260928140000_roles_editables` +
+      rollback). Es lo que resuelve ese choque, y sin ella la pantalla sería inútil. La regla: el
+      seed define el **punto de partida** de un rol; en cuanto alguien lo edita desde la pantalla,
+      el rol queda `personalizado` y `upsertRolConPermisos()` hace early-return sin tocarle los
+      permisos. La contracara —que un permiso nuevo de una release futura no le llegue solo— es
+      deliberada, la pantalla lo dice, y el seed **lo imprime al terminar** (`Roles personalizados
+      (el seed NO les tocó los permisos): ...`) para que no pase inadvertido.
+      - El **catálogo** de permisos se sigue sembrando siempre, antes de decidir nada sobre el rol:
+        es lo que hace que un permiso nuevo aparezca en la pantalla para poder asignarlo a mano.
+    - **ADMIN no es editable, a propósito.** Por definición tiene todos los permisos y el seed lo
+      reconcilia siempre, así que es el camino de recuperación si otro rol queda mal configurado.
+      Si se dejara personalizar, un permiso nuevo dejaría de llegarle y nadie se enteraría hasta
+      necesitarlo. Rechazado en el servicio, y en la pantalla con badge "No editable".
+    - **Guarda anti-bloqueo**: no se puede quitar `plataforma.roles.administrar` de un rol que el
+      propio actor tiene (perdería el acceso a la pantalla). No es absoluta —ADMIN siempre puede
+      recuperarlo— pero evita el tropiezo obvio. Mismo espíritu que las guardas ya existentes en
+      `usuarios.service.ts`.
+    - **`PATCH /roles/:id/permisos` recibe el conjunto COMPLETO, no un delta**: mandar un delta
+      obligaría a distinguir "no lo mandé" de "lo quité", que es donde se cuelan los errores. Los
+      códigos se resuelven contra el catálogo real y uno inventado es un 400 explícito.
+      `POST /roles` crea roles nuevos (nacen vacíos y ya `personalizado`). **No hay borrado de
+      roles** — convención #4, y un rol con asignaciones no debería desaparecer.
+    - **45 descripciones de permisos sembradas** (`DESCRIPCIONES_PERMISOS` en `seed.ts`). El campo
+      `descripcion` existía en el modelo **sin usarse**, y sin él la pantalla es un muro de códigos
+      con puntos: `costeo.consumo.fecha_manual` no le dice nada a quien tiene que repartirlos. Se
+      escriben en cada corrida (`update: { descripcion }`), así que corregir un texto en el seed
+      alcanza para que cambie en pantalla.
+    - Frontend: `apps/web/src/features/roles/`, ruta `/roles` (`RutaConPermiso` con
+      `plataforma.roles.administrar`) e ítem nuevo en el desplegable del avatar junto a Usuarios —
+      exactamente donde la nota de esa sesión anticipaba que iría. Lista de roles a la izquierda,
+      permisos del elegido a la derecha **agrupados por dominio y recurso** derivados del propio
+      código (con 45 permisos una lista plana es ilegible), buscador, "marcar todos" por recurso, y
+      Guardar habilitado solo si hay cambios.
+    - **Verificado con curl y en navegador**: alta de rol, reemplazo de permisos (el rol queda
+      `personalizado`), ADMIN rechazado (400), permiso inexistente (400), rol inexistente (404),
+      código de rol en minúsculas (400), rol duplicado (409), y la guarda anti-bloqueo (409 al
+      quitarse el permiso a sí mismo, 200 cuando lo hace un admin sobre un rol ajeno). **La prueba
+      que importó**: se le dio `costeo.consumo.fecha_manual` a OPERADOR_IMPRESION por la API, se
+      corrió el seed, y el permiso **sobrevivió** mientras DISENO (no personalizado) se reconcilió
+      normal. En navegador: buscar "fecha" encuentra el permiso con su descripción legible, y ADMIN
+      aparece con los checkboxes deshabilitados.
+    - **Todo lo de la prueba se revirtió**: OPERADOR_IMPRESION volvió a sus 5 permisos del seed y a
+      `personalizado = false`. **Qué rol recibe la excepción de la fecha es decisión del usuario**,
+      que ahora la toma desde la pantalla sin pedir cambios de código.
+
+  - **"No existe esa OP" ahora dice en qué empresa sí está (2026-09-28)**. Dos preguntas del usuario
+    sobre el cambio de empresa, con respuestas distintas:
+    1. **"¿Es normal que `admin` no tenga la opción de cambiar de empresa?"** — **Sí, y no es un
+       bug del selector**: el acceso a una empresa viene de tener un **rol activo ahí**, y `admin`
+       solo lo tiene en Digitexsa. No existe un "ADMIN ve todas las empresas" implícito, y está
+       bien que no exista: si lo hubiera, el conjunto de empresas visibles dejaría de ser un dato
+       explícito y auditable. Se resuelve asignándole el rol también en la otra empresa desde
+       `/usuarios`. El selector aparece solo con más de una empresa — con una sola no hay nada que
+       elegir.
+    2. **"¿Cómo sé de qué empresa es la orden que quiero modificar?"** — **Eso sí era un hueco
+       real, recién abierto por la separación por empresa de esta misma sesión.** Buscar una OP
+       parado en la empresa equivocada devolvía un 404 plano ("No existe la orden de producción
+       26OP010345"), que es engañoso —la orden existe— y deja sin saber qué hacer.
+    - `common/op-otra-empresa.ts`: cuando la búsqueda falla, revisa si esa `(anio, correlativo)`
+      existe en otra empresa y lo dice por nombre ("...pero sí existe en Digitexsa. Cambiá de
+      empresa desde el menú de tu usuario"). Usado por los tres puntos de entrada — Órdenes,
+      Reposiciones e Impresión de OPs.
+    - ⚠️ **Solo nombra empresas donde el usuario TIENE rol activo.** Si la OP vive en una empresa a
+      la que no tiene acceso, la respuesta sigue siendo el "no existe" pelado: confirmar lo
+      contrario le contaría que otro inquilino tiene una orden con ese número, que es justo lo que
+      la separación por empresa evita. Verificado con dos usuarios distintos.
+    - Se llama **solo cuando la búsqueda ya falló**, así que no pesa en el camino normal.
+    - **`ApiError` del frontend ahora lleva `motivo`** (`lib/api.ts`), tomado del cuerpo del error.
+      Hacía falta porque el aviso de Impresión de OPs ofrecía ademas "Ir a Órdenes de Producción /
+      las órdenes se cargan por plantilla desde ahí" — un segundo consejo que **contradice** al
+      primero cuando el arreglo real es cambiar de empresa. El caso se distingue por
+      `motivo: 'OP_EN_OTRA_EMPRESA'` y **no por el texto del mensaje**, que se rompe en cuanto
+      alguien lo reescribe (mismo criterio que ya se había usado con `SIN_ROLLO_MONTADO`, que hasta
+      ahora solo viajaba dentro de respuestas 2xx y no en excepciones).
+    - **Verificado con curl y en navegador**: usuario con acceso a las dos empresas parado en
+      Digitalpro → el mensaje nombra Digitexsa en las tres pantallas, con HTTP 404 y
+      `motivo` en el cuerpo; usuario sin acceso a Digitexsa → mensaje pelado, sin filtración; OP
+      inexistente → mensaje pelado y **conserva** el atajo de cargar por plantilla, que ahí sí
+      corresponde. Usuarios de prueba borrados al terminar.
 
   - **F4 — Fase D (espejo a Google Sheets) completada, 2026-09-21.** Cierra F4. Cada envío de
     consumo escribe además en la hoja **"Datos"** del libro `ConsumosFinal DIGITEXSAMig`, que es lo

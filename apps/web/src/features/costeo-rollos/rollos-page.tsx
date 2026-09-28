@@ -11,14 +11,21 @@ export function RollosPage() {
   const { tienePermiso } = useAuth()
   const puedeIngresar = tienePermiso('costeo.rollo.ingresar')
   const puedeMontar = tienePermiso('costeo.rollo.montar') || tienePermiso('costeo.rollo.desmontar')
+  // Permiso propio, no `costeo.rollo.ver`: el historial dice quién montó y
+  // quién desmontó cada rollo, y por ahora es solo para administradores.
+  const puedeVerHistorial = tienePermiso('costeo.rollo.historial')
 
   // La pestaña viaja en la URL para poder enlazar directo a Montaje desde el
-  // error de "sin rollo montado" de Envío de impresas. Se valida contra los
+  // error de "sin rollo montado" de Impresión de OPs. Se valida contra los
   // permisos: un ?tab= a una pestaña que el rol no ve dejaría la página vacía.
   const [params, setParams] = useSearchParams()
   const pedida = params.get('tab')
-  // 'historial' solo pide costeo.rollo.ver, que es lo mismo que el panel.
-  const disponibles = ['panel', ...(puedeMontar ? ['montaje'] : []), ...(puedeIngresar ? ['ingreso', 'corregir'] : []), 'historial']
+  const disponibles = [
+    'panel',
+    ...(puedeMontar ? ['montaje'] : []),
+    ...(puedeIngresar ? ['ingreso', 'corregir'] : []),
+    ...(puedeVerHistorial ? ['historial'] : []),
+  ]
   const tab = pedida && disponibles.includes(pedida) ? pedida : 'panel'
 
   return (
@@ -34,7 +41,7 @@ export function RollosPage() {
           {puedeMontar && <TabsTrigger value="montaje">Montaje</TabsTrigger>}
           {puedeIngresar && <TabsTrigger value="ingreso">Ingreso a bodega</TabsTrigger>}
           {puedeIngresar && <TabsTrigger value="corregir">Corregir ingreso</TabsTrigger>}
-          <TabsTrigger value="historial">Historial</TabsTrigger>
+          {puedeVerHistorial && <TabsTrigger value="historial">Historial</TabsTrigger>}
         </TabsList>
         <TabsContent value="panel">
           <TabPanel />
@@ -54,9 +61,11 @@ export function RollosPage() {
             <TabCorregirIngreso />
           </TabsContent>
         )}
-        <TabsContent value="historial">
-          <TabHistorial />
-        </TabsContent>
+        {puedeVerHistorial && (
+          <TabsContent value="historial">
+            <TabHistorial />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

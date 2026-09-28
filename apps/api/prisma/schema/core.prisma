@@ -6,6 +6,12 @@ model Empresa {
   nit                 String?
   idMonedaBase        Int                 @map("id_moneda_base")
   activo              Boolean             @default(true)
+  /// Color de marca (#RRGGBB) para distinguir de un vistazo en qué empresa se
+  /// está trabajando. Vive en la base y no incrustado en el frontend, mismo
+  /// criterio que `recetas.tallas.frecuente`: se ajusta con un UPDATE, sin
+  /// desplegar. Es solo presentación, no participa de ningún cálculo ni regla
+  /// de acceso.
+  colorMarca          String?             @map("color_marca") @db.VarChar(7)
   creadoEn            DateTime            @default(now()) @map("creado_en") @db.Timestamptz(3)
   actualizadoEn       DateTime            @updatedAt @map("actualizado_en") @db.Timestamptz(3)
   auditorias          Auditoria[]
@@ -45,6 +51,10 @@ model Rol {
   nombre              String
   descripcion         String?
   esRolSistema        Boolean             @default(false) @map("es_rol_sistema")
+  /// true = sus permisos se administran desde la pantalla de Roles y el seed
+  /// ya no los reconcilia. Lo prende `PATCH /roles/:id/permisos`; ADMIN nunca
+  /// llega a prenderlo porque no es editable desde la pantalla.
+  personalizado       Boolean             @default(false)
   permisos            RolPermiso[]
   usuarioEmpresaRoles UsuarioEmpresaRol[]
 

@@ -1,5 +1,16 @@
-import { Controller, Get } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+} from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import type { JwtPayload } from '../auth/types/jwt-payload.type';
+import { ActualizarPermisosRolDto, CrearRolDto } from './dto/roles.dto';
 import { RolesPermisosService } from './roles-permisos.service';
 
 @Controller()
@@ -20,5 +31,28 @@ export class RolesPermisosController {
   @Get('permisos')
   listarPermisos() {
     return this.rolesPermisosService.listarPermisos();
+  }
+
+  @RequirePermissions('plataforma.roles.administrar')
+  @Post('roles')
+  crearRol(@Body() dto: CrearRolDto, @CurrentUser() usuario: JwtPayload) {
+    return this.rolesPermisosService.crearRol(dto, usuario.sub);
+  }
+
+  @RequirePermissions('plataforma.roles.administrar')
+  @Patch('roles/:id/permisos')
+  actualizarPermisos(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ActualizarPermisosRolDto,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    // Los roles del actor van al servicio solo para la guarda anti-bloqueo
+    // (que no se quite a sí mismo el acceso a esta pantalla).
+    return this.rolesPermisosService.actualizarPermisos(
+      id,
+      dto,
+      usuario.sub,
+      usuario.roles,
+    );
   }
 }

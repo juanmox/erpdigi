@@ -170,7 +170,17 @@ model OrdenProduccion {
   // pasar en `data:` de un create/update (encontrado como bug real al
   // construir F3: costeoOrdenes/costeoReposiciones dependían de leer este
   // campo y siempre volvía undefined porque no estaba declarado).
-  codigo            String    @default(dbgenerated()) @unique @db.VarChar(20)
+  // Ya NO lleva @unique: desde 20260928120000 la unicidad es por empresa, así
+  // que dos empresas pueden traer el mismo código de OP (cada una importa la
+  // numeración de su propio origen). Además el @unique nunca existió en la
+  // base —el índice `idx_op_codigo` siempre fue un btree común—, así que
+  // declararlo era una mentira que Prisma habría usado para armar un
+  // findUnique({codigo}) sin respaldo real.
+  codigo            String    @default(dbgenerated()) @db.VarChar(20)
+  // + SQL: FK hacia core.empresas. Va como Int plano sin @relation, mismo
+  // criterio que `creadoPor` en todo este schema: la relación inversa no se
+  // usa para nada y ensuciaría core.Empresa con arrays por cada tabla.
+  idEmpresa         Int       @map("id_empresa")
   idCliente         Int?      @map("id_cliente")
   idLineaProducto   Int?      @map("id_linea_producto")
   ordenCompra       String?   @map("orden_compra") @db.VarChar(40)
@@ -187,7 +197,8 @@ model OrdenProduccion {
   consumosPapel    ConsumoPapel[]
   reposiciones     Reposicion[]
 
-  @@unique([anio, correlativo])
+  @@unique([idEmpresa, anio, correlativo])
+  @@index([idEmpresa])
   @@map("orden_produccion")
   @@schema("costeo")
 }
@@ -310,8 +321,17 @@ model MontajeRollo {
 // ── Hechos: consumo de papel y reposiciones ─────────────────────────
 model LineaProduccion {
   idLineaProduccion  Int       @id @default(autoincrement()) @map("id_linea_produccion")
-  codigoLine         String    @unique @map("codigo_line") @db.VarChar(40)
+  // El @unique pasó a ser por empresa (ver @@unique al pie): el LINE es el
+  // identificador de línea del pedido del cliente y viene de afuera, así que
+  // dos empresas con clientes distintos podrían repetirlo.
+  codigoLine         String    @map("codigo_line") @db.VarChar(40)
   idOrdenProduccion  Int       @map("id_orden_produccion")
+  // + SQL: FK COMPUESTA (id_orden_produccion, id_empresa) -> orden_produccion,
+  // que Prisma no expresa. Es lo que garantiza en la base que la empresa de la
+  // línea sea siempre la de su orden; sin ella una FK suelta dejaría colgar una
+  // línea de Digitalpro de una OP de Digitexsa. Se duplica acá (en vez de
+  // derivarla por join) porque la consulta de trabajo pendiente recorre líneas.
+  idEmpresa          Int       @map("id_empresa")
   idProducto         Int       @map("id_producto")
   idImpresora        Int?      @map("id_impresora")
   idTipoPapel        Int?      @map("id_tipo_papel")
@@ -347,6 +367,8 @@ model LineaProduccion {
   tallas          LineaProduccionTalla[]
   consumosPapel   ConsumoPapel[]
 
+  @@unique([idEmpresa, codigoLine])
+  @@index([idEmpresa])
   @@map("linea_produccion")
   @@schema("costeo")
 }

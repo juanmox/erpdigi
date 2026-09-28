@@ -62,14 +62,32 @@ const PERMISOS_COSTEO = [
   'costeo.rollo.montar',
   'costeo.rollo.desmontar',
   'costeo.rollo.ingresar',
+  // Historial de montajes: quién montó y quién desmontó cada rollo. Va aparte
+  // de `costeo.rollo.ver` a pedido del usuario — por ahora solo administradores.
+  // Al vivir en PERMISOS_COSTEO lo reciben ADMIN y ADMIN_IT_COSTEO y ninguno de
+  // los roles granulares de planta, que listan sus permisos uno por uno. Para
+  // abrirlo después basta agregarlo a un rol desde /usuarios, sin tocar código.
+  'costeo.rollo.historial',
   'costeo.orden.ver',
   'costeo.orden.importar',
   'costeo.reposicion.ver',
   'costeo.reposicion.crear',
   'costeo.reposicion.anular',
+  // Excepción pedida por el usuario (2026-09-28): normalmente el selector de
+  // impresora de Reposiciones solo ofrece las que tienen un rollo montado
+  // AHORA, y el servidor rechaza cualquier otra. Este permiso levanta las dos
+  // cosas, para registrar algo que pasó antes con un rollo ya desmontado.
+  // Al vivir en PERMISOS_COSTEO lo reciben ADMIN y ADMIN_IT_COSTEO, y ningún
+  // rol de planta (esos listan sus permisos uno por uno).
+  'costeo.reposicion.impresora_sin_rollo',
   'costeo.consumo.ver',
   'costeo.consumo.capturar',
   'costeo.consumo.anular',
+  // La misma excepción del lado de Impresión de OPs: habilita el campo "Fecha
+  // y hora de impresión", que permite descontar contra el rollo que estaba
+  // montado en ese momento y no el de ahora. Sin el permiso el campo no se ve
+  // y el servidor rechaza cualquier fecha que venga en el cuerpo.
+  'costeo.consumo.fecha_manual',
   'costeo.of.ver',
   'costeo.of.crear',
   'costeo.of.editar',
@@ -91,15 +109,24 @@ const PERMISOS_COSTEO = [
 // después (son solo filas rol_permiso, editables desde /usuarios sin tocar
 // el schema).
 //
-// - Operador Impresión: SOLO Panel de estado + Montaje/desmontaje de rollo
-//   en la impresora — no ingresa factura de papel (eso es Bodeguero) ni
-//   toca reposiciones/insumos/facturación.
+// - Operador Impresión: Panel de estado + Montaje/desmontaje de rollo en la
+//   impresora + la pantalla "Impresión de OPs" (descontar el papel de lo que
+//   imprime) — no ingresa factura de papel (eso es Bodeguero) ni toca
+//   reposiciones/insumos/facturación. `costeo.consumo.*` se le agregó a
+//   pedido del usuario tras probar con un usuario real por rol: sin eso, el
+//   operario montaba el rollo pero no podía registrar lo que imprimía, que es
+//   justamente su trabajo. Sin `costeo.consumo.anular` (corregir un envío ya
+//   hecho es de supervisión) y sin `costeo.orden.ver` (las OP las carga
+//   Diseño/Analista por import, no el operario).
 // - Bodeguero (nuevo): ingreso de factura de papel a bodega + corrección de
 //   ingresos mal capturados, y ver el panel de estado — no monta/desmonta
 //   rollo en la impresora (eso es físicamente Operador Impresión) ni toca
 //   reposiciones/insumos/facturación.
 // - Diseño (nuevo): mismo alcance que Operador Impresión (Panel de estado +
-//   Montaje) — departamento distinto, mismo tipo de acceso al sistema.
+//   Montaje + Impresión de OPs) — departamento distinto, mismo tipo de
+//   acceso al sistema. En el flujo legacy Diseño era justamente quien
+//   llenaba la Forma 2 (consumo de papel), que es lo que reemplaza la
+//   pantalla de Impresión de OPs.
 // - Operador Reposiciones (código interno OPERADOR_TRANSFERENCIA, sin
 //   cambiar — ver nota junto al rol): SOLO la pantalla de Reposiciones + el
 //   panel lateral de estado de impresoras que muestra esa pantalla. Incluye
@@ -122,7 +149,13 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
   [
     'OPERADOR_IMPRESION',
     'Operador Impresión',
-    ['costeo.rollo.ver', 'costeo.rollo.montar', 'costeo.rollo.desmontar'],
+    [
+      'costeo.rollo.ver',
+      'costeo.rollo.montar',
+      'costeo.rollo.desmontar',
+      'costeo.consumo.ver',
+      'costeo.consumo.capturar',
+    ],
   ],
   [
     'BODEGUERO',
@@ -132,7 +165,13 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
   [
     'DISENO',
     'Diseño',
-    ['costeo.rollo.ver', 'costeo.rollo.montar', 'costeo.rollo.desmontar'],
+    [
+      'costeo.rollo.ver',
+      'costeo.rollo.montar',
+      'costeo.rollo.desmontar',
+      'costeo.consumo.ver',
+      'costeo.consumo.capturar',
+    ],
   ],
   [
     // Código interno sin cambiar a propósito (upsert por `codigo` — cambiarlo
@@ -527,13 +566,90 @@ const TALLAS_ADICIONALES: { nombre: string; orden: number; grupo: string }[] = [
   { nombre: 'L-XL', orden: 1170, grupo: 'COMBINADA' },
 ]
 
+// Qué hace cada permiso, en castellano. El campo `descripcion` existía en el
+// modelo sin usarse y los códigos solos ("costeo.consumo.fecha_manual") no le
+// dicen nada a quien tiene que repartirlos: la pantalla de Roles sería un muro
+// de códigos con puntos. Se escribe en cada corrida del seed, así que corregir
+// un texto acá alcanza para que cambie en pantalla.
+const DESCRIPCIONES_PERMISOS: Record<string, string> = {
+  // ── Plataforma ──
+  'plataforma.usuarios.administrar':
+    'Crear usuarios, asignarles roles, activarlos y cambiarles la contraseña',
+  'plataforma.roles.administrar': 'Ver y editar los permisos de cada rol, y crear roles nuevos',
+  'plataforma.empresas.administrar': 'Ver y administrar el catálogo de empresas',
+  'plataforma.auditoria.ver': 'Consultar el registro de auditoría (quién hizo qué y cuándo)',
+
+  // ── Recetas ──
+  'recetas.catalogo.ver':
+    'Leer el catálogo de insumos, productos y tallas (lo necesitan algunos selectores de Costeo)',
+  'recetas.cotizaciones.ver': 'Entrar al módulo Recetas y ver el historial de cotizaciones',
+  'recetas.cotizaciones.crear': 'Guardar cotizaciones nuevas',
+  'recetas.insumos.crear': 'Dar de alta insumos',
+  'recetas.insumos.editar': 'Editar insumos y actualizar sus precios',
+  'recetas.insumos.desactivar': 'Retirar insumos del catálogo',
+  'recetas.productos.crear': 'Dar de alta productos',
+  'recetas.productos.editar': 'Editar productos',
+  'recetas.productos.desactivar': 'Retirar productos del catálogo',
+  'recetas.desarrollos.crear': 'Crear desarrollos (el prototipo dueño de la receta)',
+  'recetas.desarrollos.editar': 'Editar un desarrollo y las líneas de insumo de su receta',
+  'recetas.desarrollos.aprobar': 'Aprobar un desarrollo, o reabrirlo a borrador',
+  'recetas.recetas.editar': 'Editar las líneas de receta de un desarrollo',
+  'recetas.importar': 'Usar los imports masivos de Excel de Gestión de datos',
+
+  // ── Costeo: rollos ──
+  'costeo.rollo.ver': 'Ver el panel de estado de las impresoras y sus rollos',
+  'costeo.rollo.montar': 'Montar un rollo en una impresora',
+  'costeo.rollo.desmontar': 'Desmontar un rollo y registrar sus yardas finales',
+  'costeo.rollo.ingresar':
+    'Ingresar facturas de papel a bodega, corregirlas e importarlas por plantilla',
+  'costeo.rollo.historial': 'Ver el historial de montajes: quién montó y quién desmontó cada rollo',
+
+  // ── Costeo: órdenes ──
+  'costeo.orden.ver': 'Buscar órdenes de producción y ver sus líneas',
+  'costeo.orden.importar':
+    'Importar órdenes de producción por plantilla y dar de alta líneas de producto',
+
+  // ── Costeo: reposiciones ──
+  'costeo.reposicion.ver': 'Ver las reposiciones de una orden',
+  'costeo.reposicion.crear': 'Registrar reposiciones',
+  'costeo.reposicion.anular': 'Anular una reposición ya registrada',
+  'costeo.reposicion.impresora_sin_rollo':
+    'EXCEPCIÓN: elegir una impresora que no tiene rollo montado en este momento',
+
+  // ── Costeo: consumo de papel (Impresión de OPs) ──
+  'costeo.consumo.ver': 'Entrar a Impresión de OPs y ver el trabajo pendiente',
+  'costeo.consumo.capturar': 'Enviar líneas y descontar el papel del rollo montado',
+  'costeo.consumo.fecha_manual':
+    'EXCEPCIÓN: registrar con una fecha y hora distinta a la actual, para descontar del rollo que estaba montado en ese momento',
+  'costeo.consumo.anular': 'Anular un consumo ya enviado',
+
+  // ── Costeo: consumo estándar ──
+  'costeo.estandar.ver': 'Consultar el consumo estándar de papel por producto y talla',
+  'costeo.estandar.administrar': 'Cargar y versionar el consumo estándar',
+
+  // ── Costeo: insumos y facturación (módulos aún sin pantalla) ──
+  'costeo.insumo.ver': 'Ver los insumos de costeo',
+  'costeo.insumo.administrar': 'Administrar el catálogo de insumos de costeo',
+  'costeo.insumo.editar_costo': 'Editar el costo unitario de un insumo (versionado)',
+  'costeo.of.ver': 'Ver órdenes de facturación',
+  'costeo.of.crear': 'Crear órdenes de facturación',
+  'costeo.of.editar': 'Editar órdenes de facturación',
+  'costeo.of.cerrar': 'Cerrar una orden de facturación',
+  'costeo.of.reabrir': 'Reabrir una orden de facturación cerrada',
+  'costeo.dashboard.ver': 'Ver los tableros de Costeo',
+  'costeo.dashboard.ver_financiero': 'Ver las cifras financieras de los tableros',
+}
+
 async function upsertPermiso(codigo: string) {
+  const descripcion = DESCRIPCIONES_PERMISOS[codigo] ?? null
   return prisma.permiso.upsert({
     where: { codigo },
-    update: {},
-    create: { codigo },
+    update: { descripcion },
+    create: { codigo, descripcion },
   })
 }
+
+const rolesPersonalizadosOmitidos: string[] = []
 
 // Reconcilia de verdad: agrega los permisos que falten Y quita los que ya no
 // estén en `codigosPermisos` — antes solo agregaba, así que recortar la
@@ -541,14 +657,27 @@ async function upsertPermiso(codigo: string) {
 // el acceso viejo (bug real, encontrado al recortar OPERADOR_IMPRESION/
 // OPERADOR_TRANSFERENCIA en sesión posterior a F3).
 async function upsertRolConPermisos(codigo: string, nombre: string, codigosPermisos: string[]) {
+  // El CATÁLOGO de permisos se siembra siempre, antes de cualquier decisión
+  // sobre el rol: es lo que hace que un permiso nuevo de esta release aparezca
+  // en la pantalla de Roles para poder asignarlo a mano, incluso si ningún rol
+  // del seed lo lista todavía.
+  const permisos = await Promise.all(codigosPermisos.map(upsertPermiso))
+  const idsPermisosDeseados = permisos.map((p) => p.idPermiso)
+
   const rol = await prisma.rol.upsert({
     where: { codigo },
     update: { nombre },
     create: { codigo, nombre, esRolSistema: true },
   })
 
-  const permisos = await Promise.all(codigosPermisos.map(upsertPermiso))
-  const idsPermisosDeseados = permisos.map((p) => p.idPermiso)
+  // Rol tomado a mano desde la pantalla de Roles: el seed no le toca los
+  // permisos. Sin esto, el deleteMany de abajo borraría en el próximo
+  // despliegue cualquier ajuste que se haya hecho por interfaz — que es
+  // justamente lo que volvería inútil a esa pantalla.
+  if (rol.personalizado) {
+    rolesPersonalizadosOmitidos.push(rol.codigo)
+    return rol
+  }
 
   await Promise.all(
     permisos.map((permiso) =>
@@ -715,6 +844,12 @@ async function main() {
       `${costeo.calandras.length} calandras, ${costeo.tiposServicio.length} tipos de servicio`,
   )
   console.log(`Roles granulares Costeo: ${rolesGranularesCosteo.map((r) => r.codigo).join(', ')}`)
+  // Se avisa fuerte: un rol personalizado NO recibe los permisos nuevos de esta
+  // release. Si hace falta, se agregan a mano desde la pantalla de Roles.
+  if (rolesPersonalizadosOmitidos.length > 0)
+    console.log(
+      `Roles personalizados (el seed NO les tocó los permisos): ${rolesPersonalizadosOmitidos.join(', ')}`,
+    )
   if (!process.env.SEED_ADMIN_PASSWORD) {
     console.log(`Usuario admin: ${usernameAdmin} / contraseña temporal: ${passwordAdmin}`)
   } else {

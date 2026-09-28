@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { EmpresaActual } from '../auth/decorators/empresa-actual.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CosteoOrdenesService } from './costeo-ordenes.service';
@@ -39,8 +40,8 @@ export class CosteoOrdenesController {
 
   @RequirePermissions('costeo.orden.importar')
   @Post('importar/preview')
-  previewImportar(@Req() req: Request) {
-    return this.service.previewImportarLineas(req.body as Buffer);
+  previewImportar(@Req() req: Request, @EmpresaActual() idEmpresa: number) {
+    return this.service.previewImportarLineas(req.body as Buffer, idEmpresa);
   }
 
   @RequirePermissions('costeo.orden.importar')
@@ -48,8 +49,9 @@ export class CosteoOrdenesController {
   aplicarImportar(
     @Body('filas') filas: FilaPreviewLinea[],
     @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
   ) {
-    return this.service.aplicarImportarLineas(filas, usuario.sub);
+    return this.service.aplicarImportarLineas(filas, usuario.sub, idEmpresa);
   }
 
   @RequirePermissions('costeo.orden.importar')
@@ -79,13 +81,18 @@ export class CosteoOrdenesController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: EditarLineaProduccionDto,
     @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
   ) {
-    return this.service.editarLineaProduccion(id, dto, usuario.sub);
+    return this.service.editarLineaProduccion(id, dto, usuario.sub, idEmpresa);
   }
 
   @RequirePermissions('costeo.orden.ver')
   @Get(':codigo')
-  buscarPorCodigo(@Param('codigo') codigo: string) {
-    return this.service.buscarPorCodigo(codigo);
+  buscarPorCodigo(
+    @Param('codigo') codigo: string,
+    @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.buscarPorCodigo(codigo, idEmpresa, usuario.sub);
   }
 }

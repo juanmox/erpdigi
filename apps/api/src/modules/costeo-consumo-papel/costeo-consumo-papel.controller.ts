@@ -9,6 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { EmpresaActual } from '../auth/decorators/empresa-actual.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CosteoConsumoPapelService } from './costeo-consumo-papel.service';
@@ -25,17 +26,25 @@ export class CosteoConsumoPapelController {
   // deja arriba porque es la entrada natural de la pantalla.
   @RequirePermissions('costeo.consumo.ver')
   @Get('pendientes')
-  pendientes(@Query('idImpresora') idImpresora?: string) {
+  pendientes(
+    @EmpresaActual() idEmpresa: number,
+    @Query('idImpresora') idImpresora?: string,
+  ) {
     const id = idImpresora ? Number(idImpresora) : undefined;
     return this.service.pendientes(
+      idEmpresa,
       Number.isFinite(id) && id! > 0 ? id : undefined,
     );
   }
 
   @RequirePermissions('costeo.consumo.ver')
   @Get('orden/:codigo')
-  obtenerOrden(@Param('codigo') codigo: string) {
-    return this.service.obtenerOrden(codigo);
+  obtenerOrden(
+    @Param('codigo') codigo: string,
+    @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.obtenerOrden(codigo, idEmpresa, usuario.sub);
   }
 
   @RequirePermissions('costeo.consumo.capturar')
@@ -43,8 +52,16 @@ export class CosteoConsumoPapelController {
   capturar(
     @Body() dto: CapturarConsumoDto,
     @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
   ) {
-    return this.service.capturarLote(dto, usuario.sub);
+    // Permiso OPCIONAL, así que no puede ir en @RequirePermissions (que exige
+    // TODOS los que lista). Se resuelve acá y el servicio decide con él.
+    return this.service.capturarLote(
+      dto,
+      usuario.sub,
+      idEmpresa,
+      usuario.permisos.includes('costeo.consumo.fecha_manual'),
+    );
   }
 
   @RequirePermissions('costeo.consumo.anular')
@@ -53,7 +70,8 @@ export class CosteoConsumoPapelController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AnularConsumoDto,
     @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
   ) {
-    return this.service.anular(id, dto.motivo, usuario.sub);
+    return this.service.anular(id, dto.motivo, usuario.sub, idEmpresa);
   }
 }
