@@ -761,6 +761,22 @@ el servidor, no la llave personal del usuario). Checkout del servidor en
     archivo se reemplace por uno de 2 líneas. **Nunca sacar el wrapper.**
     - Corolario: un cambio a `deploy.sh` entra en vigor recién en el **siguiente** despliegue. Para
       estrenarlo de inmediato, hacer `git pull` a mano en el servidor antes de correrlo.
+  - **⚠️ El bit de ejecución de `deploy.sh` vive en git, y faltaba (2026-09-28).** Un despliegue
+    falló con `-bash: ./scripts/deploy.sh: Permission denied`: el archivo estaba como `100644` en
+    el índice, o sea **nunca** fue ejecutable. Funcionaba porque alguien le había hecho `chmod +x`
+    a mano en el servidor, y el `git pull` que reescribió el archivo (el commit del wrapper
+    `main()`) le borró ese bit. Corregido con `git update-index --chmod=+x` sobre `deploy.sh` y
+    `setup-recetas-dev.sh`, así que ahora sobrevive a cualquier checkout.
+    - **Lo peligroso de este fallo no es el script sino lo que vino después**: se había pegado el
+      deploy y el seed como dos comandos seguidos, así que al abortar el primero el **seed corrió
+      igual, contra el código viejo**, y su salida de éxito ("Seed completo", todos los catálogos)
+      hacía parecer que el despliegue había funcionado. No hubo daño —el seed es idempotente
+      consigo mismo y el upsert del admin usa `update: {}`, que no toca su contraseña— pero
+      **ningún permiso nuevo se creó**, porque esos viven en el `seed.ts` que no se había bajado.
+    - *Lección*: encadenar `deploy.sh` y el seed en una sola pegada oculta el fallo del primero.
+      Conviene correrlos por separado y mirar que el deploy llegue a "Listo", o unirlos con `&&`.
+    - Mientras tanto, `bash scripts/deploy.sh` funciona sin importar el bit — es la salida cuando
+      un checkout viejo todavía no tiene el modo corregido.
 - **Gotchas reales encontrados en este primer deploy** (ya corregidos donde aplicaba):
   1. No había ningún paso que corriera `prisma generate` tras `pnpm install` → build fallaba con
      120 errores de TS. Corregido con `"postinstall": "prisma generate"` en `apps/api/package.json`.
