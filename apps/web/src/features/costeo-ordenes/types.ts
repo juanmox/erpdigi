@@ -39,6 +39,11 @@ export interface LineaProduccionDetalle {
   estatus: string
   enguiamientoYd: string
   consumoEnBlanco: boolean
+  /**
+   * Ya tiene consumo de producción vigente. Cuando es true, `consumoEnBlanco`
+   * quedó congelado en `consumo_papel` y el servidor rechaza modificarlo.
+   */
+  enviada: boolean
   // Desarrollo↔Producto es biunívoco — se lee del producto, nunca se
   // duplica como campo propio de la línea (evita que se desincronicen).
   producto: { idProducto: number; codigo: string; descripcion: string; desarrollo: string | null }
@@ -68,4 +73,44 @@ export interface OrdenProduccionDetalle {
   cliente: { idCliente: number; codigo: string; nombre: string } | null
   lineaProducto: { idLineaProducto: number; nombre: string } | null
   lineasProduccion: LineaProduccionDetalle[]
+}
+
+/** Una línea pendiente de imprimir, dentro de su OP. */
+export interface LineaPendienteOrden {
+  idLineaProduccion: number
+  codigoLine: string
+  producto: string
+  productoDescripcion: string
+  impresora: string | null
+  fechaCliente: string | null
+  fechaEntregar: string | null
+  /** Ya tiene consumo de producción vigente, o sea que se imprimió. */
+  impresa: boolean
+  /** Cantidad por nombre de talla; solo las tallas que la línea usa. */
+  cantidades: Record<string, number>
+  total: number
+}
+
+export interface OrdenPendiente {
+  idOrdenProduccion: number
+  codigo: string
+  cliente: string | null
+  lineaProducto: string | null
+  ordenCompra: string | null
+  fechaCompromiso: string | null
+  lineas: LineaPendienteOrden[]
+  totalPiezas: number
+  lineasImpresas: number
+}
+
+/** `todas` incluye impresas y pendientes. */
+export type EstadoListadoOrdenes = 'pendientes' | 'impresas' | 'todas'
+
+export interface ListadoOrdenes {
+  estado: EstadoListadoOrdenes
+  /** Columnas de talla presentes en el resultado, en orden de catálogo. */
+  tallas: string[]
+  /** Cuántas OP con pendientes hay en total (puede superar a las devueltas). */
+  totalOrdenes: number
+  ordenes: OrdenPendiente[]
 }

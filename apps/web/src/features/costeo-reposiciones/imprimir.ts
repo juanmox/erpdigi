@@ -1,3 +1,4 @@
+import { encabezadoMarcaHTML, type MarcaEmpresa } from '@/app/marca-empresa'
 import type { Reposicion } from './types'
 
 /**
@@ -43,7 +44,11 @@ const fmt = (n: number) => n.toLocaleString('es-GT', { minimumFractionDigits: 2,
  * carta) — mismo layout: número arriba a la derecha, tabla de una fila con
  * el insumo/papel repuesto, observaciones, solicitado/autorizado por.
  */
-export function imprimirReposicion(r: Reposicion, nombreSolicitante: string) {
+export function imprimirReposicion(
+  r: Reposicion,
+  nombreSolicitante: string,
+  marca: MarcaEmpresa,
+) {
   const f = new Date(r.fecha)
   const fechaFmt = `${String(f.getDate()).padStart(2, '0')}.${String(f.getMonth() + 1).padStart(2, '0')}.${String(f.getFullYear()).slice(-2)}`
 
@@ -102,9 +107,9 @@ export function imprimirReposicion(r: Reposicion, nombreSolicitante: string) {
       @media print{ body{padding:0;} }
     </style></head><body>
     <div class="head">
-      <img src="/logo.png" onerror="this.style.display='none'">
+      ${encabezadoMarcaHTML(marca, 44, 170)}
       <div class="titulos">
-        <div class="empresa">DIGITAL TEXTIL, S. A.</div>
+        <div class="empresa">${marca.razonSocial.toUpperCase()}</div>
         <div class="sub">REQUISICIÓN DE BODEGA — REPOSICIÓN</div>
       </div>
       <div class="num">Nº ${r.codigoRepo}</div>

@@ -6,6 +6,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
   Req,
   Res,
 } from '@nestjs/common';
@@ -14,7 +15,10 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { EmpresaActual } from '../auth/decorators/empresa-actual.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
-import { CosteoOrdenesService } from './costeo-ordenes.service';
+import {
+  CosteoOrdenesService,
+  type EstadoListadoOrdenes,
+} from './costeo-ordenes.service';
 import type { FilaPreviewLinea } from './costeo-ordenes.types';
 import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
 import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
@@ -52,6 +56,21 @@ export class CosteoOrdenesController {
     @EmpresaActual() idEmpresa: number,
   ) {
     return this.service.aplicarImportarLineas(filas, usuario.sub, idEmpresa);
+  }
+
+  // Va ANTES de @Get(':codigo') o 'listado' se leería como un código de OP.
+  @RequirePermissions('costeo.orden.ver')
+  @Get('listado')
+  listarOrdenes(
+    @EmpresaActual() idEmpresa: number,
+    @Query('estado') estado?: string,
+  ) {
+    // Cualquier valor raro cae en 'pendientes', que es el modo por defecto de
+    // la pantalla: no tiene sentido rechazar la carga por un query param mal
+    // escrito cuando hay un default obvio y seguro.
+    const modo: EstadoListadoOrdenes =
+      estado === 'impresas' || estado === 'todas' ? estado : 'pendientes';
+    return this.service.listarOrdenes(idEmpresa, modo);
   }
 
   @RequirePermissions('costeo.orden.importar')

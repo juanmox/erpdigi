@@ -13,6 +13,7 @@ import { CosteoEstandarModule } from './modules/costeo-estandar/costeo-estandar.
 import { CosteoOrdenesModule } from './modules/costeo-ordenes/costeo-ordenes.module';
 import { CosteoReposicionesModule } from './modules/costeo-reposiciones/costeo-reposiciones.module';
 import { CosteoRollosModule } from './modules/costeo-rollos/costeo-rollos.module';
+import { CosteoReportesModule } from './modules/costeo-reportes/costeo-reportes.module';
 import { EmpresasModule } from './modules/empresas/empresas.module';
 import { MonedasModule } from './modules/monedas/monedas.module';
 import { CotizacionesModule } from './modules/recetas-cotizaciones/cotizaciones.module';
@@ -48,6 +49,7 @@ import { PrismaModule } from './prisma/prisma.module';
     DesarrollosModule,
     CotizacionesModule,
     CosteoRollosModule,
+    CosteoReportesModule,
     CosteoOrdenesModule,
     CosteoReposicionesModule,
     CosteoConsumoPapelModule,

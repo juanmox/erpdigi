@@ -1,3 +1,4 @@
+import { encabezadoMarcaHTML, type MarcaEmpresa } from '@/app/marca-empresa'
 import type { CotizacionDetalleCompleto, ResumenMaterial } from './types'
 
 const fmt = (n: number) => n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -45,7 +46,7 @@ function imprimirHTML(html: string) {
   }
 }
 
-export function imprimirCotizacion(d: CotizacionDetalleCompleto) {
+export function imprimirCotizacion(d: CotizacionDetalleCompleto, marca: MarcaEmpresa) {
   const c = d.cotizacion
   const usd = c.moneda === 'USD' && !!c.tasaCambio
   const tasa = usd ? (c.tasaCambio as number) : 1
@@ -137,9 +138,9 @@ export function imprimirCotizacion(d: CotizacionDetalleCompleto) {
       @media print{ body{padding:0;} }
     </style></head><body>
     <div class="head">
-      <img src="/logo.png" onerror="this.style.display='none'">
+      ${encabezadoMarcaHTML(marca)}
       <div>
-        <div class="empresa">Digital Textil, S.A. (Digitexsa)</div>
+        <div class="empresa">${marca.razonSocial}</div>
         <div class="sub">Cotización de recetas de uniformes deportivos</div>
       </div>
     </div>
@@ -169,6 +170,7 @@ export function imprimirResumen(
   tasa: number | null,
   titulo: string,
   productos: { codigo: string; descripcion: string; cantidad: number }[],
+  marca: MarcaEmpresa,
 ) {
   const sim = moneda === 'USD' ? '$' : 'Q'
   const cv = (v: number) => (moneda === 'USD' && tasa ? v / tasa : v)
@@ -226,8 +228,8 @@ export function imprimirResumen(
       @media print{ body{padding:0;} }
     </style></head><body>
     <div class="head">
-      <img src="/logo.png" onerror="this.style.display='none'">
-      <div><div class="empresa">Digital Textil, S.A. (Digitexsa)</div>
+      ${encabezadoMarcaHTML(marca)}
+      <div><div class="empresa">${marca.razonSocial}</div>
       <div class="sub">Resumen de material requerido</div></div>
     </div>
     <div class="meta">

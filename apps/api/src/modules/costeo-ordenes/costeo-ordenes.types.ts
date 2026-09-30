@@ -64,5 +64,7 @@ export interface FilaPreviewLinea {
   imagen: string | null;
   tallas: FilaTallaCantidad[];
   totalPiezas: number;
+  /** Columna "En blanco" de la plantilla; false si el archivo no la trae. */
+  consumoEnBlanco: boolean;
   error: string | null;
 }

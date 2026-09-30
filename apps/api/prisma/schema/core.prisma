@@ -12,6 +12,16 @@ model Empresa {
   /// desplegar. Es solo presentación, no participa de ningún cálculo ni regla
   /// de acceso.
   colorMarca          String?             @map("color_marca") @db.VarChar(7)
+  /// Logo como data URI. Es data URI y no una ruta porque los documentos
+  /// impresos se arman en un iframe con su propio HTML, donde una ruta
+  /// relativa depende del base de Vite y del prefijo de Nginx. Solo
+  /// presentación; NULL se cae al recuadro con `colorMarca`.
+  logo                String?
+  /// Si la empresa replica sus reposiciones y consumos en los Google Sheets
+  /// legacy que alimentan Data Studio. Esos libros son de Digitexsa, así que
+  /// el default es `false`: una empresa nueva NO escribe en libros ajenos
+  /// hasta que se lo habilite. Ver `// + SQL:` en la migración.
+  espejaSheets        Boolean             @default(false) @map("espeja_sheets")
   creadoEn            DateTime            @default(now()) @map("creado_en") @db.Timestamptz(3)
   actualizadoEn       DateTime            @updatedAt @map("actualizado_en") @db.Timestamptz(3)
   auditorias          Auditoria[]

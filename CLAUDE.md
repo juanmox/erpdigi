@@ -1341,7 +1341,13 @@ sin i18n (todo en español).
        resultó falsa: el valor viejo de producción era el desactualizado. Producción ya quedó
        corregida a 9.99.
     **Estado final, verificado en ambos lados**: `BSN-FB01ESPN 98.8343 · BSN-FB01N 50.7940 ·
-    BSN-FB02NB 47.0583 · BSN-YFB02NB 44.7118`, idénticos. No hace falta tocar nada más, y **si un
+    BSN-FB02NB 47.0583 · BSN-YFB02NB 44.7118`, idénticos.
+    - ⚠️ **Esos cuatro números son la foto del 2026-09-22 y YA NO son los vigentes.** El 2026-09-24
+      el usuario actualizó precios de insumos (`core.auditoria`: `insumos | UPDATE | admin`), así
+      que en local hoy dan `99.0771 · 70.8427 · 75.1541 · 72.8077`. Es actividad normal de negocio,
+      no una regresión. **No usar la lista de arriba como control de integridad** — si un análisis
+      futuro la toma como "lo correcto" va a diagnosticar un problema que no existe; para comparar
+      local contra producción hay que sacar la foto de los dos lados en el momento. No hace falta tocar nada más, y **si un
     análisis futuro vuelve a marcar el 9.99 como sospechoso, está equivocado**.
     - *Lección de método*: "número redondo" no es evidencia de dato de prueba. Cuando el dato es de
       negocio y no hay forma de verificarlo contra el sistema (acá `costeo.insumo_costo` está vacía
@@ -1712,6 +1718,381 @@ sin i18n (todo en español).
       `motivo` en el cuerpo; usuario sin acceso a Digitexsa → mensaje pelado, sin filtración; OP
       inexistente → mensaje pelado y **conserva** el atajo de cargar por plantilla, que ahí sí
       corresponde. Usuarios de prueba borrados al terminar.
+
+  - **Tabla de órdenes cargadas, con filtro por estado (2026-09-29)**. La pantalla de Órdenes solo
+    tenía un buscador por código, así que —en palabras del usuario— "es difícil ver qué órdenes hay
+    cargadas, a menos que sepas exactamente qué órdenes subiste". Era un problema de
+    descubribilidad, no de búsqueda. Nació mostrando solo las pendientes (lo que él pidió) y en el
+    mismo turno pidió poder ver también las ya impresas.
+    - `GET /costeo/ordenes/listado?estado=pendientes|impresas|todas` (gateado `costeo.orden.ver`,
+      con `@EmpresaActual()`) + `components/tabla-ordenes.tsx`. Un `estado` inválido cae en
+      `pendientes`: no tiene sentido fallar la carga por un query param mal escrito habiendo un
+      default obvio.
+    - **"Pendiente" es el MISMO criterio que el panel de Impresión de OPs**: una línea sin ningún
+      consumo de PRODUCCIÓN vigente. **No** se usa `procesadaEn`, que se marca en el primer envío
+      aunque queden tallas sueltas — con esa marca una OP a medio enviar desaparecería de la lista
+      teniendo trabajo por hacer. Reusar el criterio evita que las dos pantallas discrepen.
+    - **`impresas` = ninguna línea pendiente**, expresado como `NOT { lineasProduccion: { some:
+      pendiente } }` **más** `lineasProduccion: { some: {} }`. Lo segundo no sobra: sin él, una OP
+      sin ninguna línea entraría en "impresas", porque un "ninguna pendiente" sobre un conjunto
+      vacío es verdadero.
+    - **Qué líneas se devuelven acompaña al modo**, para que cada uno responda una sola pregunta:
+      `pendientes` trae solo lo que falta imprimir; `impresas` y `todas` traen la orden completa. En
+      los tres casos cada línea viene con `impresa`, y la pantalla **solo muestra el badge en
+      `todas`** — en los otros dos el estado ya lo dice el filtro elegido, repetirlo sería ruido.
+    - **La consulta va por ORDEN, no por línea** (al revés que el panel de Impresión, que agrupa
+      por impresora): así el `take` nunca parte una OP a la mitad.
+    - **Columnas de talla dinámicas**, derivadas de las tallas realmente presentes en el resultado
+      y ordenadas por el `orden` del catálogo — con los datos reales son **10** (`YM YL YXL S M L
+      XL 2XL 3XL 4XL`), o sea una matriz parecida a la hoja de cálculo con la que ya trabajan.
+      Renderizar las 158 del catálogo habría dado una tabla casi vacía. Una celda sin cantidad va
+      **vacía y no en 0**: un cero se lee como "se pidieron cero", cuando lo cierto es que esa talla
+      no va en esa línea.
+    - **Las líneas van agrupadas bajo su OP** (como pidió el usuario): cliente, orden de compra y
+      compromiso son de la orden; producto, impresora, fecha de cliente y tallas son de cada línea.
+      Repetir los datos de la OP en cada fila ensancharía la tabla sin agregar información. El
+      código de la OP en la cabecera es clickeable y abre su ficha en el buscador de arriba.
+    - ⚠️ **El filtro de texto corre en el navegador sobre lo ya traído.** Por eso el tope del
+      endpoint es **200** y no 50: con un tope bajo, filtrar por una OP que quedó fuera diría
+      "ninguna coincide" aunque exista — un falso negativo que se diagnostica pésimo. Con el
+      volumen real (67 OP) quedan todas cubiertas, y si alguna vez se supera, el estado vacío dice
+      cuántas quedaron fuera y remite al buscador por código.
+    - **Defecto de layout preexistente corregido de paso**: la fila de título + botones de la
+      página era `flex ... justify-between` sin `flex-wrap`, así que en teléfono los dos botones no
+      bajaban de renglón y empujaban el ancho de toda la página. Medido con un script que lista los
+      elementos que se salen del viewport: el desborde a 390 px lo causaba eso, **no** la tabla
+      nueva, que scrollea dentro de su `overflow-x-auto`. Mismo defecto y mismo arreglo que en
+      `tab-insumos.tsx`/`tab-precios.tsx`. La página pasó además de `max-w-5xl` a `max-w-7xl` para
+      que la matriz entre sin scroll en escritorio.
+    - **Verificado con curl y en navegador** a 1600, 820 y 390 px, y con los tres modos: pendientes
+      66 OP / 7,841 piezas, impresas 1 OP / 72 piezas, todas 67 OP / 7,969 piezas — la suma cierra,
+      y 7,969 es el total de piezas cargadas que ya documentaba la carga de datos de F4. En el modo
+      mixto se contaron 253 badges de línea sobre 320 filas (253 líneas + 67 cabeceras de OP).
+      `estado` inválido cae en pendientes. Cero desborde horizontal en los tres anchos.
+    - **Cómo se probó el modo "impresas" sin ensuciar nada**: con los datos reales no había ninguna
+      OP impresa, así que ese modo saldría vacío y no probaría el filtro. Se insertó **por SQL** una
+      fila mínima de `consumo_papel` sobre una OP de una sola línea, y se revirtió al terminar. Se
+      usó SQL y no la captura real a propósito: capturar dispara el **espejo a los Google Sheets de
+      producción**, y lo que había que probar era el listado, no la captura. Datos y usuario de
+      prueba borrados al terminar.
+    - **Responsive y colapsable, tras probarla el usuario (2026-09-29, mismo día)**: "solo se podría
+      ver en PC, dado que si reduzco el tamaño de la ventana el contenido de la tabla no se ajusta",
+      más el pedido de poder colapsar para ver solo las cabeceras.
+      - **Dos presentaciones de los mismos datos, no dos pantallas.** En `xl` y más, la matriz con
+        una columna por talla; abajo de `xl`, tarjetas apiladas con las tallas como texto compacto
+        (`S 9 · M 11 · L 2 · XL 5 · 2XL 4`). Una matriz de 15 columnas no entra en un teléfono, y
+        forzarla era exactamente el scroll horizontal que el usuario reportó. Mismo criterio que la
+        Fase C de F4, que ya había resuelto PC/tablet/teléfono con tarjetas que reflowean.
+      - ⚠️ **El corte va en `xl` (1280px) y no en `lg` (1024).** `lg` es viewport, pero el sidebar se
+        lleva 248px: a 1024 quedan ~776 útiles y la matriz de 1000px volvería a scrollear. Medido en
+        navegador a 1600/1280/1024/820/390 — tabla en los dos primeros, tarjetas en los tres
+        últimos, **cero desborde horizontal en los cinco**.
+      - **Las órdenes arrancan COLAPSADAS**, mostrando solo las cabeceras. El propósito de la
+        pantalla es ver qué hay cargado, y eso lo responden las cabeceras; las líneas son el detalle
+        al que se entra. Botones "Expandir todas"/"Colapsar todas", y cada OP alterna con un clic en
+        su cabecera. El estado se guarda como el conjunto de **expandidas** (no de colapsadas): así
+        el conjunto vacío es el default y las órdenes que lleguen después —otro modo, otro
+        filtro— nacen colapsadas sin tener que tocarlo. Cambiar de modo lo limpia.
+      - ⚠️ **Bug propio encontrado por los errores de consola de Playwright, no a ojo**: la cabecera
+        de la tarjeta era un `<button>` y adentro lleva el código de OP, que también es un botón.
+        **Un botón anidado es HTML inválido** y React lo reporta como error de hidratación. La
+        versión de tabla no lo tenía porque su contenedor es un `<tr>`. Corregido pasando la
+        cabecera a `<div onClick>` y extrayendo el chevron a un `<button>` propio con
+        `aria-expanded` — que de paso arregla algo que no estaba: **antes no había forma de expandir
+        con teclado**. Verificado: consola limpia en los cinco anchos.
+      - *Nota*: los dos árboles se renderizan siempre y se muestra uno por CSS. Es más robusto que
+        un hook de media query (no hay parpadeo al redimensionar) y con 67 OP no pesa, pero **los
+        selectores de Playwright tienen que filtrar por `:visible`** o agarran el árbol oculto — se
+        tropezó con eso al verificar.
+      - **Verificado con clic real**: al cargar, 67 filas (solo cabeceras); un clic en una cabecera
+        suma sus 3 líneas; "Expandir todas" llega a **318 filas = 67 cabeceras + 251 líneas
+        pendientes**, que cuadra contra SQL (las 253 líneas totales menos 2 que ya tienen consumo de
+        producción de pruebas anteriores — un "320" esperado de entrada era confusión mía entre
+        líneas totales y pendientes); "Colapsar todas" vuelve a 67. El clic en el código de OP sigue
+        abriendo su ficha **sin** alternar el colapso (`stopPropagation`). Usuario de prueba borrado
+        al terminar.
+    - **Anchos de columna, con las 5 tallas combinadas en pantalla (2026-09-29)**. El usuario
+      advirtió que las 5 tallas combinadas agregadas a la plantilla (`YS-YM`, `YL-YXL`, `2XS-XS`,
+      `S-M`, `L-XL`) **van a aparecer en cuanto haya órdenes que las usen**, y pidió achicar las
+      columnas para que quepan sin montarse unos datos sobre otros, aclarando que **las cantidades
+      rara vez pasan de 2 dígitos**.
+      - **No hizo falta tocar qué columnas se muestran**: son dinámicas desde el principio, así que
+        una talla aparece sola apenas una línea la usa. Se comprobó agregando las 5 combinadas a una
+        línea real por SQL — el listado pasó de 10 a 15 columnas sin tocar código, y se revirtió.
+      - **Medido antes de cambiar nada**, que fue lo que orientó el arreglo: las cuatro primeras
+        columnas se llevaban **583px** (Línea 173 · Producto 190 · Impresora 109 · Fecha cliente
+        111) con contenido mucho más corto. Lo que las inflaba era el **encabezado**: con
+        `table-layout: auto` el navegador reserva lugar para "Fecha cliente" entero aunque abajo
+        solo diga `28/05/26`. De ahí que la solución fuera acortar encabezados ("Impr.",
+        "F. cliente") y pasar a `table-fixed` con anchos explícitos en una constante `ANCHO`.
+      - El `min-w` de la tabla **crece con la cantidad de columnas de talla**
+        (`ANCHO_FIJO + tallas.length * 36`) en vez de ser el `1000px` fijo de antes: agregar tallas
+        ensancha la tabla en lugar de apretar las que ya estaban.
+      - Los nombres combinados se dejan **envolver** (`whitespace-normal`, que vence al
+        `whitespace-nowrap` del primitivo `TableHead`) en vez de ensanchar la columna — aunque con
+        `text-[10.5px]` terminan entrando en un solo renglón igual.
+      - **Verificado con las 15 tallas visibles** a 1600/1440/1280 px: la tabla entra completa en
+        los tres (1246/1158/998 px, exactamente el ancho del contenedor), **cero celdas con texto
+        cortado y cero encabezados cortados**, y la fila de encabezado sigue midiendo 40px — o sea
+        una sola línea, ni `2XS-XS` necesitó envolver. A 1280, cada columna de talla queda en 36px.
+        Datos de prueba revertidos (las piezas volvieron a 7,969) y usuario borrado.
+
+  - **El "En blanco" se congela al capturar — hallazgo del usuario, confirmado en datos reales
+    (2026-09-29)**. Preguntó qué pasa si una OP ya enviada sigue con el checkbox editable y el
+    operario lo prende tarde. **No era hipotético**: en `26OP012625` las líneas `7011852716` y
+    `-1` tenían el flag en `true` con `en_blanco_yd = 0.0000`, y `core.auditoria` mostró que el
+    último cambio a `true` fue **posterior** a las capturas.
+    - **Cómo funciona**: `capturarUna()` calcula `cantidad × factorEnBlanco` **con el flag que la
+      línea tenía en ese instante** y lo guarda en `consumo_papel.en_blanco_yd`. Tocar el flag
+      después cambia `linea_produccion` y **no toca la fila ya escrita**.
+    - ⚠️ **La trampa peor: reenviar NO lo corrige.** La captura es idempotente — las tallas ya
+      enviadas se saltean (`yaEstaban`) — así que prender el checkbox y darle "Enviar" otra vez no
+      recalcula nada, y quien lo haga cree razonablemente que lo arregló.
+    - **Escenarios que sí afecta**: (a) el costeo futuro queda corto en 0.6 yd por pieza; (b) el
+      Google Sheet ya escribió la columna L vacía y los Dashboards leen eso; (c) corregirlo exige
+      anular y recapturar, y como **las anulaciones no se espejan**, eso deja una fila duplicada en
+      la hoja.
+    - **Lo que NO afecta: el rollo.** El panel y la merma descuentan **solo `consumoYd`** —
+      `enguiamiento_yd` y `en_blanco_yd` se registran pero nunca se restan del rollo. Verificado en
+      `costeo-rollos.service.ts` (`_sum: { consumoYd: true }`). Sigue abierta la pregunta de si
+      deberían descontarse; si algún día se decide que sí, este olvido pasaría a distorsionar
+      también el stock del rollo.
+    - **Hoy el daño está acotado** porque F5 (Ordenes de Facturación) no existe: nadie lee
+      `en_blanco_yd` salvo el espejo a Sheets.
+
+  - **Los dos arreglos que pidió el usuario (2026-09-29)**. Decidió no corregir los datos —el envío
+    de esa OP era de prueba— pero sí el flujo:
+    1. **El checkbox se bloquea una vez enviada la línea.** `editarLineaProduccion()` rechaza con
+       **409** si la línea ya tiene consumo de PRODUCCIÓN vigente, con un mensaje que explica que
+       el valor quedó congelado y que para cambiarlo hay que anular y recapturar. `buscarPorCodigo`
+       devuelve ahora `enviada` por línea (mismo criterio, `take: 1` sobre `consumosPapel`) y
+       `ordenes-page.tsx` deshabilita el `Checkbox` mostrando "ya enviada". La guarda va en el
+       servidor **además** de la pantalla: ocultar el control no es un gate.
+    2. **La plantilla de Órdenes gana la columna "En blanco (SI/NO)"**, porque los operarios saben
+       antes de imprimir cuáles llevan ese consumo. Acepta `SI/SÍ/S/X/1/TRUE` y `NO/N/0/FALSE`;
+       vacía es `false`.
+       - ⚠️ **Va DESPUÉS de las columnas de talla y el parser la ubica POR NOMBRE de encabezado, no
+         por índice.** Ponerla antes correría `IDX_TALLA_INICIO` y haría que un archivo armado con
+         la plantilla vieja cargara cantidades en la talla equivocada, **en silencio** — el modo de
+         falla ya advertido en el comentario de `TALLAS_IMPORT_LINEAS`. Y buscarla por nombre la
+         deja a salvo de la próxima talla que se agregue, que la correría de lugar.
+       - Una celda con texto no interpretable (`tal vez`) es un **error explícito de la fila**, no un
+         `false` silencioso — mismo criterio que la validación de fechas del import de Consumo
+         Estándar, y especialmente importante acá porque es el dato que después ya no se puede
+         corregir.
+    - **Verificado de punta a punta**: la plantilla real trae 36 columnas con "En blanco (SI/NO)" en
+      la última; un archivo con `SI`/`NO`/vacía/`tal vez` dio `true`/`false`/`false`/error; un
+      archivo **sin** la columna (simulando la plantilla vieja) cargó en `false` sin error y **con
+      las tallas leídas correctamente** (`M: 5`), que era lo que había que probar; el `aplicar`
+      escribió los flags como correspondía. La guarda: línea sin enviar → 200, línea enviada → 409.
+      En navegador, las 4 líneas de `26OP012625` salen con el checkbox deshabilitado y "ya enviada",
+      y una línea nueva sale editable. Datos y usuario de prueba borrados — la base volvió a 68 OP,
+      253 líneas y 7,969 piezas.
+
+  - **El rollo ahora descuenta los TRES conceptos, no solo la impresión (2026-09-30)**. Cierra la
+    pregunta que había quedado abierta desde F4: el usuario confirmó que **enguiamiento, papel en
+    blanco, consumo de impresión y reposiciones salen todos del rollo montado en ese momento**.
+    - **Antes se restaba solo `consumoYd`.** El enguiamiento y el papel en blanco se registraban en
+      `consumo_papel` pero nunca se descontaban, así que ese papel —que sí se gasta físicamente—
+      terminaba cayendo en la **merma** del desmontaje como si fuera pérdida inexplicada. Con el
+      cambio, la merma vuelve a medir solo lo que de verdad no se puede explicar.
+    - **Las reposiciones ya se descontaban**, contra lo que parecía: escriben su papel en
+      `consumoYd` y la agregación **nunca filtró por `origen`**. Sus filas traen enguiamiento y en
+      blanco en 0 (default de la columna), así que sumar los tres campos no las altera — verificado
+      contra el montaje 15, que es solo reposiciones y quedó idéntico en 9.0000 yd.
+    - **Un solo lugar que tocar**: todo pasa por `consumoPorMontajeIds()` — el panel, el historial y
+      el cálculo de merma del desmontaje lo usan, y `historialConsumoRollo()` también. Pasó de
+      `_sum: { consumoYd: true }` a sumar los tres campos.
+    - ⚠️ **La merma NO se guarda: se calcula en vivo** (`montaje_rollo` no tiene columna de merma,
+      verificado contra el schema). O sea que este cambio reescribe también la merma que se muestra
+      de montajes **ya cerrados**. Con los 4 montajes de prueba de hoy no importa, pero conviene
+      saberlo antes de comparar contra un número anotado de antes.
+    - La etiqueta del modal de desmontaje aclara ahora qué incluye el número
+      ("impresión + enguiamiento + en blanco + reposiciones"), porque de ahí sale la merma y quien
+      desmonta lo está comparando contra una lectura física.
+    - **Medido antes y después sobre los datos reales**: montaje 11 pasó de 59.5689 a **64.2096 yd**
+      (+4.6407 de enguiamiento), 20 de 0.8264 a 0.9108, 22 de 8.9097 a 9.6693, y 15 sin cambio. La
+      API devuelve exactamente esos valores. El papel en blanco suma 0 en todos porque ninguna línea
+      tenía el flag al capturar — mismo hallazgo de más arriba.
+    - **Pedido en el mismo mensaje y ya construido**: el reporte consolidado, ver el punto
+      siguiente.
+
+  - **Alta de `BSNS-AC-8800A` / `BSNS-AC-8800Y` y sus 5 consumos estándar (2026-09-30)**. El usuario
+    mandó una tabla de 5 consumos (arm sleeve volleyball adulto y youth, tallas combinadas) y pidió
+    verificar si estaban cargados. **No lo estaban, y la causa era que los dos productos no
+    existían** — el import deja pendiente cualquier fila cuyo producto no esté en el catálogo.
+    - **Descartado antes de crear nada**: no eran un código escrito distinto (buscando `8800`,
+      `AC-88` y `ARM SLEEVE` solo aparecen `CP3000`, `CSJ-ARMSLV` y `TI-AS1000`, que son otros
+      productos), y **no figuran en ninguna de las fuentes del usuario** — se barrieron los 20+
+      `.xlsx` de la carpeta de análisis buscando `BSNS-AC` y `ARM SLEEVE VOLLEYBALL`: cero
+      coincidencias. O sea que descripción y cliente salieron solo de la captura.
+    - ⚠️ **El bloqueo aparente era falso.** La regla "un producto exige un desarrollo APROBADO"
+      parecía obligar a inventar una receta, porque `aprobar()` exige al menos una línea de insumo.
+      Pero **solo 4 de los 1,285 desarrollos tienen receta**: los otros 1,281 —incluidos los tres
+      arm sleeves que ya existían— quedaron `APROBADO` con **cero líneas** en el backfill de la
+      migración de desarrollos. Un producto sin receta y con costo Q0.00 es el estado normal de
+      este catálogo, no una anomalía, así que crear estos dos igual **no inventa ningún costo**.
+    - Los desarrollos se crearon por la API y se aprobaron **por SQL**, que es la única parte que la
+      API no puede expresar sin una receta que no existe. El CHECK `ck_desarrollo_aprobado_en`
+      obliga a registrar `aprobado_en`, así que la aprobación quedó fechada y con autor. Los
+      productos y los 5 consumos sí se crearon por los endpoints reales (201 en los 7 casos).
+    - **Los códigos de desarrollo (`BSNS-AC-8800A-DES`, `BSNS-AC-8800Y-DES`) son un marcador
+      trazable, no el número real**, que nadie conoce todavía. Es seguro: la FK
+      `productos.desarrollo -> desarrollos.codigo` es **ON UPDATE CASCADE**, así que cuando aparezca
+      el número verdadero basta un `UPDATE` sobre `recetas.desarrollos.codigo` y el producto se
+      actualiza solo. Talla base elegida por criterio (`S-M` para adulto, `YS-YM` para youth), no
+      por dato.
+    - **Verificado**: las 5 filas cuadran con la tabla del usuario (17.5 → 0.4861, 18.5 → 0.5139,
+      19 → 0.5278, 12.75 → 0.3542, 13.25 → 0.3681 — la columna `yardas` la calcula la base), cliente
+      BSN SPORTS, vigentes desde hoy. El invariante `count(productos) = count(v_producto_costo)`
+      sigue en pie (1,287 = 1,287). Autoría reasignada a `admin` y usuario desechable borrado.
+    - **Pendiente del usuario**: receta y precio de venta de los dos (hoy Q0.00, como los otros
+      1,281), y el número real de desarrollo si existe.
+
+  - **Reporte consolidado de consumo por OP, exportable a Excel y PDF (2026-09-30)**. Pedido junto
+    con el descuento de los tres conceptos: *"Luego habrá que consolidar cuál fue el consumo de todo
+    lo relacionado con una OP"*. Módulo nuevo `apps/api/src/modules/costeo-reportes/` +
+    `apps/web/src/features/costeo-reportes/`, ruta `/costeo/reportes`, ítem de sidebar gateado con
+    `costeo.dashboard.ver` (existía desde F1 sin gatear nada y su audiencia —Admin, Analista,
+    Gerencia, Supervisor— es exactamente la del reporte; **no hizo falta permiso nuevo**).
+    - **Alcance elegido por el usuario**, no inferido: varias OP con filtros (no una sola OP),
+      resumen arriba y detalle abajo, y **yardas ahora, dinero cuando exista F5**.
+    - Hasta ahora nadie sumaba por orden: Gestión de Rollos mira el rollo y Impresión de OPs mira la
+      línea. Filtros de rango de fechas, cliente e impresora, aplicados **al presionar "Ver"** y no
+      en cada tecla — con campos de fecha, recargar por tecla dispara consultas contra rangos a
+      medio escribir.
+    - **La tela va en columna propia y NO suma al total de papel**: es otro material y no sale del
+      rollo. Sumarla daría un número sin significado físico.
+    - **Las reposiciones se consultan aparte del consumo, no en la misma query**: una reposición de
+      solo tela **no crea ninguna fila de `consumo_papel`**, así que leyendo solo esa tabla
+      desaparecería del reporte.
+    - **Las opciones de los selectores las devuelve el propio reporte**, no los catálogos de otros
+      módulos. Verificado que hacía falta: de los 5 roles con `costeo.dashboard.ver`,
+      ANALISTA_COSTOS no tiene `costeo.rollo.ver` y GERENCIA_COSTEO no tiene `costeo.orden.importar`,
+      así que armar los selectores con `/costeo/rollos/impresoras` y `/costeo/ordenes/clientes` les
+      habría dado **403 y un filtro vacío a dos de los cinco**. Salen del rango de fechas y **antes**
+      de aplicar cliente/impresora, para que elegir uno no borre los demás de la lista (verificado en
+      navegador: con UNDER ARMOUR puesto, el selector sigue ofreciendo BSN SPORTS).
+    - Los filtros se interpretan en un helper del **controlador**, compartido por las dos rutas
+      (datos y Excel): si una leyera las fechas distinto que la otra, el Excel no coincidiría con lo
+      que se ve en pantalla. El PDF sale del diálogo del navegador vía **iframe oculto**
+      (convención #9), sin librería de PDF en el servidor.
+    - ⚠️ **Bug propio grave encontrado en la verificación en navegador, no con curl**: el estado
+      vacío mostraba *"entre 31/12/2025 y 30/1/2026"* para un rango pedido del 1 al 31 de enero. El
+      corrimiento de display delató un problema **de datos**: `new Date('2026-09-30')` es medianoche
+      **UTC**, o sea las 18:00 del 29 en Guatemala, y el rango era `{gte: desde, lte: hasta}`. O sea
+      que el rango arrancaba 6 horas antes de tiempo y —mucho peor— **se comía casi todo el último
+      día**, así que un cierre de mes dejaba fuera lo impreso la tarde del último día sin ningún
+      síntoma.
+      - **Medido sobre las filas reales, no razonado**: pedir el día 29/09 solo devolvía **0 de 9**
+        filas (las 9 están a las 23:58 UTC = 17:58 de Guatemala), y pedir del 01 al 29/09 devolvía
+        **7 de 16**. Es el modo de falla peor posible para un reporte: número plausible, más chico
+        de lo que corresponde, sin error.
+      - Corregido anclando los días a **UTC-6** (Guatemala es fijo y **sin horario de verano**, así
+        que el desfase es constante y un día calendario se puede anclar exacto) y haciendo el límite
+        superior el inicio del día **siguiente**, con comparación **exclusiva** (`lt`, no `lte`) —
+        así abarca el día pedido entero sin depender de la precisión del timestamp. Queda anotado en
+        el código que si alguna vez volviera el DST hay que rehacerlo con una librería de zonas.
+      - Los filtros se devuelven ahora como **texto `yyyy-mm-dd`** y no como `Date`. Un `Date`
+        obliga al frontend a re-derivar el día calendario, que es justo de donde salía el
+        corrimiento; el nombre del archivo Excel usa los mismos textos, porque `hastaExclusivo`
+        pondría una fecha que el usuario nunca eligió. En pantalla y en el PDF conviven **dos
+        formateadores a propósito**: `fecha()` para instantes reales (cuándo se imprimió, en hora de
+        Guatemala) y `dia()` para los días calendario elegidos en los filtros, que se reordenan tal
+        cual sin pasar por `Date`.
+    - **El código del ítem de sidebar es `RS` y no el `RC` obvio**: con el panel colapsado esas dos
+      letras son lo único que se ve, y `RC` ya es Recetas (`app/modulos.ts`) — dos ítems del mismo
+      sidebar habrían quedado indistinguibles. `RP`, el otro candidato, es el tile "Reportes" del
+      roadmap. Verificado con el panel colapsado: `IN RC CR OP RE IO CE RS`, sin duplicados.
+    - **Verificado con curl y con clic real** (usuario desechable con ADMIN, borrado al terminar):
+      el resumen de 3 OP cierra contra el total —67.3550 impresión + 5.4847 enguiamiento + 0 en
+      blanco + 10.9500 reposiciones = **83.7897 yd**, más 7.4500 de tela aparte—, y ese total es
+      **exactamente la suma de lo descontado de todos los rollos** (64.2096 + 9.0000 + 0.9108 +
+      9.6693), que es el invariante que une este reporte con Gestión de Rollos. Filtro por cliente:
+      BSN SPORTS da 73.2096 = 83.7897 − 10.5801 de UNDER ARMOUR. Excel con 3 hojas y fila TOTAL en
+      negrita, cuyo contenido se leyó de vuelta y coincide celda por celda con la pantalla; PDF con
+      sus 3 tablas y el subtítulo con los días correctos. Rango invertido y fechas mal formadas dan
+      400 y la pantalla los muestra sin romperse; sin datos, los botones de exportar quedan
+      deshabilitados. Cero desborde horizontal y consola limpia a 1600, 1280, 820 y 390 px.
+    - **Los dos 401 que aparecen en consola al arrancar son `POST /auth/refresh` previos al login**
+      —el refresh silencioso al montar la app, sin cookie todavía—, no de este módulo: después de
+      entrar, el reporte no genera ninguno.
+
+  - **Logo por empresa, y el espejo a Sheets cortado para Digitalpro (2026-09-30)**. Dos pedidos del
+    usuario en el mismo mensaje, unidos por el mismo principio: con dos empresas conviviendo, lo de
+    una no puede aparecer —ni escribirse— como si fuera de la otra. Migración
+    `20260930120000_empresa_logo_y_espejo_sheets` (+ `rollback.sql`), dos columnas en
+    `core.empresas`.
+    - **`logo` se guarda como data URI, no como ruta.** No es capricho: los documentos se imprimen
+      en un iframe oculto con su propio HTML, donde una ruta relativa depende del base de Vite y del
+      prefijo de Nginx. Un data URI no depende de nada.
+      - ⚠️ **Bug preexistente que esto destapó**: los tres documentos traían
+        `<img src="/logo.png">`, que da **404** —el frontend se sirve bajo `/erp`—, y el
+        `onerror="this.style.display='none'"` que lo acompañaba lo ocultaba en silencio. Medido:
+        `/logo.png` → 404, `/erp/logo.png` → 200. O sea que **el logo no se vio nunca** en ninguna
+        cotización, resumen ni requisición, aunque una nota anterior lo daba por corregido al copiar
+        el archivo a `public/`. `apps/web/public/logo.png` quedó sin uso.
+      - Viaja en la sesión (`EmpresaDisponible.logo`), ~19 KB por empresa. Se eligió eso sobre un
+        endpoint aparte porque un `<img>` dentro del iframe de impresión no puede mandar el token.
+      - `app/marca-empresa.ts` centraliza el hook y el bloque HTML del encabezado, así que los
+        cuatro consumidores no repiten el `<img>`. La caja tiene tope de **alto y de ancho** con
+        `object-fit: contain`: los dos logos tienen proporciones muy distintas (digiTEXSA ~5.8:1,
+        digitalPRO ~2:1) y fijar solo una dimensión desborda uno o agranda el otro.
+      - **Sin logo cargado cae al nombre en texto**, nunca al logo de la otra empresa — verificado
+        en navegador con Digitalpro, que todavía no tiene archivo.
+      - `apps/api/scripts/cargar-logo-empresa.mjs <CODIGO> <archivo>` carga uno nuevo. Cargar el de
+        Digitalpro es `... CASTA logo.png`, **sin desplegar** — mismo criterio que `color_marca`.
+        Tiene tope de 200 KB porque el archivo viaja en cada login y cada refresh.
+      - **Los documentos impresos llevan la RAZÓN SOCIAL, no el nombre comercial.** La Requisición
+        de Bodega decía `DIGITAL TEXTIL, S. A.` fijo en el código; hacerlo dinámico con
+        `nombreComercial` lo habría degradado a `DIGITEXSA` mientras se lo arreglaba para
+        Digitalpro. Por eso `EmpresaDisponible` ganó `razonSocial`.
+    - **`espeja_sheets`, con DEFAULT `false`.** El usuario pidió que lo enviado desde Impresión de
+      OPs en Digitalpro se guarde solo en PostgreSQL. Hasta ahora el espejo corría para cualquier
+      empresa, así que el consumo de Digitalpro habría caído en los libros de Digitexsa y los
+      Dashboards lo habrían contado como propio.
+      - El default es `false` **a propósito**: el modo de falla de equivocarse acá no es perder una
+        fila, es contaminar libros de producción con datos de otra empresa, y limpiarlos es a mano.
+      - **Se aplicó también a Reposiciones**, que el usuario no nombró: escribe a los MISMOS libros,
+        así que dejarlo abierto habría filtrado por la otra puerta lo que se cerraba por la primera.
+    - ⚠️ **Cómo se verificó el corte sin tocar los libros reales**: el `.env` local apunta a los
+      libros de producción, así que una captura de prueba con Digitexsa habría escrito ahí de
+      verdad. Se levantó una **instancia aislada de la API en el puerto 4055** con
+      `GOOGLE_SHEETS_ID_*` apuntando a un id inexistente, y se capturó en las dos empresas sobre
+      datos desechables. Resultado medido en el log: **Digitalpro cero intentos de escritura**;
+      **Digitexsa exactamente uno**, fallando contra el id falso
+      (`Requested entity was not found`) — o sea que el espejo sigue vivo donde corresponde. Las dos
+      capturas devolvieron `enviadas: 1`, confirmando de paso que el espejo nunca bloquea el
+      guardado. Datos de prueba y usuarios desechables borrados; la base volvió a 68 OP / 253 líneas
+      / 7,969 piezas.
+    - **Verificado en navegador**: logo en el sidebar (150x26 px), en el PDF del reporte (190x33) y
+      en la Requisición de Bodega (174x30), con `DIGITAL TEXTIL, S.A.` como encabezado; al cambiar a
+      Digitalpro el sidebar cae al texto sin heredar el logo ajeno. Consola limpia.
+      - *Nota de método*: `page.goto()` a una ruta interna **vuelve a pedir la selección de empresa**
+        cuando el usuario tiene más de una — el access token vive solo en memoria y la recarga lo
+        pierde. No es un bug: hay que navegar con clics. Y el iframe de impresión **se autodestruye
+        al segundo**, así que hay que inspeccionarlo antes de ese plazo.
+    - **Los dos logos ya están cargados** (`DIGITEXSA` 18 KB, `CASTA` 59 KB). El de digitalPRO lo
+      cargó el usuario desde `C:\Users\PETER\Pictures\Logos\LOGO DIGITAL PRO.png`.
+      - ⚠️ **Bug del script, encontrado por el usuario al correrlo**: fallaba con
+        `SASL: client password must be a string`. La causa era que el script **no cargaba el
+        `.env`** — yo lo había probado con `node --env-file=.env` desde `apps/api`, y él lo corrió
+        desde la raíz, donde `DATABASE_URL` no está en el entorno; sin ella `PrismaPg` conecta sin
+        contraseña y el error no menciona el `.env` por ningún lado. Corregido con
+        `process.loadEnvFile()` resolviendo `apps/api/.env` **relativo al propio script**, así que
+        ahora corre desde cualquier directorio.
+    - **Tamaño de la caja del logo, medido con los dos reales** (digiTEXSA 983x169 ≈ 5.8:1;
+      digitalPRO 1260x587 ≈ 2.15:1). La primera caja (38px de alto) dejaba a digitalPRO en
+      **82x38 px con su bajada "your source for sublimation" ilegible**, al lado de un digiTEXSA de
+      190x33. El tope de alto se subió para que el logo cuadrado alcance un tamaño comparable —
+      para el apaisado sigue mandando el ancho, así que no cambia. Valores finales, verificados en
+      navegador: sidebar `max-h 38 / max-w 150` (150x26 y 82x38), reporte `48 / 200` (200x34 y
+      103x48), requisición `44 / 170` (170x29 y 94x44).
+      - *Lección*: con logos de proporciones muy distintas, una caja que solo limita una dimensión
+        hace que uno se vea bien y el otro diminuto. Hay que mirarlos juntos antes de fijar valores.
+    - **El 404 de `GET /costeo/reposiciones/siguiente-numero` que aparece en consola al cambiar de
+      empresa no es un bug**: es la respuesta correcta de "esa OP no es de esta empresa" (con el
+      mensaje que nombra la otra). Verificado con curl: 200 en Digitexsa, 404 en Digitalpro.
 
   - **F4 — Fase D (espejo a Google Sheets) completada, 2026-09-21.** Cierra F4. Cada envío de
     consumo escribe además en la hoja **"Datos"** del libro `ConsumosFinal DIGITEXSAMig`, que es lo

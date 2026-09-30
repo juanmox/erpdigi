@@ -367,7 +367,13 @@ export class CosteoConsumoPapelService {
     // bloquea ni revierte el guardado real (misma regla que Reposiciones,
     // confirmada con el usuario). GoogleSheetsService no lanza; si falla,
     // queda en el log del servidor.
-    void this.espejarEnGoogleSheets(filasSheets);
+    //
+    // Y solo si ESTA empresa espeja: los libros son de Digitexsa, así que el
+    // consumo de Digitalpro se guarda únicamente en PostgreSQL (decisión del
+    // usuario, 2026-09-30). Se consulta acá y no dentro del método para que la
+    // condición quede a la vista junto a la llamada.
+    if (filasSheets.length && (await this.empresaEspejaSheets(idEmpresa)))
+      void this.espejarEnGoogleSheets(filasSheets);
 
     return resultado;
   }
@@ -386,6 +392,20 @@ export class CosteoConsumoPapelService {
    * hace append y nunca borra ni marca filas. Una anulación en el ERP deja su
    * fila ya escrita tal cual, para limpiarla a mano si hiciera falta.
    */
+  /**
+   * Si la empresa replica en los Google Sheets legacy. El default de la columna
+   * es `false`, así que una empresa nueva no escribe en libros ajenos hasta que
+   * alguien lo habilite — el error caro es contaminar los Dashboards, no
+   * quedarse sin una fila.
+   */
+  private async empresaEspejaSheets(idEmpresa: number) {
+    const empresa = await this.prisma.empresa.findUnique({
+      where: { idEmpresa },
+      select: { espejaSheets: true },
+    });
+    return empresa?.espejaSheets ?? false;
+  }
+
   private async espejarEnGoogleSheets(filas: (string | number)[][]) {
     await this.googleSheets.agregarFilas(
       process.env.GOOGLE_SHEETS_ID_CONSUMOS,

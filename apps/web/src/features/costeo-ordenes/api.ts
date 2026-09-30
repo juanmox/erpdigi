@@ -1,9 +1,11 @@
 import { apiFetch, descargarArchivo } from '@/lib/api'
 import type {
   ClienteRef,
+  EstadoListadoOrdenes,
   FilaPreviewLinea,
   LineaProduccionDetalle,
   LineaProductoDetalle,
+  ListadoOrdenes,
   OrdenProduccionDetalle,
 } from './types'
 
@@ -13,6 +15,8 @@ async function subirArchivo<T>(path: string, archivo: File): Promise<T> {
 
 export const costeoOrdenesApi = {
   buscarPorCodigo: (codigo: string) => apiFetch<OrdenProduccionDetalle>(`/costeo/ordenes/${codigo}`),
+  listado: (estado: EstadoListadoOrdenes) =>
+    apiFetch<ListadoOrdenes>(`/costeo/ordenes/listado?estado=${estado}`),
   previewImportar: (archivo: File) =>
     subirArchivo<{ filas: FilaPreviewLinea[] }>('/costeo/ordenes/importar/preview', archivo),
   aplicarImportar: (filas: FilaPreviewLinea[]) =>

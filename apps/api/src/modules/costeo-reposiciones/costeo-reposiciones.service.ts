@@ -261,7 +261,17 @@ export class CosteoReposicionesService {
     // Espejo hacia los dos Google Sheets legacy que todavía alimentan Data
     // Studio — en segundo plano, nunca bloquea ni puede fallar el guardado
     // (que ya quedó confirmado en Postgres arriba).
-    void this.espejarEnGoogleSheets(detalle, nrolloTexto);
+    //
+    // Solo para las empresas que espejan. El usuario lo pidió para Impresión de
+    // OPs, pero Reposiciones escribe a los MISMOS libros de Digitexsa, así que
+    // dejarlo abierto acá habría filtrado por la otra puerta lo que se estaba
+    // cerrando por la primera.
+    const empresa = await this.prisma.empresa.findUnique({
+      where: { idEmpresa },
+      select: { espejaSheets: true },
+    });
+    if (empresa?.espejaSheets)
+      void this.espejarEnGoogleSheets(detalle, nrolloTexto);
 
     return detalle;
   }

@@ -17,6 +17,7 @@ import { normalizarCodigoCosteo } from '@/lib/codigos-costeo'
 import { costeoReposicionesApi } from './api'
 import { ModalAnular } from './components/modal-anular'
 import { PanelImpresoras } from './components/panel-impresoras'
+import { useMarcaEmpresa } from '@/app/marca-empresa'
 import { imprimirReposicion } from './imprimir'
 import type { Reposicion } from './types'
 
@@ -44,6 +45,7 @@ function campoVacio() {
 }
 
 export function ReposicionesPage() {
+  const marca = useMarcaEmpresa()
   const queryClient = useQueryClient()
   const { usuario, tienePermiso } = useAuth()
   const puedeAnular = tienePermiso('costeo.reposicion.anular')
@@ -230,7 +232,7 @@ export function ReposicionesPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => imprimirReposicion(ultimaRegistrada, usuario?.nombreCompleto ?? '')}
+                      onClick={() => imprimirReposicion(ultimaRegistrada, usuario?.nombreCompleto ?? '', marca)}
                     >
                       Imprimir
                     </Button>
@@ -425,7 +427,7 @@ export function ReposicionesPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => imprimirReposicion(r, usuario?.nombreCompleto ?? '')}
+                          onClick={() => imprimirReposicion(r, usuario?.nombreCompleto ?? '', marca)}
                         >
                           Imprimir
                         </Button>

@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatMonto, formatearHoras, type CodigoMoneda } from '@digitexsa-erp/shared-utils'
 import type { ResumenMaterial } from '../types'
+import { useMarcaEmpresa } from '@/app/marca-empresa'
 import { imprimirResumen } from '../imprimir'
 
 export interface ResumenAMostrar {
@@ -20,6 +21,7 @@ interface ModalResumenProps {
 }
 
 export function ModalResumen({ resumen, onClose }: ModalResumenProps) {
+  const marca = useMarcaEmpresa()
   if (!resumen) return null
   const { data, moneda, tasa, titulo, productos } = resumen
 
@@ -116,7 +118,7 @@ export function ModalResumen({ resumen, onClose }: ModalResumenProps) {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => imprimirResumen(data, moneda, tasa, titulo, productos)}>
+          <Button variant="outline" onClick={() => imprimirResumen(data, moneda, tasa, titulo, productos, marca)}>
             Imprimir
           </Button>
         </DialogFooter>

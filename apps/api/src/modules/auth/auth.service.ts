@@ -16,10 +16,20 @@ export interface EmpresaDisponible {
   idEmpresa: number;
   codigo: string;
   nombreComercial: string | null;
+  /** Nombre legal, para encabezar documentos formales (requisiciones, reportes). */
+  razonSocial: string;
   /** TODOS los roles activos del usuario en esa empresa, no uno solo. */
   roles: string[];
   /** #RRGGBB de `core.empresas.color_marca`, para distinguirlas en pantalla. */
   colorMarca: string | null;
+  /**
+   * Logo como data URI. Viaja en la sesión —y no por un endpoint aparte—
+   * porque los documentos impresos se arman en un iframe con su propio HTML:
+   * ahí un `<img src="/ruta">` no lleva el token y depende del prefijo del
+   * servidor, mientras que un data URI ya viene resuelto. Son ~19 KB por
+   * empresa; si alguna vez pesa, el camino es servirlo aparte y cachearlo.
+   */
+  logo: string | null;
 }
 
 export interface SesionEmitida {
@@ -78,8 +88,10 @@ export class AuthService {
         idEmpresa: a.empresa.idEmpresa,
         codigo: a.empresa.codigo,
         nombreComercial: a.empresa.nombreComercial,
+        razonSocial: a.empresa.razonSocial,
         roles: [a.rol.codigo],
         colorMarca: a.empresa.colorMarca,
+        logo: a.empresa.logo,
       });
     }
     return [...porEmpresa.values()];

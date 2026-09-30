@@ -7,10 +7,14 @@ export interface EmpresaDisponible {
   idEmpresa: number
   codigo: string
   nombreComercial: string | null
+  /** Nombre legal, para documentos impresos. */
+  razonSocial: string
   /** TODOS los roles del usuario en esa empresa: nunca se elige uno solo. */
   roles: string[]
   /** #RRGGBB de marca. Null si la empresa todavía no tiene color asignado. */
   colorMarca: string | null
+  /** Logo como data URI; `null` si esa empresa todavía no tiene uno cargado. */
+  logo: string | null
 }
 
 export interface Usuario {

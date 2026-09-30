@@ -159,6 +159,11 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
             <div>
               <div className="text-ink-faint">Consumo de este montaje</div>
               <div className="font-medium">{consumoEsteMontaje.toFixed(2)} yd</div>
+              {/* Se aclara qué incluye porque de este número sale la merma, y
+                  quien desmonta lo está comparando contra una lectura física. */}
+              <div className="text-ink-faint text-[11px] leading-tight">
+                impresión + enguiamiento + en blanco + reposiciones
+              </div>
             </div>
             <div>
               <div className="text-ink-faint">Merma calculada</div>

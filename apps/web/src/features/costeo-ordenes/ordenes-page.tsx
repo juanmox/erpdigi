@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ImportPreviewDialog } from '@/components/shared/import-preview-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -11,6 +12,7 @@ import { ApiError } from '@/lib/api'
 import { normalizarCodigoCosteo } from '@/lib/codigos-costeo'
 import { costeoOrdenesApi } from './api'
 import { ModalLineasProducto } from './components/modal-lineas-producto'
+import { TablaOrdenes } from './components/tabla-ordenes'
 import type { FilaPreviewLinea, OrdenProduccionDetalle } from './types'
 
 export function OrdenesPage() {
@@ -20,14 +22,17 @@ export function OrdenesPage() {
   const [orden, setOrden] = useState<OrdenProduccionDetalle | null>(null)
   const [buscando, setBuscando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
-  async function buscar() {
-    if (!codigoBuscar.trim()) return
+  async function buscar(codigo?: string) {
+    const texto = (codigo ?? codigoBuscar).trim()
+    if (!texto) return
+    if (codigo) setCodigoBuscar(codigo)
     setBuscando(true)
     setError(null)
     setOrden(null)
     try {
-      const resultado = await costeoOrdenesApi.buscarPorCodigo(normalizarCodigoCosteo(codigoBuscar, 'OP'))
+      const resultado = await costeoOrdenesApi.buscarPorCodigo(normalizarCodigoCosteo(texto, 'OP'))
       setOrden(resultado)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Error al buscar la orden')
@@ -65,10 +70,13 @@ export function OrdenesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4">
-      <div className="flex items-center justify-between">
+    <div className="mx-auto max-w-7xl space-y-4 p-4">
+      {/* flex-wrap: sin esto los dos botones no bajan de renglón y empujan el
+          ancho de toda la página en teléfono (mismo defecto ya corregido en
+          Gestión de datos). */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold text-ink">Órdenes de Producción</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => setLineasAbierto(true)}>
             Líneas de producto
           </Button>
@@ -89,7 +97,9 @@ export function OrdenesPage() {
               onKeyDown={(e) => e.key === 'Enter' && buscar()}
               className="max-w-xs font-mono"
             />
-            <Button variant="outline" disabled={buscando} onClick={buscar}>
+            {/* Envuelto: `buscar` ahora recibe un codigo opcional, y pasarlo
+                directo le entregaría el MouseEvent como si fuera ese código. */}
+            <Button variant="outline" disabled={buscando} onClick={() => void buscar()}>
               {buscando ? 'Buscando…' : 'Buscar'}
             </Button>
           </div>
@@ -143,10 +153,23 @@ export function OrdenesPage() {
                         {l.tallas.map((t) => `${t.talla.nombre}:${t.cantidad}`).join('  ·  ')}
                       </TableCell>
                       <TableCell>
-                        <Checkbox
-                          checked={l.consumoEnBlanco}
-                          onCheckedChange={(checked) => toggleEnBlanco(l.idLineaProduccion, checked === true)}
-                        />
+                        {/* Una vez enviada, el valor quedo congelado en
+                            `consumo_papel` al capturar: dejarlo editable hacía
+                            mostrar un cambio que no afectaba nada. */}
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            checked={l.consumoEnBlanco}
+                            disabled={l.enviada}
+                            onCheckedChange={(checked) =>
+                              toggleEnBlanco(l.idLineaProduccion, checked === true)
+                            }
+                          />
+                          {l.enviada && (
+                            <span className="text-ink-faint text-[11px]">
+                              ya enviada
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -156,6 +179,8 @@ export function OrdenesPage() {
           )}
         </CardContent>
       </Card>
+
+      <TablaOrdenes onAbrirOrden={(codigo) => void buscar(codigo)} />
 
       <ImportPreviewDialog<FilaPreviewLinea>
         open={importAbierto}
@@ -176,6 +201,9 @@ export function OrdenesPage() {
         onArchivoElegido={async (archivo) => (await costeoOrdenesApi.previewImportar(archivo)).filas}
         onAplicar={async (filas) => {
           const r = await costeoOrdenesApi.aplicarImportar(filas)
+          // Sin esto la tabla de pendientes seguiría mostrando lo de antes del
+          // import, que es justo lo que se acaba de cargar para verlo.
+          await queryClient.invalidateQueries({ queryKey: ['costeo-ordenes', 'listado'] })
           return `${r.ordenesCreadas} OP nuevas, ${r.lineasCreadas} líneas creadas.`
         }}
       />

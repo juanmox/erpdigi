@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatMonto } from '@digitexsa-erp/shared-utils'
 import { recetasApi } from '../api'
+import { useMarcaEmpresa } from '@/app/marca-empresa'
 import { imprimirCotizacion } from '../imprimir'
 import type { ResumenAMostrar } from './modal-resumen'
 
@@ -16,6 +17,7 @@ interface ModalHistorialProps {
 }
 
 export function ModalHistorial({ open, onClose, onMostrarResumen }: ModalHistorialProps) {
+  const marca = useMarcaEmpresa()
   const [idSeleccionado, setIdSeleccionado] = useState<number | null>(null)
 
   const { data: historial } = useQuery({
@@ -47,7 +49,7 @@ export function ModalHistorial({ open, onClose, onMostrarResumen }: ModalHistori
 
   async function imprimir(id: number) {
     const d = await recetasApi.obtenerCotizacion(id)
-    imprimirCotizacion(d)
+    imprimirCotizacion(d, marca)
   }
 
   return (

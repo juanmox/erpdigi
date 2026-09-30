@@ -11,6 +11,7 @@ import { ReposicionesPage } from '@/features/costeo-reposiciones/reposiciones-pa
 import { RollosPage } from '@/features/costeo-rollos/rollos-page'
 import { InicioPage } from '@/features/inicio/inicio-page'
 import { CotizacionPage } from '@/features/recetas/cotizacion-page'
+import { ReportesPage } from '@/features/costeo-reportes/reportes-page'
 import { RolesPage } from '@/features/roles/roles-page'
 import { UsuariosPage } from '@/features/usuarios/usuarios-page'
 
@@ -124,6 +125,14 @@ function App() {
               element={
                 <RutaConPermiso permisos={['costeo.consumo.ver']}>
                   <ConsumoPage />
+                </RutaConPermiso>
+              }
+            />
+            <Route
+              path="costeo/reportes"
+              element={
+                <RutaConPermiso permisos={['costeo.dashboard.ver']}>
+                  <ReportesPage />
                 </RutaConPermiso>
               }
             />

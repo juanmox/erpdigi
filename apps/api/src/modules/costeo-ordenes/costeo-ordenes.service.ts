@@ -27,6 +27,43 @@ const AZUL_DIGITEXSA = 'FF203080';
 // igual en cada columna).
 const FILA_INICIO_DATOS = 5;
 
+/**
+ * Encabezado de la columna "En blanco" de la plantilla de Órdenes.
+ *
+ * ⚠️ Va DESPUÉS de las columnas de talla, y el parser la ubica **por nombre de
+ * encabezado**, no por índice fijo. Las dos cosas son deliberadas:
+ *
+ * - Ponerla antes de las tallas correría `IDX_TALLA_INICIO` y haría que un
+ *   archivo armado con la plantilla vieja cargara cantidades en la talla
+ *   equivocada, en silencio — el modo de falla que ya está advertido en el
+ *   comentario de `TALLAS_IMPORT_LINEAS`.
+ * - Buscarla por nombre la deja a salvo de la próxima talla que se agregue, que
+ *   la correría de lugar si dependiera de un índice.
+ *
+ * Un archivo viejo simplemente no la trae: la columna no se encuentra y todas
+ * las líneas quedan en `false`, que es el default histórico.
+ */
+const ENCABEZADO_EN_BLANCO = 'En blanco (SI/NO)';
+
+const EN_BLANCO_SI = ['si', 'sí', 's', 'x', '1', 'true', 'verdadero'];
+const EN_BLANCO_NO = ['no', 'n', '0', 'false', 'falso'];
+
+/**
+ * Interpreta la celda "En blanco". Devuelve el valor, o `null` si tiene texto
+ * que no se pudo interpretar — un typo tiene que ser un error visible, no un
+ * `false` silencioso (mismo criterio que la validación de fechas del import de
+ * Consumo Estándar).
+ */
+function leerEnBlanco(valor: ExcelJS.CellValue): boolean | null {
+  if (valor === true) return true;
+  if (valor === false) return false;
+  const texto = textoCelda(valor).trim().toLowerCase();
+  if (texto === '') return false;
+  if (EN_BLANCO_SI.includes(texto)) return true;
+  if (EN_BLANCO_NO.includes(texto)) return false;
+  return null;
+}
+
 function estiloEncabezado(cell: ExcelJS.Cell) {
   cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   cell.fill = {
@@ -35,6 +72,9 @@ function estiloEncabezado(cell: ExcelJS.Cell) {
     fgColor: { argb: AZUL_DIGITEXSA },
   };
 }
+
+/** Modos del listado de Órdenes. `todas` incluye impresas y pendientes. */
+export type EstadoListadoOrdenes = 'pendientes' | 'impresas' | 'todas';
 
 @Injectable()
 export class CosteoOrdenesService {
@@ -62,7 +102,17 @@ export class CosteoOrdenesService {
         cliente: true,
         lineaProducto: true,
         lineasProduccion: {
-          include: { producto: true, tallas: { include: { talla: true } } },
+          include: {
+            producto: true,
+            tallas: { include: { talla: true } },
+            // Solo para saber si la línea ya se envió a imprimir; `take: 1`
+            // porque alcanza con que exista uno.
+            consumosPapel: {
+              where: { origen: 'PRODUCCION', anuladoEn: null },
+              select: { idConsumoPapel: true },
+              take: 1,
+            },
+          },
           orderBy: { idLineaProduccion: 'asc' },
         },
       },
@@ -77,7 +127,156 @@ export class CosteoOrdenesService {
           idEmpresaActual: idEmpresa,
         }),
       );
-    return orden;
+    // `enviada` sale del mismo criterio que usa Impresión de OPs. La pantalla lo
+    // necesita para bloquear el checkbox de "En blanco": una vez capturada, el
+    // valor quedó congelado en `consumo_papel` y tocarlo ya no cambia nada.
+    return {
+      ...orden,
+      lineasProduccion: orden.lineasProduccion.map(
+        ({ consumosPapel, ...l }) => ({
+          ...l,
+          enviada: consumosPapel.length > 0,
+        }),
+      ),
+    };
+  }
+
+  /**
+   * Las OP cargadas, en forma tabular, filtradas por estado de impresión.
+   *
+   * La pantalla de Órdenes solo tenía un buscador por código, así que no había
+   * manera de ver qué se cargó salvo recordar los números de memoria (reportado
+   * por el usuario).
+   *
+   * "Pendiente" es el MISMO criterio que usa el panel de Impresión de OPs: una
+   * línea sin ningún consumo de PRODUCCIÓN vigente. No se usa `procesadaEn`,
+   * que se marca en el primer envío aunque queden tallas sueltas — si se usara,
+   * una OP a medio enviar desaparecería de la lista con trabajo todavía por
+   * hacer.
+   *
+   * Qué líneas se devuelven acompaña al modo, para que cada uno responda una
+   * pregunta sola: `pendientes` trae solo lo que falta imprimir, `impresas` y
+   * `todas` traen la orden completa. En los tres casos cada línea viene marcada
+   * con `impresa`, que es lo que deja distinguirlas en el modo mixto.
+   *
+   * Se consulta por ORDEN y no por línea (a diferencia del panel de Impresión,
+   * que agrupa por impresora) para que el `take` nunca parta una OP por la
+   * mitad: se traen N órdenes completas.
+   */
+  async listarOrdenes(
+    idEmpresa: number,
+    estado: EstadoListadoOrdenes = 'pendientes',
+    // 200 y no 50: el filtro de la tabla corre en el navegador sobre lo que se
+    // trajo, así que un tope bajo hace que buscar una OP que quedó afuera diga
+    // "ninguna coincide" aunque exista. Con el volumen real esto las cubre por
+    // completo; si alguna vez se supera, la pantalla avisa cuántas quedaron
+    // fuera y el buscador por código sigue encontrándolas.
+    limite = 200,
+  ) {
+    const lineaPendiente = {
+      consumosPapel: { none: { origen: 'PRODUCCION', anuladoEn: null } },
+    } as const;
+
+    // `some: {}` en los tres modos: una OP sin ninguna línea no tiene nada que
+    // mostrar, y sin esto `impresas` la incluiría (un `every` sobre un conjunto
+    // vacío siempre da verdadero).
+    const whereOrden =
+      estado === 'pendientes'
+        ? { idEmpresa, lineasProduccion: { some: lineaPendiente } }
+        : estado === 'impresas'
+          ? {
+              idEmpresa,
+              lineasProduccion: { some: {} },
+              NOT: { lineasProduccion: { some: lineaPendiente } },
+            }
+          : { idEmpresa, lineasProduccion: { some: {} } };
+
+    const [ordenes, total] = await Promise.all([
+      this.prisma.ordenProduccion.findMany({
+        where: whereOrden,
+        include: {
+          cliente: { select: { nombre: true } },
+          lineaProducto: { select: { nombre: true } },
+          lineasProduccion: {
+            where: estado === 'pendientes' ? lineaPendiente : undefined,
+            include: {
+              producto: { select: { codigo: true, descripcion: true } },
+              impresora: { select: { codigo: true } },
+              tallas: {
+                include: { talla: { select: { nombre: true, orden: true } } },
+              },
+              // Solo para saber si la línea ya se imprimió; `take: 1` porque
+              // alcanza con que exista uno, no hace falta traerlos todos.
+              consumosPapel: {
+                where: { origen: 'PRODUCCION', anuladoEn: null },
+                select: { idConsumoPapel: true },
+                take: 1,
+              },
+            },
+            orderBy: { codigoLine: 'asc' },
+          },
+        },
+        // Más recientes primero: lo recién importado es lo que se busca.
+        orderBy: [{ anio: 'desc' }, { correlativo: 'desc' }],
+        take: limite,
+      }),
+      this.prisma.ordenProduccion.count({ where: whereOrden }),
+    ]);
+
+    // Las columnas de talla se arman con las tallas REALMENTE presentes, no con
+    // las 158 del catálogo. Con los datos de hoy son 10, o sea una matriz
+    // parecida a la hoja de cálculo con la que ya trabajan.
+    const tallasVistas = new Map<string, number>();
+    for (const o of ordenes)
+      for (const l of o.lineasProduccion)
+        for (const t of l.tallas)
+          if (!tallasVistas.has(t.talla.nombre))
+            tallasVistas.set(t.talla.nombre, t.talla.orden ?? 0);
+
+    const tallas = [...tallasVistas.entries()]
+      .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+      .map(([nombre]) => nombre);
+
+    return {
+      estado,
+      tallas,
+      // Se informa el total real para que la pantalla pueda decir que hay más
+      // de lo que muestra, en vez de dar a entender que eso es todo.
+      totalOrdenes: total,
+      ordenes: ordenes.map((o) => {
+        const lineas = o.lineasProduccion.map((l) => {
+          const cantidades: Record<string, number> = {};
+          let totalPiezas = 0;
+          for (const t of l.tallas) {
+            cantidades[t.talla.nombre] = t.cantidad;
+            totalPiezas += t.cantidad;
+          }
+          return {
+            idLineaProduccion: l.idLineaProduccion,
+            codigoLine: l.codigoLine,
+            producto: l.producto.codigo,
+            productoDescripcion: l.producto.descripcion,
+            impresora: l.impresora?.codigo ?? null,
+            fechaCliente: l.fechaCliente,
+            fechaEntregar: l.fechaEntregar,
+            impresa: l.consumosPapel.length > 0,
+            cantidades,
+            total: totalPiezas,
+          };
+        });
+        return {
+          idOrdenProduccion: o.idOrdenProduccion,
+          codigo: o.codigo,
+          cliente: o.cliente?.nombre ?? null,
+          lineaProducto: o.lineaProducto?.nombre ?? null,
+          ordenCompra: o.ordenCompra,
+          fechaCompromiso: o.fechaCompromiso,
+          lineas,
+          totalPiezas: lineas.reduce((acc, l) => acc + l.total, 0),
+          lineasImpresas: lineas.filter((l) => l.impresa).length,
+        };
+      }),
+    };
   }
 
   listarClientes() {
@@ -149,6 +348,27 @@ export class CosteoOrdenesService {
     if (!linea)
       throw new NotFoundException('Línea de producción no encontrada');
 
+    // El "en blanco" se CONGELA al capturar: `capturarUna()` calcula
+    // `cantidad * factorEnBlanco` con el flag que la línea tenía en ese
+    // instante y lo guarda en `consumo_papel.en_blanco_yd`. Cambiarlo después
+    // no toca esa fila, así que dejarlo editable era una trampa: el reenvío es
+    // idempotente (saltea las tallas ya enviadas), con lo cual alguien podía
+    // prender el checkbox, reenviar, y creer razonablemente que lo había
+    // corregido cuando no cambió nada. Encontrado en datos reales: la OP
+    // 26OP012625 tiene líneas con el flag en true y `en_blanco_yd` en 0.
+    const yaEnviada = await this.prisma.consumoPapel.findFirst({
+      where: {
+        idLineaProduccion,
+        origen: 'PRODUCCION',
+        anuladoEn: null,
+      },
+      select: { idConsumoPapel: true },
+    });
+    if (yaEnviada)
+      throw new ConflictException(
+        'Esta línea ya se envió a imprimir, así que el consumo en blanco quedó congelado como se capturó. Para cambiarlo hay que anular el envío y volver a capturarlo.',
+      );
+
     const actualizada = await this.prisma.lineaProduccion.update({
       where: { idLineaProduccion },
       data: { consumoEnBlanco: dto.consumoEnBlanco },
@@ -178,6 +398,18 @@ export class CosteoOrdenesService {
 
     const IDX_TALLA_INICIO = 18;
 
+    // La columna "En blanco" se ubica por su encabezado (fila 4), no por
+    // índice: ver la nota de ENCABEZADO_EN_BLANCO.
+    const filaEncabezado = ws.getRow(FILA_INICIO_DATOS - 1);
+    let idxEnBlanco = 0;
+    filaEncabezado.eachCell((celda, col) => {
+      if (
+        textoCelda(celda.value).trim().toLowerCase() ===
+        ENCABEZADO_EN_BLANCO.toLowerCase()
+      )
+        idxEnBlanco = col;
+    });
+
     const crudo: {
       fila: number;
       op: string;
@@ -197,6 +429,8 @@ export class CosteoOrdenesService {
       estatus: string;
       prioridad: string;
       imagen: string;
+      /** null = la celda traía texto que no se pudo interpretar. */
+      enBlanco: boolean | null;
       tallas: FilaTallaCantidad[];
     }[] = [];
 
@@ -215,6 +449,9 @@ export class CosteoOrdenesService {
 
       crudo.push({
         fila: rowNumber,
+        enBlanco: idxEnBlanco
+          ? leerEnBlanco(row.getCell(idxEnBlanco).value)
+          : false,
         op,
         cliente: textoCelda(row.getCell(2).value).trim(),
         lineaProducto: textoCelda(row.getCell(3).value).trim(),
@@ -337,6 +574,11 @@ export class CosteoOrdenesService {
         error = 'Enguiamiento inválido';
       else if (totalPiezas <= 0)
         error = 'Sin cantidad en ninguna talla reconocida';
+      // Un typo en esa celda tiene que verse, no convertirse en un `false`
+      // silencioso: es justo el dato que después no se puede corregir.
+      else if (r.enBlanco === null)
+        error =
+          'La columna "En blanco" no se pudo interpretar (usá SI o NO, o dejala vacía)';
       if (r.codigoLine) vistosLine.add(r.codigoLine);
 
       return {
@@ -366,6 +608,7 @@ export class CosteoOrdenesService {
         imagen: r.imagen || null,
         tallas: r.tallas,
         totalPiezas,
+        consumoEnBlanco: r.enBlanco === true,
         error,
       } satisfies FilaPreviewLinea;
     });
@@ -455,6 +698,10 @@ export class CosteoOrdenesService {
             estatus: f.estatus,
             imagen: f.imagen,
             prioridad: f.prioridad,
+            // Viene de la plantilla: los operarios saben antes de imprimir
+            // cuáles llevan papel en blanco. Se puede corregir desde Órdenes
+            // hasta que la línea se envíe, momento en que queda congelado.
+            consumoEnBlanco: f.consumoEnBlanco === true,
             creadoPor: idUsuarioActor,
           },
         });
@@ -501,7 +748,7 @@ export class CosteoOrdenesService {
     wb.created = new Date();
 
     const ws = wb.addWorksheet('Órdenes e ítems');
-    const totalCols = 17 + TALLAS_IMPORT_LINEAS.length;
+    const totalCols = 17 + TALLAS_IMPORT_LINEAS.length + 1;
     ws.mergeCells(1, 1, 1, totalCols);
     ws.getCell('A1').value =
       'Digital Textil, S.A. (Digitexsa) — Carga de Órdenes de Producción e ítems (consumo de papel)';
@@ -537,6 +784,7 @@ export class CosteoOrdenesService {
       'Prioridad (opcional)',
       'Imagen (opcional)',
       ...TALLAS_IMPORT_LINEAS,
+      ENCABEZADO_EN_BLANCO,
     ];
     headerRow.eachCell(estiloEncabezado);
     const anchos = [
@@ -558,6 +806,7 @@ export class CosteoOrdenesService {
       12,
       16,
       ...TALLAS_IMPORT_LINEAS.map(() => 8),
+      16,
     ];
     anchos.forEach((w, i) => (ws.getColumn(i + 1).width = w));
 

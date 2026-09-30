@@ -560,12 +560,25 @@ export class CosteoRollosService {
     const filas = await this.prisma.consumoPapel.groupBy({
       by: ['idMontajeRollo'],
       where: { idMontajeRollo: { in: idsMontaje }, anuladoEn: null },
-      _sum: { consumoYd: true },
+      // Los TRES conceptos salen del rollo montado, confirmado por el usuario
+      // (2026-09-30). Antes se restaba solo `consumoYd`, así que el enguiamiento
+      // y el papel en blanco —que sí se gastan físicamente— quedaban registrados
+      // pero nunca descontados, y terminaban cayendo en la MERMA del desmontaje
+      // como si fueran pérdida inexplicada. Con esto la merma vuelve a medir solo
+      // lo que de verdad no se puede explicar.
+      //
+      // Las reposiciones ya se descontaban y siguen igual: escriben su papel en
+      // `consumoYd` y esta consulta nunca filtró por `origen`. Sus filas traen
+      // enguiamiento y en blanco en 0 (default de la columna), así que sumar los
+      // tres campos no las altera.
+      _sum: { consumoYd: true, enguiamientoYd: true, enBlancoYd: true },
     });
     return new Map(
       filas.map((f) => [
         f.idMontajeRollo as number,
-        Number(f._sum.consumoYd ?? 0),
+        Number(f._sum.consumoYd ?? 0) +
+          Number(f._sum.enguiamientoYd ?? 0) +
+          Number(f._sum.enBlancoYd ?? 0),
       ]),
     );
   }

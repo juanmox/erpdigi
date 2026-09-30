@@ -71,6 +71,14 @@ export function Sidebar() {
     ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones', codigo: 'RE', etiqueta: 'Reposiciones' }] : []),
     ...(tienePermiso('costeo.consumo.ver') ? [{ to: '/costeo/consumo', codigo: 'IO', etiqueta: 'Impresión de OPs' }] : []),
     ...(tienePermiso('costeo.estandar.ver') ? [{ to: '/costeo/estandar', codigo: 'CE', etiqueta: 'Consumo Estándar' }] : []),
+    // "Reportes de Costeo" y no "Reportes" a secas: el mosaico de Inicio ya
+    // tiene un tile "Reportes" del roadmap global, todavía en Próximamente.
+    //
+    // El código es `RS` y no el `RC` obvio porque con el panel colapsado esas
+    // dos letras son lo único que se ve, y `RC` ya es Recetas (`app/modulos.ts`)
+    // — dos ítems del mismo sidebar quedarían indistinguibles. `RP`, el otro
+    // candidato, es el del tile "Reportes" del roadmap.
+    ...(tienePermiso('costeo.dashboard.ver') ? [{ to: '/costeo/reportes', codigo: 'RS', etiqueta: 'Reportes de Costeo' }] : []),
   ]
 
   const proximamente = MODULOS.filter((m) => !m.activo)
@@ -101,9 +109,22 @@ export function Sidebar() {
         </div>
         {!colapsado && (
           <div className="flex min-w-0 flex-col leading-tight">
-            <strong className="truncate text-[14.5px] font-bold tracking-tight text-ink">
-              {empresaActual?.nombreComercial ?? empresaActual?.codigo ?? 'Digitexsa'} ERP
-            </strong>
+            {/* El logo real de la empresa activa cuando lo tiene cargado
+                (`core.empresas.logo`), y el nombre en texto cuando no — así una
+                empresa sin logo nunca hereda el de la otra. El recuadro de color
+                de al lado se queda en los dos casos: con el panel colapsado es
+                lo único visible, y un logo apaisado no se lee a 30px. */}
+            {empresaActual?.logo ? (
+              <img
+                src={empresaActual.logo}
+                alt={empresaActual.nombreComercial ?? empresaActual.codigo}
+                className="max-h-[38px] max-w-[150px] self-start object-contain"
+              />
+            ) : (
+              <strong className="truncate text-[14.5px] font-bold tracking-tight text-ink">
+                {empresaActual?.nombreComercial ?? empresaActual?.codigo ?? 'Digitexsa'} ERP
+              </strong>
+            )}
             <span className="text-[11.5px] text-ink-faint">{empresaActual?.codigo ?? 'Digital Textil, S.A.'}</span>
           </div>
         )}
