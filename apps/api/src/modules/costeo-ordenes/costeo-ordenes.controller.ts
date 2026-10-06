@@ -3,8 +3,6 @@ import {
   Controller,
   Get,
   Param,
-  ParseIntPipe,
-  Patch,
   Post,
   Query,
   Req,
@@ -21,7 +19,6 @@ import {
 } from './costeo-ordenes.service';
 import type { FilaPreviewLinea } from './costeo-ordenes.types';
 import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
-import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
 
 @Controller('costeo/ordenes')
 export class CosteoOrdenesController {
@@ -92,17 +89,6 @@ export class CosteoOrdenesController {
     @CurrentUser() usuario: JwtPayload,
   ) {
     return this.service.crearLineaProducto(dto, usuario.sub);
-  }
-
-  @RequirePermissions('costeo.orden.importar')
-  @Patch('lineas/:id')
-  editarLineaProduccion(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: EditarLineaProduccionDto,
-    @CurrentUser() usuario: JwtPayload,
-    @EmpresaActual() idEmpresa: number,
-  ) {
-    return this.service.editarLineaProduccion(id, dto, usuario.sub, idEmpresa);
   }
 
   @RequirePermissions('costeo.orden.ver')

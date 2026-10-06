@@ -14,6 +14,7 @@ import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import { ETIQUETA_EN_BLANCO } from '../costeo-reportes/costeo-reportes.service';
 import { CapturarConsumoDto } from './dto/capturar-consumo.dto';
 
 /**
@@ -45,10 +46,29 @@ export interface TallaCalculada {
   yardasEstandar: number | null;
   consumoYd: number | null;
   enguiamientoYd: number;
-  enBlancoYd: number;
   /** Ya se envió a producción (índice único parcial de `consumo_papel`). */
   yaEnviada: boolean;
   idConsumoPapel: number | null;
+}
+
+export interface OrdenPendiente {
+  idOrdenProduccion: number;
+  codigo: string;
+  cliente: string | null;
+  ordenCompra: string | null;
+  fechaCompromiso: Date | null;
+  consumoEnBlanco: boolean;
+  enBlancoYd: number;
+  lineas: number;
+  totalPiezas: number;
+  /** Lo que se envía al marcar la orden: sus líneas pendientes EN ESA impresora. */
+  idsLineaProduccion: number[];
+}
+
+export interface GrupoImpresoraPendiente {
+  idImpresora: number | null;
+  impresora: string;
+  ordenes: OrdenPendiente[];
 }
 
 @Injectable()
@@ -186,9 +206,6 @@ export class CosteoConsumoPapelService {
           yardasEstandar: yardas,
           consumoYd: yardas === null ? null : +(yardas * t.cantidad).toFixed(4),
           enguiamientoYd: +(t.cantidad * factorEng).toFixed(4),
-          enBlancoYd: l.consumoEnBlanco
-            ? +(t.cantidad * Number(l.factorEnBlanco)).toFixed(4)
-            : 0,
           yaEnviada: enviadoPor.has(`${l.idLineaProduccion}|${t.idTalla}`),
           idConsumoPapel:
             enviadoPor.get(`${l.idLineaProduccion}|${t.idTalla}`) ?? null,
@@ -203,8 +220,6 @@ export class CosteoConsumoPapelService {
         producto: l.producto,
         impresora: l.impresora,
         tipoPapel: l.tipoPapel,
-        consumoEnBlanco: l.consumoEnBlanco,
-        factorEnBlanco: Number(l.factorEnBlanco),
         factorEnguiamiento: factorEng,
         /** El que Diseño tecleó; se usa solo como contraste del calculado. */
         enguiamientoCapturadoYd: Number(l.enguiamientoYd),
@@ -216,9 +231,6 @@ export class CosteoConsumoPapelService {
           .toFixed(4),
         totalEnguiamientoYd: +tallas
           .reduce((a, t) => a + t.enguiamientoYd, 0)
-          .toFixed(4),
-        totalEnBlancoYd: +tallas
-          .reduce((a, t) => a + t.enBlancoYd, 0)
           .toFixed(4),
         // Estados que la pantalla necesita para decidir qué ofrecer.
         completa: pendientes.length === 0,
@@ -251,7 +263,21 @@ export class CosteoConsumoPapelService {
    * repartirse entre varias impresoras, así que agrupar por OP mostraría trabajo
    * que no es de esa máquina.
    */
-  async pendientes(idEmpresa: number, idImpresora?: number, limite = 200) {
+  /**
+   * El trabajo pendiente, agrupado por IMPRESORA y dentro de ella por ORDEN.
+   *
+   * La consulta sigue yendo por LÍNEA y no por orden —una misma OP puede
+   * repartirse entre dos impresoras, y agrupar por orden mostraría trabajo de
+   * otra máquina— pero el resultado se agrupa acá: la pantalla trabaja por
+   * orden, así que armar esa jerarquía en el navegador sería repetir en cada
+   * cliente una decisión que es del servidor.
+   *
+   * ⚠️ El tope es por LÍNEA, no por orden. Con ~3.8 líneas por OP, 500 órdenes
+   * en una impresora son ~1,900 líneas: un tope de 200 truncaba la mitad de la
+   * cola sin ninguna señal. El default alcanza para el volumen que describió el
+   * usuario; si se supera, la pantalla lo dice en vez de mentir.
+   */
+  async pendientes(idEmpresa: number, idImpresora?: number, limite = 2500) {
     const lineas = await this.prisma.lineaProduccion.findMany({
       where: {
         // Sin esto el panel ofrecía trabajo pendiente de la otra empresa.
@@ -265,24 +291,64 @@ export class CosteoConsumoPapelService {
       },
       include: {
         ordenProduccion: { include: { cliente: true } },
-        producto: { select: { codigo: true } },
+        producto: { select: { codigo: true, descripcion: true } },
         impresora: { select: { idImpresora: true, codigo: true } },
         tallas: { select: { cantidad: true } },
       },
-      orderBy: [{ impresora: { orden: 'asc' } }, { codigoLine: 'asc' }],
+      orderBy: [
+        { impresora: { orden: 'asc' } },
+        { ordenProduccion: { correlativo: 'desc' } },
+        { codigoLine: 'asc' },
+      ],
       take: limite,
     });
 
+    // Una línea sin impresora asignada no puede agruparse bajo ninguna: se
+    // junta aparte para que no desaparezca de la vista sin explicación.
+    const SIN_IMPRESORA = 0;
+    const grupos = new Map<number, GrupoImpresoraPendiente>();
+
+    for (const l of lineas) {
+      const idImp = l.impresora?.idImpresora ?? SIN_IMPRESORA;
+      let grupo = grupos.get(idImp);
+      if (!grupo) {
+        grupo = {
+          idImpresora: idImp === SIN_IMPRESORA ? null : idImp,
+          impresora: l.impresora?.codigo ?? 'Sin impresora asignada',
+          ordenes: [],
+        };
+        grupos.set(idImp, grupo);
+      }
+
+      let orden = grupo.ordenes.find(
+        (o) => o.idOrdenProduccion === l.idOrdenProduccion,
+      );
+      if (!orden) {
+        orden = {
+          idOrdenProduccion: l.idOrdenProduccion,
+          codigo: l.ordenProduccion.codigo,
+          cliente: l.ordenProduccion.cliente?.nombre ?? null,
+          ordenCompra: l.ordenProduccion.ordenCompra,
+          fechaCompromiso: l.ordenProduccion.fechaCompromiso,
+          consumoEnBlanco: l.ordenProduccion.consumoEnBlanco,
+          enBlancoYd: Number(l.ordenProduccion.enBlancoYd),
+          lineas: 0,
+          totalPiezas: 0,
+          idsLineaProduccion: [],
+        };
+        grupo.ordenes.push(orden);
+      }
+
+      orden.lineas++;
+      orden.totalPiezas += l.tallas.reduce((a, t) => a + t.cantidad, 0);
+      orden.idsLineaProduccion.push(l.idLineaProduccion);
+    }
+
     return {
-      lineas: lineas.map((l) => ({
-        idLineaProduccion: l.idLineaProduccion,
-        codigoLine: l.codigoLine,
-        codigoOp: l.ordenProduccion.codigo,
-        cliente: l.ordenProduccion.cliente?.nombre ?? null,
-        producto: l.producto.codigo,
-        impresora: l.impresora,
-        totalPiezas: l.tallas.reduce((a, t) => a + t.cantidad, 0),
-      })),
+      grupos: [...grupos.values()],
+      /** Para avisar si el tope recortó la cola en vez de callarlo. */
+      lineasDevueltas: lineas.length,
+      truncado: lineas.length === limite,
     };
   }
 
@@ -404,6 +470,300 @@ export class CosteoConsumoPapelService {
       select: { espejaSheets: true },
     });
     return empresa?.espejaSheets ?? false;
+  }
+
+  /**
+   * Crea la fila de papel en blanco de una orden, si todavía no la tiene.
+   *
+   * El monto es FIJO POR ORDEN: una orden de 500 piezas gasta lo mismo que una
+   * de 1. Antes se calculaba `cantidad * 0.6` por talla, que sobre los datos
+   * reales daba 237 yd donde van 4.
+   *
+   * Va en `en_blanco_yd` con `consumo_yd` en 0 —y no al revés— para que
+   * `consumoPorMontajeIds()` la sume sin cambiar: ese método ya suma los tres
+   * conceptos, así que el panel, el historial y la merma la recogen solos.
+   */
+  private async asegurarFilaEnBlanco(
+    tx: Pick<PrismaService, 'consumoPapel'>,
+    d: {
+      idOrdenProduccion: number;
+      enBlancoYd: number;
+      fecha: Date;
+      idImpresora: number;
+      idMontajeRollo: number;
+      idTipoPapel: number;
+      idUsuarioActor: number;
+    },
+  ) {
+    const ya = await tx.consumoPapel.findFirst({
+      where: {
+        idOrdenProduccion: d.idOrdenProduccion,
+        origen: 'EN_BLANCO',
+        anuladoEn: null,
+      },
+      select: { idConsumoPapel: true },
+    });
+    if (ya) return null;
+
+    const creada = await tx.consumoPapel.create({
+      data: {
+        fecha: d.fecha,
+        origen: 'EN_BLANCO',
+        idOrdenProduccion: d.idOrdenProduccion,
+        idImpresora: d.idImpresora,
+        idMontajeRollo: d.idMontajeRollo,
+        idTipoPapel: d.idTipoPapel,
+        consumoYd: 0,
+        enBlancoYd: d.enBlancoYd,
+        creadoPor: d.idUsuarioActor,
+      },
+      select: { idConsumoPapel: true },
+    });
+    // El id y no un booleano: quien la creó tiene que poder espejarla, y la
+    // fila se arma leyéndola de vuelta con sus relaciones (ver más abajo).
+    return creada.idConsumoPapel;
+  }
+
+  /**
+   * Arma la fila de papel en blanco para la hoja "Datos".
+   *
+   * Vive acá y no incrustada en sus dos llamadores porque la forma de la hoja
+   * es una sola: el monto va en CONSUMO YDS y la columna EN BLANCO queda
+   * vacía, igual que en el reporte (pedido explícito del usuario), y el ITEM
+   * lleva la etiqueta que identifica la fila. Duplicar eso sería duplicar el
+   * contrato con un libro que leen los Dashboards.
+   */
+  private filaSheetsEnBlanco(d: {
+    fecha: Date;
+    codigoOp: string;
+    cliente: string;
+    impresora: string;
+    tipoPapel: string;
+    yardas: number;
+    nrollo: string;
+  }): FilaDatosSheets {
+    return [
+      formatearFechaSheets(d.fecha), // A - Fecha
+      '', // B - LINE (no tiene: el papel en blanco es de la ORDEN)
+      d.codigoOp, // C - Orden de Producción
+      '', // D - repo
+      d.cliente, // E - Cliente
+      d.impresora, // F - IMPRESORA
+      ETIQUETA_EN_BLANCO, // G - Item
+      d.tipoPapel, // H - TIPO DE PAPEL
+      '', // I - Talla
+      '', // J - Cantidad
+      '', // K - Enguiamiento
+      '', // L - En blanco (el monto va en Consumo, como en el reporte)
+      d.yardas, // M - CONSUMO YDS
+      '', // N - OBSERVACION
+      d.nrollo, // O - NRollo
+    ];
+  }
+
+  /**
+   * Espeja UNA fila de papel en blanco a la hoja "Datos".
+   *
+   * Va en su propia fila y no pegada a una talla porque es consumo de la
+   * ORDEN. Se arma releyendo la fila con sus relaciones en vez de recibir 15
+   * parámetros: los dos caminos que la crean —la captura y el marcado manual—
+   * tienen datos distintos a mano, y duplicar el armado sería duplicar la
+   * forma de la hoja.
+   *
+   * Formato: el monto va en CONSUMO YDS y la columna EN BLANCO queda vacía,
+   * igual que en el reporte (pedido explícito del usuario: en la hoja se ve
+   * tal cual aparece ahí). El ITEM lleva la etiqueta que lo identifica.
+   */
+  private async espejarEnBlanco(idConsumoPapel: number) {
+    const fila = await this.prisma.consumoPapel.findUnique({
+      where: { idConsumoPapel },
+      include: {
+        ordenProduccion: { include: { cliente: true } },
+        impresora: true,
+        tipoPapel: true,
+        montajeRollo: {
+          include: { rolloPapel: { include: { facturaPapel: true } } },
+        },
+      },
+    });
+    if (!fila) return;
+
+    const r = fila.montajeRollo?.rolloPapel;
+    const nrollo = r
+      ? `${r.facturaPapel.numeroFactura}-${r.facturaPapel.totalRollos}-${r.secuencia}`
+      : '';
+
+    await this.googleSheets.agregarFilas(
+      process.env.GOOGLE_SHEETS_ID_CONSUMOS,
+      'Datos',
+      [
+        this.filaSheetsEnBlanco({
+          fecha: fila.fecha,
+          codigoOp: fila.ordenProduccion.codigo,
+          cliente: fila.ordenProduccion.cliente?.nombre ?? '',
+          impresora: fila.impresora.codigo,
+          tipoPapel: fila.tipoPapel.nombre,
+          yardas: Number(fila.enBlancoYd),
+          nrollo,
+        }),
+      ],
+    );
+  }
+
+  /**
+   * Marca o desmarca el papel en blanco de una orden.
+   *
+   * Es el reemplazo del flag por línea, que estaba en el lugar equivocado y
+   * quedaba congelado al capturar (bug del 2026-09-29: prenderlo después no
+   * hacía nada y reenviar tampoco lo corregía). Ahora:
+   *
+   * - Si la orden todavía no se imprimió, solo se guarda la intención; la fila
+   *   se crea sola en el primer envío, contra el rollo que la imprima.
+   * - Si ya se imprimió, se carga en el acto **al rollo que la imprimió** —el
+   *   del último consumo de producción de esa orden—, no al que esté montado
+   *   ahora. Así se puede corregir un olvido sin atribuirle el papel a un rollo
+   *   que nunca tocó esa orden.
+   * - Desmarcar ANULA la fila con autor y motivo; nunca la borra.
+   */
+  async editarEnBlanco(
+    codigoOp: string,
+    consumoEnBlanco: boolean,
+    idUsuarioActor: number,
+    idEmpresa: number,
+    puedeAnular: boolean,
+    enBlancoYd?: number,
+  ) {
+    const orden = await this.resolverOrden(codigoOp, idEmpresa, idUsuarioActor);
+    // Sin cantidad explícita se conserva la que la orden ya tenía: desmarcar no
+    // manda ninguna, y volver a marcar no debería resetear lo que se eligió.
+    const yardas = enBlancoYd ?? Number(orden.enBlancoYd);
+
+    const filaVigente = await this.prisma.consumoPapel.findFirst({
+      where: {
+        idOrdenProduccion: orden.idOrdenProduccion,
+        origen: 'EN_BLANCO',
+        anuladoEn: null,
+      },
+      select: { idConsumoPapel: true, enBlancoYd: true },
+    });
+
+    // Quitarlo retira papel ya cargado a un rollo, así que es una anulación de
+    // consumo y se pide el permiso que gobierna eso — no el de editar la orden.
+    if (!consumoEnBlanco && filaVigente && !puedeAnular)
+      throw new ForbiddenException(
+        'Quitar el papel en blanco de una orden ya cargada anula un consumo, y para eso hace falta el permiso costeo.consumo.anular.',
+      );
+
+    let idCreada: number | null = null;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.ordenProduccion.update({
+        where: { idOrdenProduccion: orden.idOrdenProduccion },
+        data: { consumoEnBlanco, enBlancoYd: yardas },
+      });
+
+      if (!consumoEnBlanco) {
+        if (filaVigente)
+          await tx.consumoPapel.update({
+            where: { idConsumoPapel: filaVigente.idConsumoPapel },
+            data: {
+              anuladoEn: new Date(),
+              anuladoPor: idUsuarioActor,
+              motivoAnulacion: 'Se desmarcó el papel en blanco de la orden',
+            },
+          });
+        return;
+      }
+      const cambioLaCantidad =
+        filaVigente !== null && Number(filaVigente.enBlancoYd) !== yardas;
+
+      // Corregir la cantidad de una fila YA cargada se hace anulando y
+      // recreando, no editando en el lugar. Una fila de `consumo_papel` es
+      // inmutable salvo por su anulación (misma regla que Reposiciones), y
+      // pisarle las yardas dejaría el histórico diciendo que siempre fueron
+      // las nuevas. Así quedan las dos, con autor y motivo.
+      if (cambioLaCantidad) {
+        await tx.consumoPapel.update({
+          where: { idConsumoPapel: filaVigente.idConsumoPapel },
+          data: {
+            anuladoEn: new Date(),
+            anuladoPor: idUsuarioActor,
+            motivoAnulacion: `Se corrigió el papel en blanco de ${Number(filaVigente.enBlancoYd)} a ${yardas} yd`,
+          },
+        });
+      } else if (filaVigente) return;
+
+      // Solo si la orden YA tiene producción: de ahí sale el rollo al que
+      // corresponde cargarlo. Si todavía no se imprimió, no hay rollo legítimo
+      // al cual atribuirlo y la fila se creará sola en el primer envío.
+      const ultimo = await tx.consumoPapel.findFirst({
+        where: {
+          idOrdenProduccion: orden.idOrdenProduccion,
+          origen: 'PRODUCCION',
+          anuladoEn: null,
+        },
+        orderBy: { fecha: 'desc' },
+        select: {
+          fecha: true,
+          idImpresora: true,
+          idMontajeRollo: true,
+          idTipoPapel: true,
+        },
+      });
+      if (!ultimo?.idMontajeRollo) return;
+
+      idCreada = await this.asegurarFilaEnBlanco(tx, {
+        idOrdenProduccion: orden.idOrdenProduccion,
+        enBlancoYd: yardas,
+        fecha: ultimo.fecha,
+        idImpresora: ultimo.idImpresora,
+        idMontajeRollo: ultimo.idMontajeRollo,
+        idTipoPapel: ultimo.idTipoPapel,
+        idUsuarioActor,
+      });
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      entidad: 'costeo.orden_produccion',
+      idEntidad: String(orden.idOrdenProduccion),
+      accion: 'UPDATE',
+      datosNuevos: { consumoEnBlanco, enBlancoYd: yardas },
+    });
+
+    // Después de que Postgres confirmó y sin `await`: el espejo nunca bloquea
+    // ni revierte el guardado. Solo si ESTA empresa espeja — los libros son de
+    // Digitexsa.
+    //
+    // ⚠️ Desmarcar o corregir ANULA la fila en Postgres, pero las anulaciones
+    // no se espejan (el legacy solo hace `append`), así que la fila ya escrita
+    // se queda en la hoja. Es la misma convención que Reposiciones; con el
+    // papel en blanco siendo corregible a propósito va a pasar más seguido.
+    if (idCreada !== null && (await this.empresaEspejaSheets(idEmpresa)))
+      void this.espejarEnBlanco(idCreada);
+
+    return this.estadoEnBlanco(orden.idOrdenProduccion);
+  }
+
+  /** Lo que la pantalla necesita para dibujar el checkbox y su leyenda. */
+  private async estadoEnBlanco(idOrdenProduccion: number) {
+    const [orden, fila] = await Promise.all([
+      this.prisma.ordenProduccion.findUniqueOrThrow({
+        where: { idOrdenProduccion },
+        select: { codigo: true, consumoEnBlanco: true, enBlancoYd: true },
+      }),
+      this.prisma.consumoPapel.findFirst({
+        where: { idOrdenProduccion, origen: 'EN_BLANCO', anuladoEn: null },
+        select: { enBlancoYd: true, idMontajeRollo: true },
+      }),
+    ]);
+    return {
+      codigo: orden.codigo,
+      consumoEnBlanco: orden.consumoEnBlanco,
+      enBlancoYd: Number(orden.enBlancoYd),
+      /** Ya descontado de un rollo. Si es false, se descontará al imprimir. */
+      cargado: fila !== null,
+      idMontajeRollo: fila?.idMontajeRollo ?? null,
+    };
   }
 
   private async espejarEnGoogleSheets(filas: (string | number)[][]) {
@@ -559,9 +919,9 @@ export class CosteoConsumoPapelService {
             idConsumoEstandar: est.idConsumoEstandar,
             consumoYd,
             enguiamientoYd: +(t.cantidad * factorEng).toFixed(4),
-            enBlancoYd: linea.consumoEnBlanco
-              ? +(t.cantidad * Number(linea.factorEnBlanco)).toFixed(4)
-              : 0,
+            // `enBlancoYd` NO se calcula acá: el papel en blanco es un monto
+            // fijo por ORDEN y vive en su propia fila (`origen = EN_BLANCO`).
+            // Calcularlo por talla era lo que daba 237 yd donde van 4.
             observacion: dto.observacion ?? null,
             creadoPor: idUsuarioActor,
           },
@@ -583,18 +943,55 @@ export class CosteoConsumoPapelService {
           t.talla.nombre, // I - Talla
           t.cantidad, // J - Cantidad
           +(t.cantidad * factorEng).toFixed(4), // K - Yardas (enguiamiento)
-          // El legacy deja la celda VACÍA cuando la línea no lleva papel en
-          // blanco, no un 0. Se respeta para no cambiarle el tipo de dato a
-          // la columna que ya leen los Dashboards.
-          linea.consumoEnBlanco
-            ? +(t.cantidad * Number(linea.factorEnBlanco)).toFixed(4)
-            : '', // L - Consumo en blanco
+          // Columna L siempre vacía desde que el papel en blanco es por ORDEN:
+          // ya no hay un monto atribuible a esta talla. El legacy también la
+          // dejaba vacía (no 0) cuando no aplicaba, así que no se le cambia el
+          // tipo de dato a una columna que los Dashboards ya leen.
+          // ⚠️ Consecuencia: los Dashboards dejan de ver el papel en blanco
+          // (4 yd por orden). Es muchísimo menos error que lo que recibían
+          // antes, pero queda anotado como decisión pendiente del usuario.
+          '', // L - Consumo en blanco
           consumoYd, // M - CONSUMO YDS
           // El legacy mandaba "" acá, pero la columna se llama OBSERVACION en
           // la hoja real y el ERP sí tiene ese dato por captura: se aprovecha.
           dto.observacion ?? '', // N - OBSERVACION
           nrolloTexto, // O - NRollo
         ]);
+      }
+
+      // El papel en blanco de la ORDEN, una sola vez. Se crea acá —dentro de
+      // la misma transacción que la captura— para que nadie tenga que
+      // acordarse de marcarlo después: si la orden lo lleva, se carga al rollo
+      // que de verdad la imprimió. El índice único parcial lo vuelve
+      // idempotente, así que reenviar otra línea de la misma orden no lo
+      // duplica; por eso basta con intentarlo y no hace falta coordinar nada.
+      if (creadas > 0 && linea.ordenProduccion.consumoEnBlanco) {
+        const yardasEnBlanco = Number(linea.ordenProduccion.enBlancoYd);
+        const creada = await this.asegurarFilaEnBlanco(tx, {
+          idOrdenProduccion: linea.idOrdenProduccion,
+          enBlancoYd: yardasEnBlanco,
+          fecha,
+          idImpresora,
+          idMontajeRollo,
+          idTipoPapel: montaje.rolloPapel.idTipoPapel,
+          idUsuarioActor,
+        });
+        // Solo si de verdad se creó: el índice único la vuelve idempotente, y
+        // espejar igual duplicaría la fila en una hoja que solo hace append.
+        // Viaja en `filasSheets` con las tallas para que el lote mande todo en
+        // UNA llamada, en vez de gastar una request aparte por orden.
+        if (creada !== null)
+          filasSheets.push(
+            this.filaSheetsEnBlanco({
+              fecha,
+              codigoOp: linea.ordenProduccion.codigo,
+              cliente: clienteNombre,
+              impresora: impresoraCodigo,
+              tipoPapel: tipoPapelNombre,
+              yardas: yardasEnBlanco,
+              nrollo: nrolloTexto,
+            }),
+          );
       }
 
       // Corrección #3: el origen NO se borra, se marca como procesado.

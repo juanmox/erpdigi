@@ -38,11 +38,7 @@ export interface LineaProduccionDetalle {
   codigoLine: string
   estatus: string
   enguiamientoYd: string
-  consumoEnBlanco: boolean
-  /**
-   * Ya tiene consumo de producción vigente. Cuando es true, `consumoEnBlanco`
-   * quedó congelado en `consumo_papel` y el servidor rechaza modificarlo.
-   */
+  /** Ya tiene consumo de producción vigente. */
   enviada: boolean
   // Desarrollo↔Producto es biunívoco — se lee del producto, nunca se
   // duplica como campo propio de la línea (evita que se desincronicen).
@@ -64,6 +60,9 @@ export interface LineaProductoDetalle {
 }
 
 export interface OrdenProduccionDetalle {
+  /** El papel en blanco es por ORDEN: yardas fijas, no por prenda. */
+  consumoEnBlanco: boolean
+  enBlancoYd: number
   idOrdenProduccion: number
   codigo: string
   anio: number
@@ -113,4 +112,14 @@ export interface ListadoOrdenes {
   /** Cuántas OP con pendientes hay en total (puede superar a las devueltas). */
   totalOrdenes: number
   ordenes: OrdenPendiente[]
+}
+
+/** Respuesta de marcar/desmarcar el papel en blanco de una orden. */
+export interface EstadoEnBlanco {
+  codigo: string
+  consumoEnBlanco: boolean
+  enBlancoYd: number
+  /** Ya descontado de un rollo. Si es false, se descuenta al imprimir. */
+  cargado: boolean
+  idMontajeRollo: number | null
 }

@@ -17,6 +17,7 @@ import {
   AnularConsumoDto,
   CapturarConsumoDto,
 } from './dto/capturar-consumo.dto';
+import { EditarEnBlancoDto } from './dto/editar-en-blanco.dto';
 
 @Controller('costeo/consumo-papel')
 export class CosteoConsumoPapelController {
@@ -24,6 +25,35 @@ export class CosteoConsumoPapelController {
 
   // Antes que @Get('orden/:codigo') no hace falta (rutas distintas), pero se
   // deja arriba porque es la entrada natural de la pantalla.
+  /**
+   * Marca o desmarca el papel en blanco de una orden.
+   *
+   * Vive acá y no en Órdenes porque lo que hace es CREAR O ANULAR CONSUMO, no
+   * editar un atributo descriptivo de la orden.
+   *
+   * `costeo.consumo.anular` se resuelve a mano y no con @RequirePermissions
+   * porque es OPCIONAL: solo hace falta para quitar un papel en blanco que YA
+   * se cargó a un rollo. Ponerlo en el decorador lo volvería obligatorio
+   * también para marcar (el decorador exige TODOS los permisos que lista).
+   */
+  @RequirePermissions('costeo.consumo.capturar')
+  @Patch('orden/:codigo/en-blanco')
+  editarEnBlanco(
+    @Param('codigo') codigo: string,
+    @Body() dto: EditarEnBlancoDto,
+    @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
+  ) {
+    return this.service.editarEnBlanco(
+      codigo,
+      dto.consumoEnBlanco,
+      usuario.sub,
+      idEmpresa,
+      usuario.permisos.includes('costeo.consumo.anular'),
+      dto.enBlancoYd,
+    );
+  }
+
   @RequirePermissions('costeo.consumo.ver')
   @Get('pendientes')
   pendientes(

@@ -36,6 +36,13 @@ export interface ResumenOrden {
 
 const F4 = (n: number) => +n.toFixed(4);
 
+/**
+ * Cómo se identifica la fila de papel en blanco en el detalle y en el espejo a
+ * Google Sheets. Es la misma etiqueta en los dos lados a propósito: el usuario
+ * pidió que en la hoja se vea tal cual aparece en el reporte.
+ */
+export const ETIQUETA_EN_BLANCO = 'En blanco por REPO';
+
 @Injectable()
 export class CosteoReportesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -226,14 +233,22 @@ export class CosteoReportesService {
         fecha: c.fecha,
         orden: c.ordenProduccion.codigo,
         codigoLine: c.lineaProduccion?.codigoLine ?? null,
-        producto: c.producto?.codigo ?? null,
+        // La fila del papel en blanco no tiene producto: se identifica con su
+        // propia descripción, que es lo único que la distingue en el detalle.
+        producto:
+          c.origen === 'EN_BLANCO'
+            ? ETIQUETA_EN_BLANCO
+            : (c.producto?.codigo ?? null),
         talla: c.talla?.nombre ?? null,
         cantidad: c.cantidad,
         impresora: c.impresora.codigo,
         tipoPapel: c.tipoPapel.nombre,
-        consumoYd: Number(c.consumoYd),
+        // El detalle ya NO tiene columna "En blanco": el monto va en Consumo.
+        // Sumar los dos campos da lo correcto sin ningún `if`, porque son
+        // excluyentes — una fila PRODUCCION trae `enBlancoYd` en 0 y una
+        // EN_BLANCO trae `consumoYd` en 0.
+        consumoYd: F4(Number(c.consumoYd) + Number(c.enBlancoYd)),
         enguiamientoYd: Number(c.enguiamientoYd),
-        enBlancoYd: Number(c.enBlancoYd),
         totalYd: F4(
           Number(c.consumoYd) + Number(c.enguiamientoYd) + Number(c.enBlancoYd),
         ),
@@ -344,7 +359,6 @@ export class CosteoReportesService {
       'Tipo de papel',
       'Consumo (yd)',
       'Enguiamiento (yd)',
-      'En blanco (yd)',
       'Total (yd)',
     ]);
     encI.eachCell((c) => Object.assign(c, negrita));
@@ -360,7 +374,6 @@ export class CosteoReportesService {
         x.tipoPapel,
         x.consumoYd,
         x.enguiamientoYd,
-        x.enBlancoYd,
         x.totalYd,
       ]);
     imp.columns.forEach((c, i) => (c.width = i === 3 ? 20 : 14));

@@ -84,7 +84,6 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <td>${esc(x.impresora)}</td>
       <td class="n">${yd(x.consumoYd)}</td>
       <td class="n">${yd(x.enguiamientoYd)}</td>
-      <td class="n">${yd(x.enBlancoYd)}</td>
       <td class="n b">${yd(x.totalYd)}</td>
     </tr>`,
     )
@@ -152,9 +151,9 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
   <table>
     <thead><tr>
       <th>Fecha</th><th>OP</th><th>LINE</th><th>Producto</th><th>Talla</th><th class="n">Cant.</th>
-      <th>Impresora</th><th class="n">Consumo</th><th class="n">Enguiam.</th><th class="n">En blanco</th><th class="n">Total</th>
+      <th>Impresora</th><th class="n">Consumo</th><th class="n">Enguiam.</th><th class="n">Total</th>
     </tr></thead>
-    <tbody>${filasImpresion || '<tr><td colspan="11">Sin impresiones en el rango.</td></tr>'}</tbody>
+    <tbody>${filasImpresion || '<tr><td colspan="10">Sin impresiones en el rango.</td></tr>'}</tbody>
   </table>
 
   <h2>Detalle de reposiciones</h2>

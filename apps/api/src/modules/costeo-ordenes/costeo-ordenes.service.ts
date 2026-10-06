@@ -16,7 +16,6 @@ import {
   TALLAS_IMPORT_LINEAS,
 } from './costeo-ordenes.types';
 import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
-import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
 
 const AZUL_DIGITEXSA = 'FF203080';
 // La plantilla de plantillaImportarLineas() tiene título (fila 1) +
@@ -127,11 +126,14 @@ export class CosteoOrdenesService {
           idEmpresaActual: idEmpresa,
         }),
       );
-    // `enviada` sale del mismo criterio que usa Impresión de OPs. La pantalla lo
-    // necesita para bloquear el checkbox de "En blanco": una vez capturada, el
-    // valor quedó congelado en `consumo_papel` y tocarlo ya no cambia nada.
+    // `enviada` sale del mismo criterio que usa Impresión de OPs; la pantalla
+    // la muestra como estado de la línea. Ya NO bloquea nada: el papel en
+    // blanco es de la orden y vive en su propia fila de consumo, así que se
+    // puede corregir después de enviar sin tocar lo ya capturado.
     return {
       ...orden,
+      // Decimal de Prisma serializa como string; la pantalla lo quiere número.
+      enBlancoYd: Number(orden.enBlancoYd),
       lineasProduccion: orden.lineasProduccion.map(
         ({ consumosPapel, ...l }) => ({
           ...l,
@@ -326,63 +328,6 @@ export class CosteoOrdenesService {
     });
 
     return linea;
-  }
-
-  // consumo_en_blanco/factor_en_blanco ya existen desde F1 (default false/0.6),
-  // pero el import de OP (arriba) nunca los toca — se importan siempre
-  // apagados, a propósito: es una decisión que el operador de Diseño toma al
-  // momento de imprimir/capturar consumo, no algo que se sepa de antemano al
-  // cargar la OP. Este endpoint es la única forma de prenderlo, editable
-  // libremente después de importar.
-  async editarLineaProduccion(
-    idLineaProduccion: number,
-    dto: EditarLineaProduccionDto,
-    idUsuarioActor: number,
-    idEmpresa: number,
-  ) {
-    // findFirst y no findUnique: una línea de otra empresa tiene que verse
-    // como inexistente, no como existente-pero-prohibida.
-    const linea = await this.prisma.lineaProduccion.findFirst({
-      where: { idLineaProduccion, idEmpresa },
-    });
-    if (!linea)
-      throw new NotFoundException('Línea de producción no encontrada');
-
-    // El "en blanco" se CONGELA al capturar: `capturarUna()` calcula
-    // `cantidad * factorEnBlanco` con el flag que la línea tenía en ese
-    // instante y lo guarda en `consumo_papel.en_blanco_yd`. Cambiarlo después
-    // no toca esa fila, así que dejarlo editable era una trampa: el reenvío es
-    // idempotente (saltea las tallas ya enviadas), con lo cual alguien podía
-    // prender el checkbox, reenviar, y creer razonablemente que lo había
-    // corregido cuando no cambió nada. Encontrado en datos reales: la OP
-    // 26OP012625 tiene líneas con el flag en true y `en_blanco_yd` en 0.
-    const yaEnviada = await this.prisma.consumoPapel.findFirst({
-      where: {
-        idLineaProduccion,
-        origen: 'PRODUCCION',
-        anuladoEn: null,
-      },
-      select: { idConsumoPapel: true },
-    });
-    if (yaEnviada)
-      throw new ConflictException(
-        'Esta línea ya se envió a imprimir, así que el consumo en blanco quedó congelado como se capturó. Para cambiarlo hay que anular el envío y volver a capturarlo.',
-      );
-
-    const actualizada = await this.prisma.lineaProduccion.update({
-      where: { idLineaProduccion },
-      data: { consumoEnBlanco: dto.consumoEnBlanco },
-    });
-
-    await this.auditoria.registrar({
-      idUsuario: idUsuarioActor,
-      entidad: 'costeo.linea_produccion',
-      idEntidad: String(idLineaProduccion),
-      accion: 'UPDATE',
-      datosNuevos: { consumoEnBlanco: actualizada.consumoEnBlanco },
-    });
-
-    return actualizada;
   }
 
   async previewImportarLineas(
@@ -613,6 +558,22 @@ export class CosteoOrdenesService {
       } satisfies FilaPreviewLinea;
     });
 
+    // El papel en blanco es de la ORDEN, pero la plantilla lo trae por fila:
+    // si dos filas de la misma OP se contradicen no hay forma de saber cuál
+    // vale, así que se marcan ambas en vez de elegir una en silencio.
+    const valoresPorOp = new Map<string, Set<boolean>>();
+    for (const f of filas) {
+      if (f.error || !f.opTexto) continue;
+      const set = valoresPorOp.get(f.opTexto) ?? new Set<boolean>();
+      set.add(f.consumoEnBlanco === true);
+      valoresPorOp.set(f.opTexto, set);
+    }
+    for (const f of filas) {
+      if (f.error || !f.opTexto) continue;
+      if ((valoresPorOp.get(f.opTexto)?.size ?? 0) > 1)
+        f.error = `La OP ${f.opTexto} tiene filas con "${ENCABEZADO_EN_BLANCO}" distinto. El papel en blanco es por orden, no por línea: poné el mismo valor en todas las filas de la OP.`;
+    }
+
     return { filas };
   }
 
@@ -670,6 +631,11 @@ export class CosteoOrdenesService {
                 fechaCompromiso: f.fechaCompromisoOp
                   ? new Date(f.fechaCompromisoOp)
                   : null,
+                // El papel en blanco es por ORDEN, así que la columna de la
+                // plantilla se lee por fila pero se guarda acá. El preview
+                // rechaza los archivos donde dos filas de la misma OP se
+                // contradicen, así que cualquier fila de la OP sirve.
+                consumoEnBlanco: f.consumoEnBlanco === true,
                 creadoPor: idUsuarioActor,
               },
             });
@@ -698,10 +664,6 @@ export class CosteoOrdenesService {
             estatus: f.estatus,
             imagen: f.imagen,
             prioridad: f.prioridad,
-            // Viene de la plantilla: los operarios saben antes de imprimir
-            // cuáles llevan papel en blanco. Se puede corregir desde Órdenes
-            // hasta que la línea se envíe, momento en que queda congelado.
-            consumoEnBlanco: f.consumoEnBlanco === true,
             creadoPor: idUsuarioActor,
           },
         });

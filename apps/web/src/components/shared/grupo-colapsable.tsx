@@ -3,7 +3,16 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface GrupoColapsableProps {
-  titulo: string
+  /**
+   * `ReactNode` y no `string`: el encabezado de Impresión de OPs lleva el
+   * nombre de la impresora más sus contadores con estilos distintos. Ensanchar
+   * el tipo es compatible hacia atrás — un `string` ya es un `ReactNode`.
+   *
+   * ⚠️ El encabezado ES un `<button>`, así que lo que se pase no puede traer
+   * otro botón adentro: un botón anidado es HTML inválido y React lo reporta
+   * como error de hidratación (ya pasó en la tabla de Órdenes).
+   */
+  titulo: React.ReactNode
   defaultAbierto?: boolean
   children: React.ReactNode
 }

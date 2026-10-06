@@ -1,10 +1,10 @@
 import { apiFetch } from '@/lib/api'
-import type { LineaPendiente, OrdenConsumo, ResultadoLote } from './types'
+import type { EstadoEnBlanco, OrdenConsumo, Pendientes, ResultadoLote } from './types'
 
 export const costeoConsumoApi = {
   /** Trabajo pendiente; sin impresora devuelve el de todas. */
   pendientes: (idImpresora?: number) =>
-    apiFetch<{ lineas: LineaPendiente[] }>(
+    apiFetch<Pendientes>(
       `/costeo/consumo-papel/pendientes${idImpresora ? `?idImpresora=${idImpresora}` : ''}`,
     ),
 
@@ -26,6 +26,16 @@ export const costeoConsumoApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  /**
+   * Marca o desmarca el papel en blanco de una orden, con su cantidad.
+   * Vive en Consumo de Papel porque crea o anula una fila de consumo.
+   */
+  editarEnBlanco: (codigoOp: string, consumoEnBlanco: boolean, enBlancoYd?: number) =>
+    apiFetch<EstadoEnBlanco>(
+      `/costeo/consumo-papel/orden/${encodeURIComponent(codigoOp)}/en-blanco`,
+      { method: 'PATCH', body: JSON.stringify({ consumoEnBlanco, enBlancoYd }) },
+    ),
 
   anular: (idConsumoPapel: number, motivo?: string) =>
     apiFetch<{ anulado: boolean }>(`/costeo/consumo-papel/${idConsumoPapel}/anular`, {

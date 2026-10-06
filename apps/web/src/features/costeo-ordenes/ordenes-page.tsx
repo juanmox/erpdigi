@@ -41,31 +41,18 @@ export function OrdenesPage() {
     }
   }
 
-  async function toggleEnBlanco(idLineaProduccion: number, consumoEnBlanco: boolean) {
+  async function toggleEnBlanco(consumoEnBlanco: boolean) {
     if (!orden) return
     setError(null)
     // Optimista: la pantalla no espera a la respuesta para reflejar el click.
-    setOrden({
-      ...orden,
-      lineasProduccion: orden.lineasProduccion.map((l) =>
-        l.idLineaProduccion === idLineaProduccion ? { ...l, consumoEnBlanco } : l,
-      ),
-    })
+    setOrden({ ...orden, consumoEnBlanco })
     try {
-      await costeoOrdenesApi.editarLineaProduccion(idLineaProduccion, consumoEnBlanco)
+      await costeoOrdenesApi.editarEnBlanco(orden.codigo, consumoEnBlanco)
     } catch (err) {
-      // Revierte si el servidor rechazó el cambio (ej. sin permiso).
-      setOrden((prev) =>
-        prev
-          ? {
-              ...prev,
-              lineasProduccion: prev.lineasProduccion.map((l) =>
-                l.idLineaProduccion === idLineaProduccion ? { ...l, consumoEnBlanco: !consumoEnBlanco } : l,
-              ),
-            }
-          : prev,
-      )
-      setError(err instanceof ApiError ? err.message : 'Error al actualizar la línea')
+      // Revierte si el servidor rechazó el cambio (ej. quitar un papel en
+      // blanco ya cargado sin tener `costeo.consumo.anular`).
+      setOrden((prev) => (prev ? { ...prev, consumoEnBlanco: !consumoEnBlanco } : prev))
+      setError(err instanceof ApiError ? err.message : 'Error al actualizar el papel en blanco')
     }
   }
 
@@ -129,6 +116,20 @@ export function OrdenesPage() {
                   <div className="text-ink-faint">Estatus</div>
                   <Badge variant="secondary">{orden.estatus}</Badge>
                 </div>
+                {/* El papel en blanco es de la ORDEN, no de cada línea: son
+                    yardas fijas que no dependen de cuántas prendas lleve. */}
+                <div>
+                  <div className="text-ink-faint">Papel en blanco</div>
+                  <label className="mt-1 flex items-center gap-2">
+                    <Checkbox
+                      checked={orden.consumoEnBlanco}
+                      onCheckedChange={(c) => toggleEnBlanco(c === true)}
+                    />
+                    <span className="text-ink text-[13px]">
+                      {orden.consumoEnBlanco ? `${orden.enBlancoYd} yd` : 'No lleva'}
+                    </span>
+                  </label>
+                </div>
               </div>
 
               <Table>
@@ -139,7 +140,6 @@ export function OrdenesPage() {
                     <TableHead>Producto</TableHead>
                     <TableHead>Estatus</TableHead>
                     <TableHead>Tallas</TableHead>
-                    <TableHead>En blanco</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -151,25 +151,6 @@ export function OrdenesPage() {
                       <TableCell>{l.estatus}</TableCell>
                       <TableCell className="whitespace-normal">
                         {l.tallas.map((t) => `${t.talla.nombre}:${t.cantidad}`).join('  ·  ')}
-                      </TableCell>
-                      <TableCell>
-                        {/* Una vez enviada, el valor quedo congelado en
-                            `consumo_papel` al capturar: dejarlo editable hacía
-                            mostrar un cambio que no afectaba nada. */}
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            checked={l.consumoEnBlanco}
-                            disabled={l.enviada}
-                            onCheckedChange={(checked) =>
-                              toggleEnBlanco(l.idLineaProduccion, checked === true)
-                            }
-                          />
-                          {l.enviada && (
-                            <span className="text-ink-faint text-[11px]">
-                              ya enviada
-                            </span>
-                          )}
-                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

@@ -10,7 +10,9 @@ import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
 import { normalizarCodigoCosteo } from '@/lib/codigos-costeo'
 import { costeoConsumoApi } from './api'
-import { PanelPendientes } from './components/panel-pendientes'
+import type { GrupoImpresoraPendiente } from './types'
+import { DetalleOrden } from './components/detalle-orden'
+import { TablaPendientes } from './components/tabla-pendientes'
 import { TarjetaLinea } from './components/tarjeta-linea'
 import type { LineaConsumo, ResultadoLote } from './types'
 
@@ -86,12 +88,82 @@ export function ConsumoPage() {
   // El panel de pendientes es para encontrar trabajo; con una OP abierta ya
   // cumplió su función y solo compite por espacio con las líneas.
   const [panelAbierto, setPanelAbierto] = useState(true)
+  // Selección de la tabla: por ORDEN, no por línea. Marcar una orden manda sus
+  // líneas pendientes EN ESA impresora — el servidor ya las agrupó así.
+  const [ordenesSel, setOrdenesSel] = useState<Set<string>>(new Set())
+  const [expandidas, setExpandidas] = useState<Set<string>>(new Set())
+  const [progreso, setProgreso] = useState<string | null>(null)
 
   const { data, isFetching, error } = useQuery({
     queryKey: ['consumo', 'orden', codigo],
     queryFn: () => costeoConsumoApi.obtenerOrden(codigo!),
     enabled: !!codigo,
     retry: false,
+  })
+
+  const { data: pendientes } = useQuery({
+    queryKey: ['consumo', 'pendientes'],
+    queryFn: () => costeoConsumoApi.pendientes(),
+  })
+
+  /**
+   * Envía en tandas de 300 líneas, no todo de una.
+   *
+   * El tope lo manda el espejo a Google Sheets: una tanda de 300 líneas son
+   * ~1,500 filas en la hoja, y ~1,900 líneas en un solo request excederían el
+   * timeout además de la cuota. Partirlo también hace que una tanda que falle
+   * no se lleve a las anteriores, y deja mostrar avance en vez de una pantalla
+   * congelada. Cuando el espejo se retire, este número puede subir.
+   */
+  const LINEAS_POR_TANDA = 300
+
+  const capturarEnTandas = useMutation({
+    mutationFn: async (ids: number[]) => {
+      const tandas: number[][] = []
+      for (let i = 0; i < ids.length; i += LINEAS_POR_TANDA)
+        tandas.push(ids.slice(i, i + LINEAS_POR_TANDA))
+
+      const total: ResultadoLote = { enviadas: [], yaEstaban: [], fallidas: [] }
+      for (const [i, tanda] of tandas.entries()) {
+        setProgreso(
+          tandas.length > 1 ? `Enviando tanda ${i + 1} de ${tandas.length}…` : 'Enviando…',
+        )
+        const r = await costeoConsumoApi.capturar({
+          idsLineaProduccion: tanda,
+          fecha: fechaImpresion ? new Date(fechaImpresion).toISOString() : undefined,
+        })
+        // Un solo resumen al final: con 7 tandas, siete mensajes serían ilegibles.
+        total.enviadas.push(...r.enviadas)
+        total.yaEstaban.push(...r.yaEstaban)
+        total.fallidas.push(...r.fallidas)
+      }
+      return total
+    },
+    onSuccess: (r) => {
+      setProgreso(null)
+      setMensaje(resumirLote(r))
+      setOrdenesSel(new Set())
+      queryClient.invalidateQueries({ queryKey: ['consumo'] })
+      queryClient.invalidateQueries({ queryKey: ['rollos'] })
+    },
+    onError: (e) => {
+      setProgreso(null)
+      setMensaje({
+        tipo: 'error',
+        texto: e instanceof ApiError ? e.message : 'No se pudo registrar el consumo',
+      })
+    },
+  })
+
+  const enBlanco = useMutation({
+    mutationFn: (v: { codigo: string; marcado: boolean; yardas: number }) =>
+      costeoConsumoApi.editarEnBlanco(v.codigo, v.marcado, v.marcado ? v.yardas : undefined),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['consumo', 'pendientes'] }),
+    onError: (e) =>
+      setMensaje({
+        tipo: 'error',
+        texto: e instanceof ApiError ? e.message : 'No se pudo cambiar el papel en blanco',
+      }),
   })
 
   const capturar = useMutation({
@@ -118,6 +190,50 @@ export function ConsumoPage() {
         texto: e instanceof ApiError ? e.message : 'No se pudo registrar el consumo',
       }),
   })
+
+  // Las órdenes seleccionadas resueltas a las líneas que de verdad se envían.
+  // La cuenta sale de acá y no de `ordenesSel.size` porque lo que se manda son
+  // líneas: decir "3 órdenes" cuando son 47 líneas confunde al estimar el rollo.
+  const idsSeleccionados = useMemo(() => {
+    const ids: number[] = []
+    for (const g of pendientes?.grupos ?? [])
+      for (const o of g.ordenes) if (ordenesSel.has(o.codigo)) ids.push(...o.idsLineaProduccion)
+    return ids
+  }, [pendientes, ordenesSel])
+  const totalSeleccionado = idsSeleccionados.length
+  const todasLasOrdenes = useMemo(
+    () => (pendientes?.grupos ?? []).flatMap((g) => g.ordenes.map((o) => o.codigo)),
+    [pendientes],
+  )
+
+  function alternarOrden(codigo: string) {
+    setOrdenesSel((prev) => {
+      const s = new Set(prev)
+      if (s.has(codigo)) s.delete(codigo)
+      else s.add(codigo)
+      return s
+    })
+  }
+
+  function alternarGrupo(grupo: GrupoImpresoraPendiente, marcar: boolean) {
+    setOrdenesSel((prev) => {
+      const s = new Set(prev)
+      for (const o of grupo.ordenes) {
+        if (marcar) s.add(o.codigo)
+        else s.delete(o.codigo)
+      }
+      return s
+    })
+  }
+
+  function alternarDetalle(codigo: string) {
+    setExpandidas((prev) => {
+      const s = new Set(prev)
+      if (s.has(codigo)) s.delete(codigo)
+      else s.add(codigo)
+      return s
+    })
+  }
 
   function abrirOrden(op: string) {
     setMensaje(null)
@@ -223,20 +339,74 @@ export function ConsumoPage() {
       {/* Sin esto había que saber de memoria qué OP existen: la pantalla
           obligaba a teclear un código a ciegas. */}
       {panelAbierto && (
-        <PanelPendientes
-          onElegirOp={abrirOrden}
-          onCerrar={data ? () => setPanelAbierto(false) : undefined}
-          pieVacio={
-            atajoOrdenes && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-muted-foreground text-xs">
-                  Si falta trabajo, las órdenes se cargan por plantilla.
-                </span>
-                {atajoOrdenes}
-              </div>
-            )
-          }
-        />
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-ink">Trabajo pendiente</h2>
+            {totalSeleccionado > 0 && (
+              <span className="text-ink-faint text-xs">
+                {ordenesSel.size} orden(es) · {totalSeleccionado} línea(s) por enviar
+              </span>
+            )}
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              {/* Seleccionar todo lo pendiente, de todas las impresoras. El
+                  servidor resuelve el rollo de cada línea por su impresora, así
+                  que un envío mezclado es legítimo; el selector por grupo sigue
+                  siendo el camino normal (un operario trabaja una máquina). */}
+              <label className="flex items-center gap-1.5">
+                <Checkbox
+                  checked={todasLasOrdenes.length > 0 && ordenesSel.size === todasLasOrdenes.length}
+                  aria-label="Seleccionar todas las órdenes pendientes"
+                  onCheckedChange={(c) =>
+                    setOrdenesSel(c === true ? new Set(todasLasOrdenes) : new Set())
+                  }
+                />
+                <span className="text-ink-faint text-xs">Todas</span>
+              </label>
+              {ordenesSel.size > 0 && (
+                <Button variant="ghost" size="sm" onClick={() => setOrdenesSel(new Set())}>
+                  Limpiar selección
+                </Button>
+              )}
+              <Button
+                size="sm"
+                disabled={!puedeCapturar || totalSeleccionado === 0 || capturarEnTandas.isPending}
+                onClick={() => capturarEnTandas.mutate(idsSeleccionados)}
+              >
+                {progreso ?? `Enviar seleccionadas (${totalSeleccionado})`}
+              </Button>
+            </div>
+          </div>
+
+          {pendientes?.truncado && (
+            <Alert variant="destructive">
+              <AlertDescription>
+                Se alcanzó el tope de {pendientes.lineasDevueltas} líneas: hay más trabajo
+                pendiente del que se muestra. Filtrá por impresora para verlo completo.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <TablaPendientes
+            grupos={pendientes?.grupos ?? []}
+            seleccionadas={ordenesSel}
+            onAlternarOrden={alternarOrden}
+            onAlternarGrupo={alternarGrupo}
+            expandidas={expandidas}
+            onAlternarDetalle={alternarDetalle}
+            renderDetalle={(o) => <DetalleOrden codigo={o.codigo} />}
+            onEnBlanco={(o, marcado, yardas) =>
+              enBlanco.mutate({ codigo: o.codigo, marcado, yardas })
+            }
+            puedeMarcarEnBlanco={puedeCapturar}
+          />
+
+          {pendientes && pendientes.grupos.length === 0 && (
+            <div className="rounded-md border border-border p-4 text-center">
+              <p className="text-muted-foreground text-sm">No hay trabajo pendiente.</p>
+              {atajoOrdenes && <div className="mt-2">{atajoOrdenes}</div>}
+            </div>
+          )}
+        </div>
       )}
 
       {error && (

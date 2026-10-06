@@ -1050,8 +1050,9 @@ sin i18n (todo en español).
     - **Atribución**: las 2,982 filas quedaron a nombre del usuario `admin`. El usuario desechable no
       se pudo borrar (`consumo_estandar_creado_por_fkey` es `RESTRICT` — el rastro de auditoría
       protegiéndose, como debe), así que se reasignó `creado_por` antes de borrarlo.
-    - **Producción NO tiene nada de esto todavía**: ni las 142 tallas, ni la columna `frecuente`, ni
-      los 2,982 estándares. Van cuando se despliegue F4 — la migración y el seed son parte del
+    - ~~**Producción NO tiene nada de esto todavía**~~ — **desactualizado**: al desplegar el
+      2026-09-30 se comprobó que producción ya tenía las 158 tallas y 2,985 estándares. Se
+      cargaron en algún momento posterior a esta nota. Van cuando se despliegue F4 — la migración y el seed son parte del
       despliegue, y el import de datos es un paso manual aparte.
     - **Sigue sin construirse**: Fase B (backend de captura), C (la pantalla responsive PC/tablet/
       teléfono) y D (espejo a Google Sheets).
@@ -1949,6 +1950,137 @@ sin i18n (todo en español).
     - **Pendiente del usuario**: receta y precio de venta de los dos (hoy Q0.00, como los otros
       1,281), y el número real de desarrollo si existe.
 
+  - **F5-1A · El papel en blanco pasa a ser 4 yd POR ORDEN (2026-10-01)**. Planta reportó que el
+    consumo en blanco es un monto fijo por orden, no un factor por prenda. Medido antes de tocar
+    nada: en `26OP013300` (396 piezas) la regla vieja (`cantidad × 0.6`) habría cargado **237.60 yd
+    contra las 4 que corresponden** — 59×, o sea **el 20% de un rollo** de ~1,100 yd en una sola
+    orden.
+    - **El cambio no es de fórmula, es de modelo.** El "en blanco" dejó de calcularse dentro de la
+      captura por talla y pasó a ser **su propia fila** de `consumo_papel` (`origen='EN_BLANCO'`,
+      sin línea ni talla). Migración `20261001120000_en_blanco_por_orden` (+ `rollback.sql`):
+      columnas `consumo_en_blanco`/`en_blanco_yd` en `orden_produccion`, el CHECK de `origen`
+      ampliado, `ck_consumo_papel_origen_regla` reescrito, e índice único parcial
+      `(id_orden_produccion) WHERE origen='EN_BLANCO' AND anulado_en IS NULL`.
+    - ⚠️ **Eso disuelve el bug del 2026-09-29**, no solo lo parchea. El problema era que el flag
+      vivía en la línea y quedaba congelado al capturar: prenderlo después no hacía nada y reenviar
+      tampoco lo corregía. Al ser una fila independiente se puede cargar **antes, durante o
+      después** de enviar las líneas, cobrarlo dos veces es imposible **a nivel de base**, y
+      deshacerlo es anular una fila con autor y motivo. Por eso se eliminó el 409 de "ya enviada":
+      dejó de hacer falta.
+    - **Dónde se carga**: si la orden no se imprimió todavía, marcarla solo guarda la intención y la
+      fila se crea sola en el primer envío, contra el rollo que la imprima. Si ya se imprimió, se
+      carga **al rollo que la imprimió** (el del último consumo de producción de esa orden), no al
+      que esté montado ahora — así un olvido se corrige sin atribuirle papel a un rollo que nunca
+      tocó esa orden.
+    - **`consumo_yd` va en 0 y el monto en `en_blanco_yd`**, no al revés: `consumoPorMontajeIds()`
+      ya suma los tres conceptos, así que el panel, el historial y la merma la recogen **sin tocar
+      una línea de código**.
+    - **Las columnas `consumo_en_blanco`/`factor_en_blanco` de `linea_produccion` se eliminaron.**
+      Dejarlas sería tener dos fuentes de verdad para el mismo flag, que es exactamente el patrón
+      que produjo el bug. El backfill las subió a la orden primero (una orden lleva papel en blanco
+      si **cualquiera** de sus líneas lo tenía): 3 órdenes reales migradas.
+    - El endpoint vive en **Consumo de Papel y no en Órdenes** (`PATCH
+      /costeo/consumo-papel/orden/:codigo/en-blanco`), porque lo que hace es crear o anular consumo.
+      Gateado con `costeo.consumo.capturar`; **quitar** un papel en blanco ya cargado exige además
+      `costeo.consumo.anular`, resuelto como permiso **opcional** en el controlador (no en
+      `@RequirePermissions`, que exige TODOS los que lista). `editarLineaProduccion` y su DTO se
+      eliminaron.
+    - **Plantilla de Órdenes**: la columna "En blanco (SI/NO)" se sigue leyendo por fila pero se
+      guarda en la ORDEN. Si dos filas de la misma OP se contradicen, **ambas quedan con error
+      explícito** en vez de elegir una en silencio. El texto del encabezado **no** cambió a
+      propósito: el parser lo ubica por nombre, y renombrarlo haría que los archivos ya armados
+      perdieran la marca sin avisar.
+    - ⚠️ **El espejo a Google Sheets deja de llevar el papel en blanco** (columna L siempre vacía):
+      una fila `EN_BLANCO` no tiene talla ni LINE, así que no encaja en las 15 columnas del libro
+      legacy. Los Dashboards sub-reportan 4 yd por orden — muchísimo menos error que las 237 que
+      recibían antes, pero queda como **decisión pendiente** del usuario.
+    - **El reporte de consumo por OP no necesitó cambios**: no filtra por `origen`, así que las
+      filas `EN_BLANCO` caen en la rama correcta y suman en su columna.
+    - **Verificado** contra una instancia aislada en el puerto 4055 con los ids de Sheets apuntando
+      a un libro inexistente (el `.env` local apunta a producción). Sobre `26OP013306`, una de las
+      OP de 396 piezas: marcar sin producción → solo intención (`cargado:false`); primera captura →
+      fila `EN_BLANCO` de 4.0000 creada sola; segunda captura de la misma OP → **sigue habiendo una
+      sola fila**; desmarcar → anulada; volver a marcar ya impresa → cargada al montaje 23, el que
+      la imprimió; operario sin `costeo.consumo.anular` → **403** con el mensaje correcto. El rollo
+      descontó **4.0000 yd** de papel en blanco, no 237.60. Import con dos filas contradictorias →
+      ambas con error; con ambas en SI → la orden queda marcada. En navegador: el checkbox quedó en
+      la ficha de la orden, la columna de la tabla de líneas desapareció, marcar/desmarcar refleja
+      "4 yd"/"No lleva" sin errores de consola. Todos los datos y usuarios de prueba borrados — la
+      base volvió a 68 OP / 253 líneas / 7,969 piezas / 20 consumos.
+    - **Lo que NO entra acá**: la vista tabular con selección por impresora, el envío masivo en
+      tandas de 300, la exclusividad por impresora (tope, no muro) y el estado del rollo en el
+      encabezado. Son 1B-1D, decididos con el usuario pero sin construir.
+
+  - **F5-1B · El papel en blanco es 2-10 yd elegibles, y la vista pasa a tabular (2026-10-05)**.
+    Cuatro pedidos del usuario en un mismo mensaje.
+    - **El monto deja de ser 4 fijo**: ahora es un ENTERO entre 2 y 10 que el operario elige al
+      marcar. Migración `20261005120000_en_blanco_entero_2_a_10` (+ rollback): el CHECK pasa de
+      `>= 0` a `BETWEEN 2 AND 10` **más `= trunc()`**. El rango va en la base y no solo en el DTO
+      porque es regla de negocio: un POST a mano o una corrección por SQL chocan con el mismo
+      límite que el formulario. Verificado intentando violarlo: 1, 11 y 4.5 rechazados; 2, 7 y 10
+      aceptados.
+    - ⚠️ **Corregir la cantidad de una fila ya cargada ANULA Y RECREA, no edita en el lugar.** Una
+      fila de `consumo_papel` es inmutable salvo por su anulación (misma regla que Reposiciones);
+      pisarle las yardas dejaría el histórico diciendo que siempre fueron las nuevas. Verificado:
+      corregir de 7 a 3 deja la de 7 anulada con el motivo *"Se corrigió el papel en blanco de 7 a
+      3 yd"* y la de 3 vigente.
+    - **Reporte, según la captura del usuario**: el **Detalle** pierde la columna "En blanco" y el
+      monto se muestra en **Consumo**; la fila se identifica como **"En blanco por REPO"** en
+      Producto. El **Resumen conserva** su columna. Sale gratis una sola regla sin `if`: como una
+      fila PRODUCCION trae `enBlancoYd` en 0 y una EN_BLANCO trae `consumoYd` en 0, el detalle
+      muestra **la suma de los dos** y da lo correcto en ambos casos. La etiqueta vive en
+      `ETIQUETA_EN_BLANCO`, compartida con el espejo.
+    - **El espejo a Sheets vuelve a llevar el papel en blanco**, cerrando la decisión que había
+      quedado abierta en 1A: va en su propia fila con `ITEM = "En blanco por REPO"`, el monto en
+      **CONSUMO YDS** y la columna EN BLANCO vacía — "tal cual aparece en el reporte", pedido
+      textual del usuario. En la captura viaja dentro de `filasSheets` para que el lote mande todo
+      en **una** llamada; en el marcado manual se dispara aparte. El armado de la fila está en
+      `filaSheetsEnBlanco()`, un solo lugar: duplicarlo sería duplicar el contrato con un libro que
+      leen los Dashboards.
+    - ⚠️ **Desmarcar o corregir deja una fila huérfana en la hoja**: anular revierte en Postgres,
+      pero las anulaciones no se espejan (el legacy solo hace `append`). Es la convención de
+      siempre; con el en blanco ahora corregible a propósito va a pasar más seguido.
+    - **Vista tabular en Impresión de OPs** (`components/tabla-pendientes.tsx`, reemplaza
+      `panel-pendientes.tsx`): agrupada por **impresora → orden**, con casilla de envío por orden,
+      "seleccionar todas" por grupo y global, y el control del papel en blanco (casilla + cantidad)
+      **en la fila de la ORDEN**.
+      - **El control va por orden y no por ítem** porque el valor es de la orden: N controles
+        escribiendo lo mismo invitan a poner dos números distintos, que es la contradicción que ya
+        hubo que validar en el import. Y **no escondido en el detalle**, porque obligaría a abrir
+        orden por orden, justo lo contrario de una vista para trabajar la cola de corrido.
+      - La cantidad **solo se habilita con la casilla marcada**: un número editable con la casilla
+        apagada hace creer que ya se cargó algo.
+      - **`pendientes` ahora agrupa en el servidor** y su tope pasó de 200 a **2500 líneas**: el
+        tope es por línea, y con ~3.8 líneas por OP, 500 órdenes son ~1,900 — 200 truncaba la mitad
+        de la cola sin ninguna señal. Devuelve `truncado` y la pantalla lo **dice** en vez de
+        callarlo.
+      - **El contador es de LÍNEAS, no de órdenes**: seleccionar MS 1 (17 órdenes) dice "Enviar
+        seleccionadas (53)". Decir "3 órdenes" cuando son 47 líneas confunde al estimar el rollo.
+      - **El detalle se trae a demanda** (`components/detalle-orden.tsx`) y reusa `TarjetaLinea` sin
+        tocarla. Traerlo con la lista sería pedir miles de tallas que nadie va a mirar; react-query
+        lo cachea, así que expandir y colapsar no reconsulta. Dentro de la tabla las tarjetas van
+        **sin botón de envío**: ofrecer dos caminos de envío en la misma pantalla es lo que produce
+        el "creí que ya lo había mandado".
+      - ⚠️ **El detalle va en una fila propia con `colSpan`, pegada a la de su orden.** El primer
+        intento lo renderizaba después de la tabla entera para evitar el `colSpan`: con 17 órdenes
+        en un grupo, expandir la primera mostraba su detalle a 17 filas de distancia. Encontrado
+        mirando la captura, no por un error.
+      - **Envío en tandas de 300 líneas** (`LINEAS_POR_TANDA`), con un **solo resumen al final**:
+        con ~1,900 líneas son ~7 tandas y siete mensajes serían ilegibles. El tope lo manda el
+        espejo (300 líneas ≈ 1,500 filas en la hoja); cuando el espejo se retire puede subir.
+      - `GrupoColapsable.titulo` pasó de `string` a `ReactNode` (compatible hacia atrás) para poder
+        poner el nombre de la impresora y sus contadores con estilos distintos.
+    - **Verificado**: contra una instancia aislada con ids de Sheets falsos, el rango, la
+      corrección anular-y-recrear y la forma del reporte (el detalle ya no trae `enBlancoYd`, las
+      filas salen como `En blanco por REPO` con el monto en `consumoYd`, el resumen conserva la
+      columna y el total cierra). En navegador: 4 grupos de impresora con sus contadores, 66
+      órdenes, seleccionar MS 1 → "(53)", el detalle abre bajo su fila con las tarjetas reales,
+      marcar el papel en blanco habilita la cantidad y guardarla en 8 queda en la base. **Cero
+      desborde horizontal a 1600, 1280, 820 y 390 px** y consola limpia. Datos y usuario de prueba
+      revertidos.
+    - **Falta**: 1C (tope por impresora: aviso de quién la está usando, no bloqueo) y 1D (estado
+      del rollo en el encabezado del grupo + estimado del consumo seleccionado).
+
   - **Reporte consolidado de consumo por OP, exportable a Excel y PDF (2026-09-30)**. Pedido junto
     con el descuento de los tres conceptos: *"Luego habrá que consolidar cuál fue el consumo de todo
     lo relacionado con una OP"*. Módulo nuevo `apps/api/src/modules/costeo-reportes/` +
@@ -2140,6 +2272,33 @@ sin i18n (todo en español).
       es una decisión operativa que hay que tomar antes de usar esto en producción: Diseño tiene que
       dejar de usar la Forma 2 para las OP que se manejen en el ERP. Pendiente de confirmar con el
       usuario.
+
+### Despliegue del 2026-09-30 (`920cf14`) — ejecutado por SSH
+
+`920cf14` (reporte de consumo por OP, listado de órdenes, marca por empresa y corte del espejo a
+Sheets) desplegado en `192.168.2.13`, junto con `39b32b1` que venía sin pushear.
+
+- **Claude tiene SSH sin contraseña como `erpadmin`**, así que el despliegue se hizo solo. `sudo`
+  sigue pidiendo contraseña — irrelevante acá porque esta release no toca Nginx.
+- Respaldo previo de `core` (`~/backups/core-antes-logo-20260930-151534.sql`, 48K) porque la
+  migración altera `core.empresas`. La migración toca **solo `core`**, que es de `digitexsa_erp`,
+  así que `migrate deploy` con la `DATABASE_URL` de la app alcanzó — no hizo falta partirla por
+  dueños como en agosto.
+- `bash scripts/deploy.sh` corrió los 6 pasos hasta "Listo". La API reinició con **116 rutas**
+  (antes 113: las 2 del reporte más el listado de órdenes), todas declarando su acceso.
+- **El logo de Digitalpro NO viaja en el código** (el de Digitexsa sí, embebido en la migración):
+  se subió el archivo por `scp` a `/tmp` y se cargó con `cargar-logo-empresa.mjs CASTA`, borrando
+  el temporal después.
+- **Los arm sleeves se replicaron por SQL, resolviendo todo por nombre y código, nunca por id.**
+  Eso no es prolijidad: las tallas tienen **ids distintos en cada ambiente** (`2XS-XS` es 440 en
+  local y **298** en producción), así que copiar los ids habría cargado los consumos contra la
+  talla equivocada, en silencio. Se hizo en una transacción con `ON_ERROR_STOP=1`.
+- **Paridad verificada lado a lado**: `productos=1287 | vista=1287 | estandar=2990 | tallas=158 |
+  logos=2` en los dos ambientes. Desde afuera: `/` redirige 302 a `/erp/`, el frontend da 200 y la
+  API 401 sin token.
+- **No hizo falta correr el seed**: esta release no agregó permisos (el reporte usa
+  `costeo.dashboard.ver`, que existía desde F1). Sí hay que **cerrar sesión y volver a entrar**
+  para ver los logos, porque viajan en los datos de la sesión.
 
 ## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
 Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era

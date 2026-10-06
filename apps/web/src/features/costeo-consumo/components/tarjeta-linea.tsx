@@ -82,7 +82,6 @@ export function TarjetaLinea({
       <div className="text-muted-foreground mt-2 text-xs">
         Impresora <strong className="text-foreground">{linea.impresora?.codigo ?? '—'}</strong>
         {linea.tipoPapel && <> · {linea.tipoPapel.nombre}</>}
-        {linea.consumoEnBlanco && <> · en blanco ×{linea.factorEnBlanco}</>}
       </div>
 
       {/* Tallas: la grilla crece de 3 columnas en teléfono a 6 en tablet. */}
@@ -125,7 +124,6 @@ export function TarjetaLinea({
             <span className="text-muted-foreground">
               {' '}
               + eng. {linea.totalEnguiamientoYd}
-              {linea.totalEnBlancoYd > 0 && <> + blanco {linea.totalEnBlancoYd}</>}
             </span>
           </div>
         </div>

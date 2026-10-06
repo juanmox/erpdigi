@@ -28,9 +28,9 @@ export interface DetalleImpresion {
   cantidad: number | null
   impresora: string
   tipoPapel: string
+  /** Incluye el papel en blanco: el detalle ya no tiene columna propia. */
   consumoYd: number
   enguiamientoYd: number
-  enBlancoYd: number
   totalYd: number
 }
 

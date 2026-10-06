@@ -236,7 +236,6 @@ export function ReportesPage() {
                     <TableHead>Impresora</TableHead>
                     <TableHead className="text-right">Consumo</TableHead>
                     <TableHead className="text-right">Enguiam.</TableHead>
-                    <TableHead className="text-right">En blanco</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -252,7 +251,6 @@ export function ReportesPage() {
                       <TableCell>{x.impresora}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(x.consumoYd)}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(x.enguiamientoYd)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{yd(x.enBlancoYd)}</TableCell>
                       <TableCell className="text-right font-medium tabular-nums">{yd(x.totalYd)}</TableCell>
                     </TableRow>
                   ))}
