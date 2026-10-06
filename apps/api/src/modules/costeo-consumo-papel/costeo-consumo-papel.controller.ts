@@ -58,11 +58,15 @@ export class CosteoConsumoPapelController {
   @Get('pendientes')
   pendientes(
     @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
     @Query('idImpresora') idImpresora?: string,
   ) {
     const id = idImpresora ? Number(idImpresora) : undefined;
+    // El actor hace falta para el tope por impresora: una máquina que viene
+    // usando el que está mirando NO está "ocupada" para él.
     return this.service.pendientes(
       idEmpresa,
+      usuario.sub,
       Number.isFinite(id) && id! > 0 ? id : undefined,
     );
   }

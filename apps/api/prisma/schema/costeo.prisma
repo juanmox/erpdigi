@@ -419,6 +419,13 @@ model ConsumoPapel {
   anuladoEn           DateTime? @map("anulado_en") @db.Timestamptz(3)
   anuladoPor          Int?      @map("anulado_por")
   motivoAnulacion     String?   @map("motivo_anulacion")
+  /// Quién estaba usando la impresora cuando se envió este consumo, si fue
+  /// alguien distinto. NULL es el caso normal. Es el registro del "tope" por
+  /// impresora: avisa y deja pasar, pero queda escrito quién pasó por encima.
+  /// Int plano sin @relation, igual que creadoPor/anuladoPor desde F1, para no
+  /// agregarle otro array inverso a core.Usuario.
+  /// + SQL: FK RESTRICT a core.usuarios, CHECK (<> creado_por), índice parcial.
+  impresoraOcupadaPor Int?      @map("impresora_ocupada_por")
 
   ordenProduccion OrdenProduccion  @relation(fields: [idOrdenProduccion], references: [idOrdenProduccion])
   lineaProduccion LineaProduccion? @relation(fields: [idLineaProduccion], references: [idLineaProduccion])

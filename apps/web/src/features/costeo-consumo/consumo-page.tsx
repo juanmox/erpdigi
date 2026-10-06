@@ -19,11 +19,26 @@ import type { LineaConsumo, ResultadoLote } from './types'
 type Filtro = 'pendientes' | 'todas'
 
 /** Resumen legible de un envío: qué entró, qué ya estaba y qué falló. */
+/** Lo que hace falta para reintentar un envío confirmando impresoras ajenas. */
+interface ReintentoOcupada {
+  /** Solo las líneas frenadas por el tope, no todo el lote. */
+  ids: number[]
+  idsImpresora: number[]
+  /** "MS 1 (Ana Pérez)", para nombrar en el aviso de quién es cada máquina. */
+  detalle: string[]
+}
+
 function resumirLote(r: ResultadoLote): {
   tipo: 'ok' | 'error'
   texto: string
   /** Alguna línea falló porque su impresora no tenía rollo montado. */
   sinRollo: boolean
+  /**
+   * Alguna línea la frenó el tope por impresora. No es un error que se
+   * "arregle": se confirma y se reenvía, así que el aviso ofrece hacerlo en vez
+   * de dejar al operario sin salida.
+   */
+  reintentoOcupada?: ReintentoOcupada
 } {
   const partes: string[] = []
   if (r.enviadas.length > 0) {
@@ -31,16 +46,37 @@ function resumirLote(r: ResultadoLote): {
     partes.push(`${r.enviadas.length} línea(s) enviada(s) · ${tallas} talla(s)`)
   }
   if (r.yaEstaban.length > 0) partes.push(`${r.yaEstaban.length} ya estaban enviadas`)
-  if (r.fallidas.length > 0) {
+
+  // El tope por impresora se separa del resto de las fallas: se cuenta por
+  // MÁQUINA y no por línea, porque el aviso es uno por máquina —repetir
+  // "Ana está usando la MS 1" cincuenta veces no agrega nada.
+  const ocupadas = r.fallidas.filter((f) => f.impresoraOcupada)
+  const otras = r.fallidas.filter((f) => !f.impresoraOcupada)
+  let reintentoOcupada: ReintentoOcupada | undefined
+  if (ocupadas.length > 0) {
+    const porImpresora = new Map<number, { impresora: string; usuario: string }>()
+    for (const f of ocupadas) porImpresora.set(f.impresoraOcupada!.idImpresora, f.impresoraOcupada!)
+    const detalle = [...porImpresora.values()].map((x) => `${x.impresora} (${x.usuario})`)
+    partes.push(
+      `${ocupadas.length} línea(s) en uso por otro operario: ${detalle.join(', ')}`,
+    )
+    reintentoOcupada = {
+      ids: ocupadas.map((f) => f.idLineaProduccion),
+      idsImpresora: [...porImpresora.keys()],
+      detalle,
+    }
+  }
+  if (otras.length > 0) {
     // Los motivos se repiten mucho (casi siempre "sin rollo montado"), así que
     // se agrupan en vez de listar una línea por falla.
-    const motivos = [...new Set(r.fallidas.map((f) => f.motivo))].slice(0, 2)
-    partes.push(`${r.fallidas.length} fallaron: ${motivos.join('; ')}`)
+    const motivos = [...new Set(otras.map((f) => f.motivo))].slice(0, 2)
+    partes.push(`${otras.length} fallaron: ${motivos.join('; ')}`)
   }
   return {
     tipo: r.fallidas.length > 0 ? 'error' : 'ok',
     texto: partes.join(' · ') || 'No hubo nada que enviar',
     sinRollo: r.fallidas.some((f) => f.sinRollo),
+    reintentoOcupada,
   }
 }
 
@@ -77,6 +113,8 @@ export function ConsumoPage() {
     tipo: 'ok' | 'error'
     texto: string
     sinRollo?: boolean
+    /** Frenado por el tope de impresora: el aviso ofrece confirmar y reenviar. */
+    reintentoOcupada?: ReintentoOcupada
   } | null>(null)
   const [seleccion, setSeleccion] = useState<Set<number>>(new Set())
   // Vacío = ahora. Decide QUÉ rollo estaba montado, así que una orden impresa
@@ -118,7 +156,14 @@ export function ConsumoPage() {
   const LINEAS_POR_TANDA = 300
 
   const capturarEnTandas = useMutation({
-    mutationFn: async (ids: number[]) => {
+    mutationFn: async ({
+      ids,
+      idsImpresoraAjenaConfirmadas,
+    }: {
+      ids: number[]
+      /** Solo en el reintento del tope; vacío en el envío normal. */
+      idsImpresoraAjenaConfirmadas?: number[]
+    }) => {
       const tandas: number[][] = []
       for (let i = 0; i < ids.length; i += LINEAS_POR_TANDA)
         tandas.push(ids.slice(i, i + LINEAS_POR_TANDA))
@@ -131,6 +176,7 @@ export function ConsumoPage() {
         const r = await costeoConsumoApi.capturar({
           idsLineaProduccion: tanda,
           fecha: fechaImpresion ? new Date(fechaImpresion).toISOString() : undefined,
+          idsImpresoraAjenaConfirmadas,
         })
         // Un solo resumen al final: con 7 tandas, siete mensajes serían ilegibles.
         total.enviadas.push(...r.enviadas)
@@ -167,13 +213,20 @@ export function ConsumoPage() {
   })
 
   const capturar = useMutation({
-    mutationFn: (ids: number[]) =>
+    mutationFn: ({
+      ids,
+      idsImpresoraAjenaConfirmadas,
+    }: {
+      ids: number[]
+      idsImpresoraAjenaConfirmadas?: number[]
+    }) =>
       costeoConsumoApi.capturar({
         idsLineaProduccion: ids,
         // datetime-local da "2026-09-02T14:30" sin zona; el servidor guarda
         // timestamptz, así que se manda el instante completo en vez de dejar
         // que cada lado lo interprete a su manera.
         fecha: fechaImpresion ? new Date(fechaImpresion).toISOString() : undefined,
+        idsImpresoraAjenaConfirmadas,
       }),
     onSuccess: (r) => {
       setMensaje(resumirLote(r))
@@ -370,7 +423,7 @@ export function ConsumoPage() {
               <Button
                 size="sm"
                 disabled={!puedeCapturar || totalSeleccionado === 0 || capturarEnTandas.isPending}
-                onClick={() => capturarEnTandas.mutate(idsSeleccionados)}
+                onClick={() => capturarEnTandas.mutate({ ids: idsSeleccionados })}
               >
                 {progreso ?? `Enviar seleccionadas (${totalSeleccionado})`}
               </Button>
@@ -446,6 +499,33 @@ export function ConsumoPage() {
                     Ajustar la fecha de impresión
                   </Button>
                 )}
+              </div>
+            )}
+            {/* El tope por impresora NO tiene "arreglo": la máquina es de otro
+                y puede que igual corresponda (un cambio de turno). Así que la
+                salida es confirmarlo, y el aviso dice que queda registrado —
+                eso es lo que lo vuelve un tope y no un trámite invisible.
+                Reenvía SOLO las líneas frenadas, no el lote entero. */}
+            {mensaje.reintentoOcupada && puedeCapturar && (
+              <div className="space-y-1.5">
+                <p className="text-xs">
+                  Si te corresponde —por ejemplo un cambio de turno— confirmá y se envía igual.
+                  Queda registrado a tu nombre que era la impresora de{' '}
+                  {mensaje.reintentoOcupada.detalle.join(', ')}.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={capturarEnTandas.isPending}
+                  onClick={() =>
+                    capturarEnTandas.mutate({
+                      ids: mensaje.reintentoOcupada!.ids,
+                      idsImpresoraAjenaConfirmadas: mensaje.reintentoOcupada!.idsImpresora,
+                    })
+                  }
+                >
+                  Confirmar y enviar igual ({mensaje.reintentoOcupada.ids.length} línea(s))
+                </Button>
               </div>
             )}
           </AlertDescription>
@@ -524,7 +604,7 @@ export function ConsumoPage() {
                   <Button
                     size="sm"
                     disabled={seleccion.size === 0 || capturar.isPending}
-                    onClick={() => capturar.mutate([...seleccion])}
+                    onClick={() => capturar.mutate({ ids: [...seleccion] })}
                   >
                     {capturar.isPending
                       ? 'Enviando…'
@@ -591,9 +671,9 @@ export function ConsumoPage() {
                   seleccionada={seleccion.has(l.idLineaProduccion)}
                   onSeleccionar={(v) => alternar(l.idLineaProduccion, v)}
                   enviando={
-                    capturar.isPending && !!capturar.variables?.includes(l.idLineaProduccion)
+                    capturar.isPending && !!capturar.variables?.ids.includes(l.idLineaProduccion)
                   }
-                  onEnviar={() => capturar.mutate([l.idLineaProduccion])}
+                  onEnviar={() => capturar.mutate({ ids: [l.idLineaProduccion] })}
                 />
               ))}
             </div>

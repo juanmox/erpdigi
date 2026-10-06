@@ -550,6 +550,91 @@ export class CosteoRollosService {
     };
   }
 
+  /**
+   * Estado del rollo montado en cada una de estas impresoras: qué papel es y
+   * cuántas yardas le quedan.
+   *
+   * Vive acá y lo consume también Impresión de OPs (vía inyección del módulo)
+   * en vez de que esa pantalla llame al endpoint `panel()`: de los 7 roles que
+   * ven Impresión de OPs, ANALISTA_COSTOS **no** tiene `costeo.rollo.ver`, así
+   * que pedirlo desde el navegador le daría 403 y un encabezado vacío. Es la
+   * misma lección del reporte de consumo — los datos que una pantalla necesita
+   * los devuelve su propio endpoint, no el catálogo de otro módulo.
+   *
+   * Y es un método compartido, no una copia: el "restante" sale de
+   * `consumoPorMontajeIds()`, que suma los tres conceptos y ya es la fuente del
+   * panel, del historial y de la merma. Recalcularlo aparte es justo el patrón
+   * que hace que dos pantallas muestren números distintos del mismo rollo.
+   */
+  async estadoDeRollosPorImpresora(idsImpresora: number[]): Promise<
+    Map<
+      number,
+      {
+        idMontajeRollo: number;
+        tipoPapel: string;
+        codigoRollo: string;
+        yardasIniciales: number | null;
+        /** Puede ser NEGATIVO: el rollo rindió menos de lo que decía el fabricante. */
+        yardasRestantesEstimadas: number | null;
+        porcentajeRestante: number | null;
+      }
+    >
+  > {
+    const ids = [...new Set(idsImpresora)];
+    if (ids.length === 0) return new Map();
+
+    const activos = await this.prisma.montajeRollo.findMany({
+      where: { idImpresora: { in: ids }, desmontadoEn: null },
+      include: { rolloPapel: { include: INCLUDE_ROLLO } },
+    });
+    if (activos.length === 0) return new Map();
+
+    // TODOS los montajes de esos rollos, no solo el vigente: un rollo puede
+    // haberse montado, desmontado a medio usar y vuelto a montar, incluso en
+    // otra impresora, así que el consumo histórico es lo que da el restante real.
+    const todos = await this.prisma.montajeRollo.findMany({
+      where: { idRolloPapel: { in: activos.map((m) => m.idRolloPapel) } },
+      select: { idMontajeRollo: true, idRolloPapel: true },
+    });
+    const consumoPorMontaje = await this.consumoPorMontajeIds(
+      todos.map((m) => m.idMontajeRollo),
+    );
+    const consumoPorRollo = new Map<number, number>();
+    for (const m of todos)
+      consumoPorRollo.set(
+        m.idRolloPapel,
+        (consumoPorRollo.get(m.idRolloPapel) ?? 0) +
+          (consumoPorMontaje.get(m.idMontajeRollo) ?? 0),
+      );
+
+    return new Map(
+      activos.map((m) => {
+        const iniciales = m.rolloPapel.yardasIniciales
+          ? Number(m.rolloPapel.yardasIniciales)
+          : null;
+        const restante =
+          iniciales != null
+            ? iniciales - (consumoPorRollo.get(m.idRolloPapel) ?? 0)
+            : null;
+        return [
+          m.idImpresora,
+          {
+            idMontajeRollo: m.idMontajeRollo,
+            tipoPapel: m.rolloPapel.tipoPapel.nombre,
+            // Mismo formato que costeo.v_rollo_codigo.
+            codigoRollo: `${m.rolloPapel.facturaPapel.numeroFactura}-${m.rolloPapel.facturaPapel.totalRollos}-${m.rolloPapel.secuencia}`,
+            yardasIniciales: iniciales,
+            yardasRestantesEstimadas: restante,
+            porcentajeRestante:
+              iniciales != null && iniciales > 0 && restante != null
+                ? (restante / iniciales) * 100
+                : null,
+          },
+        ];
+      }),
+    );
+  }
+
   private async consumoPorMontajeIds(
     idsMontaje: number[],
   ): Promise<Map<number, number>> {

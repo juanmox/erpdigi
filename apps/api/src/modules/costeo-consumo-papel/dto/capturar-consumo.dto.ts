@@ -33,6 +33,21 @@ export class CapturarConsumoDto {
   @IsInt()
   idImpresora?: number;
 
+  /**
+   * Impresoras que otro operario viene usando y sobre las que se confirma
+   * enviar igual (tope por impresora). Es una LISTA explícita y no un booleano
+   * a propósito: un "sí, mandá todo" confirmaría a ciegas máquinas que el
+   * operario no vio en el aviso. El servidor valida exactamente éstas.
+   *
+   * Cada envío así queda registrado en `consumo_papel.impresora_ocupada_por`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  idsImpresoraAjenaConfirmadas?: number[];
+
   /** Vacío = ahora. Importa porque decide QUÉ rollo estaba montado. */
   @IsOptional()
   @IsISO8601()

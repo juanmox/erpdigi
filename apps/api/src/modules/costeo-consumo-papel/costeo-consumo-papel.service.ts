@@ -15,6 +15,7 @@ import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { ETIQUETA_EN_BLANCO } from '../costeo-reportes/costeo-reportes.service';
+import { CosteoRollosService } from '../costeo-rollos/costeo-rollos.service';
 import { CapturarConsumoDto } from './dto/capturar-consumo.dto';
 
 /**
@@ -51,6 +52,37 @@ export interface TallaCalculada {
   idConsumoPapel: number | null;
 }
 
+/**
+ * Ventana para decidir si una impresora "la está usando otro": un TURNO.
+ *
+ * El usuario pidió que un operario no envíe consumo a la máquina de otro
+ * ("regularmente se le asigna a un solo operario de impresión una sola
+ * impresora"), eligiendo un tope y no un muro. Esta ventana solo decide cuándo
+ * MOSTRAR el aviso, y 8 horas es el turno corriente: un montaje de ayer sin
+ * envíos ya no dice quién está en esa máquina hoy.
+ *
+ * El equilibrio importa en los dos sentidos. Demasiado corta y el aviso calla
+ * a mitad de un turno que sí es de otro; demasiado larga y el aviso se vuelve
+ * rutina y se confirma sin leerlo, que es el peor resultado posible para un
+ * tope. El mensaje siempre lleva el "desde cuándo" exacto, así que la decisión
+ * final la toma quien está frente a la máquina, con el dato a la vista.
+ */
+const VENTANA_OCUPACION_MS = 8 * 60 * 60 * 1000;
+
+/** Quién viene trabajando en una impresora, si no es el que está mirando. */
+export interface OcupacionImpresora {
+  idUsuario: number;
+  usuario: string;
+  /** Desde cuándo: su último envío, o el momento en que montó el rollo. */
+  desde: Date;
+  /**
+   * Qué lo delata. Un envío de consumo es la señal fuerte ("está trabajando
+   * ahí ahora"); el montaje es la de respaldo, para el operario que recién
+   * montó y todavía no envió nada.
+   */
+  via: 'CONSUMO' | 'MONTAJE';
+}
+
 export interface OrdenPendiente {
   idOrdenProduccion: number;
   codigo: string;
@@ -63,12 +95,46 @@ export interface OrdenPendiente {
   totalPiezas: number;
   /** Lo que se envía al marcar la orden: sus líneas pendientes EN ESA impresora. */
   idsLineaProduccion: number[];
+  /**
+   * Yardas que esta orden le va a sacar al rollo: estándar + enguiamiento + el
+   * papel en blanco que todavía no se cobró. Se calcula en el servidor
+   * (convención #1) con el estándar vigente HOY, el mismo que va a usar la
+   * captura.
+   */
+  estimadoYd: number;
+  /**
+   * El estimado está INCOMPLETO porque faltan estándares. Sin esto el número
+   * engañaría al que suma el rollo: una orden a la que le falta el estándar de
+   * la mitad de sus tallas mostraría un consumo mucho menor del real. Trae las
+   * tallas afectadas, que además son las que impiden enviarla.
+   */
+  tallasSinEstandar: string[];
+}
+
+/** El rollo que está montado en una impresora, para el encabezado del grupo. */
+export interface RolloDelGrupo {
+  idMontajeRollo: number;
+  tipoPapel: string;
+  codigoRollo: string;
+  yardasIniciales: number | null;
+  /**
+   * Puede ser NEGATIVO y eso NO es un error: significa que el rollo rindió
+   * menos de lo que declaraba el fabricante. El usuario lo pidió explícito —
+   * "el valor negativo en rojo" — porque es justamente la medición que querían
+   * sacar. No se arrastra al rollo siguiente.
+   */
+  yardasRestantesEstimadas: number | null;
+  porcentajeRestante: number | null;
 }
 
 export interface GrupoImpresoraPendiente {
   idImpresora: number | null;
   impresora: string;
   ordenes: OrdenPendiente[];
+  /** Otro operario viene usando esta impresora; null si está libre o es la propia. */
+  ocupadaPor: OcupacionImpresora | null;
+  /** El rollo montado ahora, o null si no hay ninguno (no se puede enviar). */
+  rollo: RolloDelGrupo | null;
 }
 
 @Injectable()
@@ -77,6 +143,13 @@ export class CosteoConsumoPapelService {
     private readonly prisma: PrismaService,
     private readonly auditoria: AuditoriaService,
     private readonly googleSheets: GoogleSheetsService,
+    /**
+     * Para el estado del rollo del encabezado. Se inyecta el servicio en vez de
+     * que la pantalla llame al endpoint `panel()`: ANALISTA_COSTOS ve Impresión
+     * de OPs pero no tiene `costeo.rollo.ver`, y recalcular el restante acá
+     * sería una segunda fuente de verdad del mismo número.
+     */
+    private readonly rollos: CosteoRollosService,
   ) {}
 
   private async resolverOrden(
@@ -277,7 +350,104 @@ export class CosteoConsumoPapelService {
    * cola sin ninguna señal. El default alcanza para el volumen que describió el
    * usuario; si se supera, la pantalla lo dice en vez de mentir.
    */
-  async pendientes(idEmpresa: number, idImpresora?: number, limite = 2500) {
+  /**
+   * Quién viene usando cada una de estas impresoras, si no es el propio actor.
+   *
+   * Dos fuentes, en orden de fuerza: el último consumo vigente capturado en esa
+   * impresora (alguien está trabajando ahí AHORA) y, si no hay ninguno en la
+   * ventana, quién montó el rollo que sigue puesto (recién montó y todavía no
+   * envió nada).
+   *
+   * ⚠️ No se usa la impresora "asignada" a un operario, porque no existe tal
+   * cosa en el modelo: la asignación es una costumbre de planta, no un dato. Lo
+   * que sí hay es actividad real, que además refleja los cambios de turno solos.
+   *
+   * Dos consultas con DISTINCT ON en vez de una por impresora: son hasta 14
+   * máquinas y esto corre en cada carga de la pantalla.
+   */
+  private async ocupacionDeImpresoras(
+    idsImpresora: number[],
+    idUsuarioActor: number,
+  ): Promise<Map<number, OcupacionImpresora>> {
+    const ids = [...new Set(idsImpresora)].filter((x) => x != null);
+    if (ids.length === 0) return new Map();
+    const desde = new Date(Date.now() - VENTANA_OCUPACION_MS);
+
+    const ultimosConsumos = await this.prisma.$queryRaw<
+      { id_impresora: number; creado_por: number; creado_en: Date }[]
+    >`
+      SELECT DISTINCT ON (id_impresora) id_impresora, creado_por, creado_en
+      FROM costeo.consumo_papel
+      WHERE id_impresora = ANY(${ids}::int[])
+        AND anulado_en IS NULL
+        AND creado_en >= ${desde}::timestamptz
+      ORDER BY id_impresora, creado_en DESC
+    `;
+
+    const montajes = await this.prisma.montajeRollo.findMany({
+      where: {
+        idImpresora: { in: ids },
+        desmontadoEn: null,
+        montadoEn: { gte: desde },
+      },
+      select: { idImpresora: true, creadoPor: true, montadoEn: true },
+    });
+
+    // El consumo pisa al montaje: si las dos fuentes apuntan a la misma
+    // impresora, la actividad reciente describe mejor quién está ahí.
+    const crudo = new Map<
+      number,
+      { idUsuario: number; desde: Date; via: 'CONSUMO' | 'MONTAJE' }
+    >();
+    for (const m of montajes)
+      crudo.set(m.idImpresora, {
+        idUsuario: m.creadoPor,
+        desde: m.montadoEn,
+        via: 'MONTAJE',
+      });
+    for (const c of ultimosConsumos)
+      crudo.set(c.id_impresora, {
+        idUsuario: c.creado_por,
+        desde: c.creado_en,
+        via: 'CONSUMO',
+      });
+
+    // La propia actividad no ocupa nada: avisarle a alguien que él mismo está
+    // usando la máquina sería ruido puro, y confirmarlo lo entrenaría a
+    // confirmar sin leer.
+    for (const [idImp, o] of [...crudo])
+      if (o.idUsuario === idUsuarioActor) crudo.delete(idImp);
+    if (crudo.size === 0) return new Map();
+
+    const usuarios = await this.prisma.usuario.findMany({
+      where: {
+        idUsuario: {
+          in: [...new Set([...crudo.values()].map((o) => o.idUsuario))],
+        },
+      },
+      select: { idUsuario: true, username: true, nombreCompleto: true },
+    });
+    const nombrePor = new Map(
+      usuarios.map((u) => [u.idUsuario, u.nombreCompleto || u.username]),
+    );
+
+    return new Map(
+      [...crudo].map(([idImp, o]) => [
+        idImp,
+        {
+          ...o,
+          usuario: nombrePor.get(o.idUsuario) ?? `Usuario ${o.idUsuario}`,
+        },
+      ]),
+    );
+  }
+
+  async pendientes(
+    idEmpresa: number,
+    idUsuarioActor: number,
+    idImpresora?: number,
+    limite = 2500,
+  ) {
     const lineas = await this.prisma.lineaProduccion.findMany({
       where: {
         // Sin esto el panel ofrecía trabajo pendiente de la otra empresa.
@@ -293,7 +463,15 @@ export class CosteoConsumoPapelService {
         ordenProduccion: { include: { cliente: true } },
         producto: { select: { codigo: true, descripcion: true } },
         impresora: { select: { idImpresora: true, codigo: true } },
-        tallas: { select: { cantidad: true } },
+        // idTalla y nombre, no solo la cantidad: hacen falta para resolver el
+        // estándar vigente y para nombrar las tallas que no lo tienen.
+        tallas: {
+          select: {
+            cantidad: true,
+            idTalla: true,
+            talla: { select: { nombre: true } },
+          },
+        },
       },
       orderBy: [
         { impresora: { orden: 'asc' } },
@@ -302,6 +480,30 @@ export class CosteoConsumoPapelService {
       ],
       take: limite,
     });
+
+    // Estándar vigente HOY para TODA la cola en una sola consulta, igual que en
+    // `buscarPorCodigo`. Con ~2,500 líneas, una consulta por línea sería
+    // inviable; con un `in` sobre productos y tallas es una sola ida a la base.
+    const hoy = new Date();
+    const idsProducto = [...new Set(lineas.map((l) => l.idProducto))];
+    const idsTalla = [
+      ...new Set(lineas.flatMap((l) => l.tallas.map((t) => t.idTalla))),
+    ];
+    const estandares =
+      idsProducto.length && idsTalla.length
+        ? await this.prisma.consumoEstandar.findMany({
+            where: {
+              idProducto: { in: idsProducto },
+              idTalla: { in: idsTalla },
+              vigenteDesde: { lte: hoy },
+              OR: [{ vigenteHasta: null }, { vigenteHasta: { gt: hoy } }],
+            },
+            select: { idProducto: true, idTalla: true, yardas: true },
+          })
+        : [];
+    const estandarPor = new Map(
+      estandares.map((e) => [`${e.idProducto}|${e.idTalla}`, Number(e.yardas)]),
+    );
 
     // Una línea sin impresora asignada no puede agruparse bajo ninguna: se
     // junta aparte para que no desaparezca de la vista sin explicación.
@@ -316,6 +518,8 @@ export class CosteoConsumoPapelService {
           idImpresora: idImp === SIN_IMPRESORA ? null : idImp,
           impresora: l.impresora?.codigo ?? 'Sin impresora asignada',
           ordenes: [],
+          ocupadaPor: null,
+          rollo: null,
         };
         grupos.set(idImp, grupo);
       }
@@ -335,6 +539,8 @@ export class CosteoConsumoPapelService {
           lineas: 0,
           totalPiezas: 0,
           idsLineaProduccion: [],
+          estimadoYd: 0,
+          tallasSinEstandar: [],
         };
         grupo.ordenes.push(orden);
       }
@@ -342,10 +548,79 @@ export class CosteoConsumoPapelService {
       orden.lineas++;
       orden.totalPiezas += l.tallas.reduce((a, t) => a + t.cantidad, 0);
       orden.idsLineaProduccion.push(l.idLineaProduccion);
+
+      // Mismas fórmulas que la captura, que salieron del Código.gs legacy:
+      // consumo = estándar × cantidad, enguiamiento = cantidad × factor. Si no
+      // se repitieran acá, el estimado y lo que de verdad se descuenta podrían
+      // discrepar sin que nada lo delate.
+      const factorEng =
+        Number(l.factorEnguiamiento ?? 0) || FACTOR_ENGUIAMIENTO_DEFAULT;
+      for (const t of l.tallas) {
+        const yd = estandarPor.get(`${l.idProducto}|${t.idTalla}`);
+        if (yd == null) {
+          // Sin estándar no se puede estimar NI enviar: se nombra la talla en
+          // vez de sumar cero en silencio.
+          if (!orden.tallasSinEstandar.includes(t.talla.nombre))
+            orden.tallasSinEstandar.push(t.talla.nombre);
+          continue;
+        }
+        orden.estimadoYd += yd * t.cantidad + t.cantidad * factorEng;
+      }
+    }
+
+    const resultado = [...grupos.values()];
+    const idsImpresoraPresentes = resultado
+      .map((g) => g.idImpresora)
+      .filter((x): x is number => x != null);
+
+    // El papel en blanco se suma al estimado SOLO si todavía no se cobró: ya
+    // cargado, el índice único impide una segunda fila, así que sumarlo otra vez
+    // haría creer que el rollo va a rendir menos de lo que rinde.
+    const idsOrden = resultado.flatMap((g) =>
+      g.ordenes
+        .filter((o) => o.consumoEnBlanco)
+        .map((o) => o.idOrdenProduccion),
+    );
+    const enBlancoYaCobrado = new Set(
+      idsOrden.length
+        ? (
+            await this.prisma.consumoPapel.findMany({
+              where: {
+                idOrdenProduccion: { in: idsOrden },
+                origen: 'EN_BLANCO',
+                anuladoEn: null,
+              },
+              select: { idOrdenProduccion: true },
+            })
+          ).map((c) => c.idOrdenProduccion)
+        : [],
+    );
+
+    // Ocupación y estado del rollo en UNA pasada para todos los grupos, no una
+    // consulta por impresora. El grupo "Sin impresora asignada" no puede estar
+    // ocupado por nadie ni tener rollo: no hay máquina.
+    const ocupacion = await this.ocupacionDeImpresoras(
+      idsImpresoraPresentes,
+      idUsuarioActor,
+    );
+    const rollos = await this.rollos.estadoDeRollosPorImpresora(
+      idsImpresoraPresentes,
+    );
+
+    for (const g of resultado) {
+      if (g.idImpresora != null) {
+        g.ocupadaPor = ocupacion.get(g.idImpresora) ?? null;
+        g.rollo = rollos.get(g.idImpresora) ?? null;
+      }
+      for (const o of g.ordenes) {
+        if (o.consumoEnBlanco && !enBlancoYaCobrado.has(o.idOrdenProduccion))
+          o.estimadoYd += o.enBlancoYd;
+        o.estimadoYd = +o.estimadoYd.toFixed(4);
+      }
     }
 
     return {
-      grupos: [...grupos.values()],
+      grupos: resultado,
       /** Para avisar si el tope recortó la cola en vez de callarlo. */
       lineasDevueltas: lineas.length,
       truncado: lineas.length === limite,
@@ -390,6 +665,12 @@ export class CosteoConsumoPapelService {
         motivo: string;
         /** Marca el caso de "impresora sin rollo montado", que tiene arreglo propio. */
         sinRollo?: boolean;
+        /** Impresora que otro operario está usando: se confirma, no se arregla. */
+        impresoraOcupada?: {
+          idImpresora: number;
+          impresora: string;
+          usuario: string;
+        };
       }[],
     };
     // Se juntan las filas de TODO el lote para mandarlas en una sola llamada a
@@ -397,9 +678,33 @@ export class CosteoConsumoPapelService {
     // serían 300 llamadas contra la cuota.
     const filasSheets: (string | number)[][] = [];
 
+    // El tope por impresora se resuelve UNA vez para el lote entero y no dentro
+    // de cada línea: un envío de 300 líneas de la misma máquina haría 300 veces
+    // la misma consulta. Las impresoras del lote salen de las líneas (o del
+    // override), así que hay que leerlas antes del loop.
+    const impresorasDelLote = await this.prisma.lineaProduccion.findMany({
+      where: { idLineaProduccion: { in: dto.idsLineaProduccion }, idEmpresa },
+      select: { idImpresora: true },
+    });
+    const ocupacion = await this.ocupacionDeImpresoras(
+      [
+        ...impresorasDelLote.map((l) => l.idImpresora),
+        dto.idImpresora ?? null,
+      ].filter((x): x is number => x != null),
+      idUsuarioActor,
+    );
+    const confirmadas = new Set(dto.idsImpresoraAjenaConfirmadas ?? []);
+
     for (const id of dto.idsLineaProduccion) {
       try {
-        const r = await this.capturarUna(id, dto, idUsuarioActor, idEmpresa);
+        const r = await this.capturarUna(
+          id,
+          dto,
+          idUsuarioActor,
+          idEmpresa,
+          ocupacion,
+          confirmadas,
+        );
         filasSheets.push(...r.filasSheets);
         if (r.creadas > 0)
           resultado.enviadas.push({
@@ -415,7 +720,13 @@ export class CosteoConsumoPapelService {
         const respuesta = e instanceof HttpException ? e.getResponse() : null;
         const cuerpo =
           respuesta && typeof respuesta === 'object'
-            ? (respuesta as { message?: string; motivo?: string })
+            ? (respuesta as {
+                message?: string;
+                motivo?: string;
+                idImpresora?: number;
+                impresora?: string;
+                usuario?: string;
+              })
             : null;
         resultado.fallidas.push({
           idLineaProduccion: id,
@@ -425,6 +736,17 @@ export class CosteoConsumoPapelService {
               : (cuerpo?.message ??
                 (e instanceof HttpException ? e.message : 'Error inesperado')),
           sinRollo: cuerpo?.motivo === 'SIN_ROLLO_MONTADO' || undefined,
+          // La pantalla necesita distinguir este caso para ofrecer confirmar en
+          // vez de un arreglo, y agruparlo por impresora. Se mira el `motivo`
+          // estructurado y no el texto, que se rompe al reescribirlo.
+          impresoraOcupada:
+            cuerpo?.motivo === 'IMPRESORA_OCUPADA'
+              ? {
+                  idImpresora: cuerpo.idImpresora!,
+                  impresora: cuerpo.impresora!,
+                  usuario: cuerpo.usuario!,
+                }
+              : undefined,
         });
       }
     }
@@ -493,6 +815,13 @@ export class CosteoConsumoPapelService {
       idMontajeRollo: number;
       idTipoPapel: number;
       idUsuarioActor: number;
+      /**
+       * Marca del tope por impresora, si el envío que la crea va sobre la
+       * máquina de otro. El papel en blanco sale del MISMO rollo ajeno, así que
+       * sin esto un reporte que sume yardas enviadas sobre impresora de otro
+       * perdería estas 2-10 yd. Opcional: el marcado manual no pasa por el tope.
+       */
+      impresoraOcupadaPor?: number | null;
     },
   ) {
     const ya = await tx.consumoPapel.findFirst({
@@ -516,6 +845,7 @@ export class CosteoConsumoPapelService {
         consumoYd: 0,
         enBlancoYd: d.enBlancoYd,
         creadoPor: d.idUsuarioActor,
+        impresoraOcupadaPor: d.impresoraOcupadaPor ?? null,
       },
       select: { idConsumoPapel: true },
     });
@@ -779,6 +1109,8 @@ export class CosteoConsumoPapelService {
     dto: CapturarConsumoDto,
     idUsuarioActor: number,
     idEmpresa: number,
+    ocupacion: Map<number, OcupacionImpresora> = new Map(),
+    confirmadas: Set<number> = new Set(),
   ) {
     const fecha = dto.fecha ? new Date(dto.fecha) : new Date();
     if (Number.isNaN(fecha.getTime()))
@@ -809,6 +1141,49 @@ export class CosteoConsumoPapelService {
       throw new BadRequestException(
         'La línea no tiene impresora asignada: indicá cuál se usó',
       );
+
+    // Tope por impresora: si otro operario viene trabajando en esta máquina,
+    // se exige confirmarlo explícitamente. La validación va en el servidor y no
+    // solo en la pantalla, porque el cuerpo lo arma el cliente.
+    //
+    // ⚠️ Es un TOPE, no un muro: con la impresora en
+    // `idsImpresoraAjenaConfirmadas` el envío procede y queda registrado. Nunca
+    // puede bloquear, porque el cambio de turno es operación normal — el
+    // usuario confirmó que alguien monta en la tarde y otro cierra en la noche.
+    const ocupada = ocupacion.get(idImpresora);
+    const ocupadaSinConfirmar = ocupada && !confirmadas.has(idImpresora);
+    if (ocupadaSinConfirmar) {
+      const impresora = await this.prisma.impresora.findUnique({
+        where: { idImpresora },
+        select: { codigo: true },
+      });
+      const codigo = impresora?.codigo ?? String(idImpresora);
+      // La hora va en zona de Guatemala y no como ISO crudo: este mensaje lo
+      // lee un operario en planta, y "2026-10-06T05:19:21.316Z" no le dice nada
+      // (son además las 23:19 del día anterior para él). `desde` viaja también
+      // estructurado para que la pantalla pueda decir "hace 12 minutos".
+      const hora = ocupada.desde.toLocaleString('es-GT', {
+        timeZone: 'America/Guatemala',
+        dateStyle: 'short',
+        timeStyle: 'short',
+      });
+      throw new ConflictException({
+        message:
+          `${ocupada.usuario} viene usando la ${codigo} ` +
+          `(${ocupada.via === 'CONSUMO' ? 'último envío' : 'montó el rollo'} ` +
+          `el ${hora}). Si de todos modos te corresponde —por ejemplo un cambio ` +
+          `de turno—, confirmalo: queda registrado a tu nombre.`,
+        motivo: 'IMPRESORA_OCUPADA',
+        idImpresora,
+        impresora: codigo,
+        usuario: ocupada.usuario,
+        desde: ocupada.desde,
+      });
+    }
+    // Solo cuando de verdad era de otro: si la venía usando el mismo que envía,
+    // `ocupacionDeImpresoras` ya la descartó y esto queda en null. El CHECK de
+    // la base rechaza la fila si llegaran a coincidir.
+    const impresoraOcupadaPor = ocupada?.idUsuario ?? null;
 
     const hoy = new Date();
     const estandares = await this.prisma.consumoEstandar.findMany({
@@ -924,6 +1299,10 @@ export class CosteoConsumoPapelService {
             // Calcularlo por talla era lo que daba 237 yd donde van 4.
             observacion: dto.observacion ?? null,
             creadoPor: idUsuarioActor,
+            // Registro del tope: null en el caso normal. Va por FILA y no una
+            // marca aparte por envío, para que el reporte futuro pueda contar
+            // yardas —no solo eventos— enviadas sobre la máquina de otro.
+            impresoraOcupadaPor,
           },
         });
         creadas++;
@@ -975,6 +1354,8 @@ export class CosteoConsumoPapelService {
           idMontajeRollo,
           idTipoPapel: montaje.rolloPapel.idTipoPapel,
           idUsuarioActor,
+          // El papel en blanco sale del mismo rollo, así que hereda la marca.
+          impresoraOcupadaPor,
         });
         // Solo si de verdad se creó: el índice único la vuelve idempotente, y
         // espejar igual duplicaría la fila en una hoja que solo hace append.

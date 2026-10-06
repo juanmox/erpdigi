@@ -56,12 +56,44 @@ export interface OrdenPendiente {
   totalPiezas: number
   /** Lo que se envía al marcarla: sus líneas pendientes EN ESA impresora. */
   idsLineaProduccion: number[]
+  /**
+   * Yardas que esta orden le va a sacar al rollo (estándar + enguiamiento + el
+   * papel en blanco que falte cobrar). Lo calcula el servidor con el mismo
+   * estándar que usará la captura, así que no es una aproximación de la pantalla.
+   */
+  estimadoYd: number
+  /** Si trae tallas, el estimado está incompleto y la orden no se puede enviar. */
+  tallasSinEstandar: string[]
+}
+
+/** El rollo montado ahora en una impresora. */
+export interface RolloDelGrupo {
+  idMontajeRollo: number
+  tipoPapel: string
+  codigoRollo: string
+  yardasIniciales: number | null
+  /** Negativo = el rollo rindió menos de lo que declaraba el fabricante. */
+  yardasRestantesEstimadas: number | null
+  porcentajeRestante: number | null
+}
+
+/** Otro operario viene trabajando en esta impresora. */
+export interface OcupacionImpresora {
+  idUsuario: number
+  usuario: string
+  /** ISO. Su último envío, o cuándo montó el rollo. */
+  desde: string
+  via: 'CONSUMO' | 'MONTAJE'
 }
 
 export interface GrupoImpresoraPendiente {
   idImpresora: number | null
   impresora: string
   ordenes: OrdenPendiente[]
+  /** null = libre, o la viene usando el que está mirando. */
+  ocupadaPor: OcupacionImpresora | null
+  /** null = no hay rollo montado, así que no se puede enviar nada a esa máquina. */
+  rollo: RolloDelGrupo | null
 }
 
 export interface Pendientes {
@@ -80,6 +112,12 @@ export interface ResultadoLote {
     motivo: string
     /** La impresora no tenía rollo montado: tiene arreglo propio (montar o ajustar la fecha). */
     sinRollo?: boolean
+    /**
+     * Otro operario está usando esa impresora. No tiene "arreglo": se confirma
+     * y se reenvía, y queda registrado. Viene agrupable por impresora para no
+     * repetir el mismo aviso una vez por línea.
+     */
+    impresoraOcupada?: { idImpresora: number; impresora: string; usuario: string }
   }[]
 }
 

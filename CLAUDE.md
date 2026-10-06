@@ -2078,8 +2078,137 @@ sin i18n (todo en español).
       marcar el papel en blanco habilita la cantidad y guardarla en 8 queda en la base. **Cero
       desborde horizontal a 1600, 1280, 820 y 390 px** y consola limpia. Datos y usuario de prueba
       revertidos.
-    - **Falta**: 1C (tope por impresora: aviso de quién la está usando, no bloqueo) y 1D (estado
-      del rollo en el encabezado del grupo + estimado del consumo seleccionado).
+    - **Bug de 1B encontrado al revisar lo que el usuario hizo en la pantalla, no por una prueba
+      propia** (`core.auditoria`, 2026-10-05): el campo de cantidad guardaba en CADA tecla, así que
+      elegir 7 con las flechas disparó **diez PATCH seguidos** (4·2·6·7·8·9·10·9·9·9). Sobre una
+      orden sin imprimir solo ensucia la auditoría, pero sobre una **ya impresa** cada paso ANULA Y
+      RECREA la fila de consumo, así que dejaría cinco pares anulado/creado para un solo cambio de
+      opinión. Corregido: la cantidad se guarda **al salir del campo o con Enter** (estado local
+      mientras se escribe, `useEffect` para resincronizar con el servidor), y un valor fuera de
+      rango no se manda — vuelve el del servidor en vez de dejar creer que guardó algo. Verificado
+      con clic real: la secuencia completa pasó de ~12 PATCH a **3**, y las flechas disparan **0**
+      hasta salir del campo. *Lección*: mirar `core.auditoria` después de que el usuario prueba
+      algo encuentra defectos que ninguna prueba propia iba a encontrar.
+
+  - **F5-1C · Tope (no muro) al enviar a la impresora de otro operario (2026-10-05)**. Pedido del
+    usuario: "regularmente se le asigna a un solo operario de impresión una sola impresora, por lo
+    que NO debería otro usuario poder enviar consumos a una impresora que otro esté usando",
+    eligiendo explícitamente **el tope sobre el muro**.
+    - ⚠️ **No puede ser un bloqueo, y eso descartó mi primer diseño.** Había propuesto resolver la
+      pertenencia por quién montó el rollo; el usuario aclaró que un operario puede montar en la
+      tarde, retirarse, y otro desmontar en la noche — "debe ser posible esa situación". Un muro
+      rompería el cambio de turno, que es operación normal.
+    - **La señal es ACTIVIDAD REAL, no una asignación**: no existe "impresora asignada" en el
+      modelo, es una costumbre de planta. `ocupacionDeImpresoras()` usa dos fuentes, en orden de
+      fuerza: el último `consumo_papel` vigente de esa impresora (alguien está trabajando ahí
+      ahora) y, si no hay ninguno en la ventana, quién montó el rollo que sigue puesto. Dos
+      consultas con `DISTINCT ON`, no una por máquina. La actividad propia **nunca** ocupa:
+      avisarle a alguien que él mismo la está usando lo entrenaría a confirmar sin leer.
+    - **Ventana de 8 horas = un turno** (`VENTANA_OCUPACION_MS`), elegida por el usuario entre tres
+      opciones. Demasiado corta y el aviso calla a mitad de un turno que sí es de otro; demasiado
+      larga y se vuelve rutina que se confirma sin leer, el peor resultado para un tope. El mensaje
+      lleva **el "hace cuánto" exacto** para que decida quien está frente a la máquina — con los
+      datos reales se vio su valor: MS 2 apareció como "la usa Administrador · envió hace 7 h 14
+      min", que un operario lee y entiende que ya no está.
+    - **El tope vive en el servidor**, no en la pantalla: `capturarUna()` rechaza con
+      `ConflictException` y **respuesta estructurada** (`motivo: 'IMPRESORA_OCUPADA'` más
+      `idImpresora`/`impresora`/`usuario`/`desde`) si la impresora no viene en
+      `idsImpresoraAjenaConfirmadas`. Es una **lista explícita y no un booleano**: un "sí, mandá
+      todo" confirmaría a ciegas máquinas que el operario no vio nombradas. Verificado que
+      confirmar una impresora distinta **no** habilita la otra.
+    - La ocupación se resuelve **una vez por lote** en `capturarLote()`, no por línea: un envío de
+      300 líneas de la misma máquina habría hecho 300 veces la misma consulta.
+    - **Migración `20261005140000_consumo_impresora_ocupada_por`** (+ rollback): columna nullable
+      `impresora_ocupada_por` con FK `RESTRICT` a `core.usuarios`, CHECK (`<> creado_por` — dos
+      iguales no significan nada y ensuciarían cualquier reporte que cuente estos casos) e **índice
+      parcial** (los casos marcados son la excepción; es lo que hace barato el reporte futuro).
+      Guarda el **usuario** y no un booleano: "lo envié sobre la máquina de Pedro" es la pregunta
+      que se va a querer responder. Sin backfill: nadie envió sobre impresora ajena porque la regla
+      no existía, así que NULL es el valor correcto para todo el histórico.
+      - El registro es lo que **le da dientes al tope**. La alternativa (dejarlo solo en
+        `core.auditoria`) se descartó con el usuario por tres costos concretos: ahí `id_usuario` es
+        `ON DELETE SET NULL` —borrar un usuario le borra el nombre al histórico, ya pasó con los de
+        prueba—, habría que parsear el detalle JSON, y el reporte saldría más caro.
+    - **La fila `EN_BLANCO` HEREDA la marca** (`asegurarFilaEnBlanco` ganó el parámetro). Ese papel
+      sale del mismo rollo ajeno: sin esto, el total de la prueba habría sido 4.132 yd en vez de
+      **9.1320**, o sea el reporte perdía más de la mitad.
+    - **El mensaje va en hora de Guatemala, no en ISO.** El primer intento mandaba
+      `2026-10-06T05:19:21.316Z`, que para el operario son las 23:19 del día anterior y no le dice
+      nada. `desde` viaja además estructurado para que la pantalla diga "hace 12 min".
+    - Frontend: aviso ámbar en el encabezado de cada impresora ("La usa Ana · envió hace 9 min"), y
+      **el tope se resuelve desde el resumen del envío**, no con un diálogo previo: si el servidor
+      frena líneas, el aviso agrupa **por máquina** (no por línea: repetir "Ana usa la MS 1"
+      cincuenta veces no agrega nada) y ofrece **"Confirmar y enviar igual (N línea(s))"**, que
+      reenvía SOLO las frenadas. Se eligió así sobre un pre-diálogo porque no estorba el camino
+      normal y funciona aunque `pendientes` no conozca esa impresora — el servidor es el que sabe.
+    - **Decisión del usuario: NO se extiende a Reposiciones.** El operario de reposiciones no está
+      usando la impresora, pide papel para reponer; avisarle que "otro la está usando" sería ruido.
+    - **Verificado** contra la instancia aislada (ids de Sheets falsos) con dos usuarios
+      desechables, uno ocupando y otro enviando encima: el CHECK, la FK y el RESTRICT rechazando lo
+      que deben (23514 / 23503 / 23001), Beto ve la ocupación y Ana no la ve sobre sí misma, 409 sin
+      confirmar, envío correcto confirmando, y las filas marcadas en la base con el usuario justo.
+      **Con clic real en navegador**: el aviso en el encabezado, el botón de confirmar, y tras
+      confirmar "1 línea(s) enviada(s)" con la fila registrada a nombre de quien la tomó. Cero
+      desborde a 1600/1280/820/390 px y consola limpia. Datos y usuarios de prueba borrados.
+
+  - **F5-1D · Estado del rollo en el encabezado y estimado de lo seleccionado (2026-10-05)**.
+    - **El estado del rollo lo devuelve `pendientes()`, NO el `panel()` de Gestión de Rollos.**
+      Medido antes de decidirlo: de los 7 roles que ven Impresión de OPs, **ANALISTA_COSTOS no
+      tiene `costeo.rollo.ver`**, así que pedirlo desde el navegador le habría dado 403 y un
+      encabezado vacío. Es la misma lección del reporte de consumo.
+    - Pero **no se recalcula**: `estadoDeRollosPorImpresora()` nuevo en `costeo-rollos.service.ts`
+      (inyectado vía `CosteoRollosModule`, que ya se exportaba) reusa `consumoPorMontajeIds()`, la
+      fuente del panel, del historial y de la merma. Verificado que da **exactamente lo mismo** que
+      el panel en las tres impresoras con rollo (1074.9433 / 1099.0892 / 1100.0000) — ese contraste
+      es el que delataría una segunda fuente de verdad.
+    - **El estimado por orden se calcula en el servidor** (convención #1) con las mismas fórmulas
+      de la captura y el estándar vigente hoy: estándar × cantidad + enguiamiento + el papel en
+      blanco **que todavía no se cobró** (si ya tiene su fila, sumarlo haría creer que el rollo
+      rinde menos). Los estándares de toda la cola se resuelven en **una** consulta, igual que en
+      `buscarPorCodigo` — con ~2,500 líneas, una por línea sería inviable.
+      - **Prueba dura, la que importa**: capturar `26OP012954` bajó el rollo **195.9366 yd** contra
+        un estimado de **195.9365**. O sea el número predice lo que de verdad se descuenta,
+        incluido el papel en blanco.
+      - Una orden con tallas sin estándar muestra **"falta estándar"** y no un estimado parcial:
+        ese número haría creer que el rollo alcanza. Son además las tallas que impiden enviarla.
+    - **El aviso de "no alcanza" es aviso, no bloqueo** (el usuario: "no se da mucho... debe ser
+      registrado y el valor negativo en rojo"). Con todo MS 1 seleccionado dice "1,929.97 yd de
+      1,074.94 — no alcanza para todo el lote (faltan 855.03 yd). Se puede enviar igual; el rollo va
+      a quedar en negativo y eso queda registrado". El restante negativo **no se arrastra al rollo
+      siguiente**: es la medición de cuánto rindió de más o de menos ese rollo respecto de lo que
+      declaraba el fabricante, que era justamente lo que se quería deducir.
+    - La suma es **por grupo** y no global: el rollo es de esa máquina, sumar la selección de las
+      otras daría un contraste sin sentido.
+    - ⚠️ **"Sin rollo montado" y "rollo sin yardas declaradas" dicen cosas distintas.** Un primer
+      texto mostraba el segundo en los dos casos, lo que mandaba a buscar un dato del rollo cuando
+      el problema era que no hay rollo. Encontrado verificando MS 6, que es el caso real.
+    - **Verificado en navegador** con los 4 grupos reales: el papel y las yardas con % en cada
+      encabezado, MS 6 con "Sin rollo montado", la columna Estimado con los valores del backend, y
+      el contraste en los cuatro casos (no alcanza ×2, alcanza, sin rollo). Cero desborde a 1600,
+      1280, 820 y 390 px; consola limpia. Datos y usuario de prueba borrados.
+    - **Las 12 yd por montaje y las 4 yd por interrupción quedan CERRADAS, y con eso se cierra el
+      bloque F5-1 — pero porque YA ESTÁN REGISTRADAS, no porque se decidiera dejarlas fuera**
+      (aclaración del usuario tras consultarlo en planta, 2026-10-05). Es una distinción que
+      importa, porque lo contrario llevaría a diagnosticar mal la merma:
+      1. **Las 12 yd del arranque ya vienen prorrateadas dentro del consumo estándar de cada
+         prenda.** El operario las mencionó como "lo que se desperdicia al montar el rollo", que
+         suena a consumo no contabilizado, pero contablemente ya estaban tomadas en cuenta al
+         armar el estándar. O sea que modelarlas aparte (`origen='MONTAJE'`) las habría cobrado
+         **dos veces**.
+      2. **Las interrupciones SON el papel en blanco.** Las "4 yd" eran un aproximado que el
+         operario dio de memoria; por eso el monto quedó configurable entre 2 y 10 en F5-1B, que
+         es justamente lo que hacía falta: no siempre es el mismo.
+      - **Consecuencia, y es buena**: la merma del desmontaje vuelve a medir **solo lo
+        inexplicado**, sin arranques ni interrupciones legítimos adentro. Y el estimado de 1D es
+        completo, no optimista: el arranque viaja dentro del estándar y el papel en blanco se suma
+        aparte cuando falta cobrarlo.
+      - ⚠️ **Una versión anterior de esta nota decía lo contrario** —que esas yardas caían en la
+        merma y que el estimado era optimista—. Era incorrecto: se escribió antes de que el usuario
+        confirmara el prorrateo. Si un análisis futuro encuentra esa afirmación en algún lado, está
+        equivocada.
+      - El **reporte de conciliación** (`rollo = Σ OP + arranques + interrupciones + merma`) pierde
+        su motivo por lo mismo: no hay conceptos sueltos que conciliar, ya están todos dentro del
+        consumo registrado.
 
   - **Reporte consolidado de consumo por OP, exportable a Excel y PDF (2026-09-30)**. Pedido junto
     con el descuento de los tres conceptos: *"Luego habrá que consolidar cuál fue el consumo de todo

@@ -21,6 +21,12 @@ export const costeoConsumoApi = {
     idImpresora?: number
     fecha?: string
     observacion?: string
+    /**
+     * Impresoras de otro operario sobre las que se confirma enviar igual. Lista
+     * explícita y no un booleano: así se confirman exactamente las que el
+     * operario vio nombradas en el aviso.
+     */
+    idsImpresoraAjenaConfirmadas?: number[]
   }) =>
     apiFetch<ResultadoLote>('/costeo/consumo-papel', {
       method: 'POST',
