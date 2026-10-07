@@ -2210,6 +2210,61 @@ sin i18n (todo en español).
         su motivo por lo mismo: no hay conceptos sueltos que conciliar, ya están todos dentro del
         consumo registrado.
 
+  - **El desmontaje deja de pedir la lectura del rollo, y la merma se retira (2026-10-06)**. El
+    usuario preguntó si no convenía que el valor se registrara solo, sin intervención. Mi primera
+    respuesta fue que no —"es el único dato físico del sistema"—, **y estaba mal calibrada**: al
+    preguntarle cómo se mide el rollo en planta, confirmó que **se estima a ojo por el diámetro**,
+    sin instrumento. Eso cambia todo: pedir un número de cuatro decimales (`1031.7904`) sobre una
+    estimación visual es falsa precisión, y la merma que salía de su diferencia medía, en buena
+    parte, el pulso de quien estimaba.
+    - **`yardasFinales` salió del DTO**: lo calcula el servidor como `iniciales − consumo
+      histórico`, el mismo "Restante" del panel. Verificado inyectando `yardasFinales: 5` en el
+      cuerpo: el servidor lo **ignoró** y guardó 1000. El `whitelist` del ValidationPipe descarta
+      lo que el DTO no declara, así que el cliente ya no puede decidir un dato de inventario.
+    - **Se sigue GUARDANDO aunque sea derivable**, y no es redundancia: congela cuánto quedaba en
+      *ese* momento. Si después se carga consumo con fecha retroactiva contra ese montaje,
+      recalcularlo daría otro número y el hecho histórico se perdería. Queda `null` si el rollo no
+      trae `yardas_iniciales` — null dice "no se sabe" mejor que un 0 inventado.
+    - **`merma` y `yardasUsadasFisicas` se quitaron de `detalleMontaje()`**, no solo de la
+      pantalla. Con las yardas finales derivadas del propio cálculo, los términos se cancelan y la
+      merma da **cero por construcción**: no medía nada, y un campo que siempre vale 0 termina en
+      un reporte creyendo que significa algo. El modal muestra ahora "Queda en el rollo · es lo que
+      se va a registrar" en su lugar.
+    - **Qué se perdió, dicho explícito**: ya no se puede detectar a nivel de rollo que falten
+      consumos por cargar, ni estimar en agregado si los rollos vienen con más o menos yardas de
+      las que declara el fabricante. Era una medición ruidosa —se promediaba sobre muchos rollos—
+      pero era la única. **Revertirlo es barato**: devolver `yardasFinales` al DTO y recuperar las
+      dos líneas de cálculo, que quedaron documentadas en el servicio. La columna nunca se borró.
+    - Verificado con curl (el valor inyectado ignorado, doble desmontaje 409, estado inválido 400,
+      cuerpo vacío 400) y **con clic real en el navegador**: el modal sin campo numérico, sin la
+      palabra "Merma", y el desmontaje completo en un clic guardando 1000.00 yd. Cero desborde a
+      1500/820/390 px y consola limpia. Factura, rollo, montaje y usuario de prueba borrados.
+    - **Dos cosas que se revisaron y NO hizo falta tocar**: dejar el campo vacío adrede ya era
+      imposible (la pantalla cortaba y el DTO exigía el campo, 400), y declarar *menos* yardas de
+      las reales **sube** la merma en vez de bajarla, así que nunca fue la vía para esconder
+      desperdicio — el riesgo estaba en el sentido contrario. El usuario decidió **no** separar el
+      papel descartado por daño de la merma inexplicada por ahora.
+
+  - **Hoja "Consolidado" en el Excel del reporte (2026-10-06)**. Pedido del usuario: las dos hojas
+    de detalle tienen columnas distintas (una habla de LINE/Producto/Talla y la otra de No.
+    repo/Departamento/Defecto), así que juntarlas exigía copiar y pegar cada vez.
+    - Cuarta hoja, **segunda en el orden** (después de Resumen), con **una fila por registro** y 18
+      columnas: cada concepto en la suya y vacía donde no aplica, en vez de mezclar "LINE / No.
+      repo" en una sola — una columna con dos significados no se puede agrupar ni filtrar.
+    - La columna **Tipo** (`Impresión` / `En blanco` / `Reposición`) es lo que la vuelve útil: con
+      ella sale cualquier corte en una tabla dinámica. El tipo de las filas de papel en blanco se
+      deriva de `ETIQUETA_EN_BLANCO`, que ya viaja dentro del detalle de impresión desde F5-1B.
+    - ⚠️ **Sin fila TOTAL a propósito.** Una fila de totales dentro del rango se cuela en cualquier
+      tabla dinámica o filtro; el total ya vive en "Resumen", que es la hoja de lectura. Lleva en
+      cambio **fila congelada y autofiltro** ya aplicados.
+    - Las filas van ordenadas por fecha, mezclando tipos: leerla como línea de tiempo es lo que
+      permite agrupar después. La tela va en su columna y **no suma al papel**, misma regla que el
+      resto del reporte.
+    - **Verificado generando el Excel real y leyéndolo de vuelta**: 23 filas = 17 de impresión + 6
+      de reposiciones, repartidas en 16 Impresión / 1 En blanco / 6 Reposición, y la suma del
+      consolidado da **87.7897 yd de papel y 7.4500 de tela**, exactamente los totales del reporte.
+      Las otras tres hojas quedaron intactas.
+
   - **Reporte consolidado de consumo por OP, exportable a Excel y PDF (2026-09-30)**. Pedido junto
     con el descuento de los tres conceptos: *"Luego habrá que consolidar cuál fue el consumo de todo
     lo relacionado con una OP"*. Módulo nuevo `apps/api/src/modules/costeo-reportes/` +

@@ -49,7 +49,12 @@ export const costeoRollosApi = {
       method: 'POST',
       body: JSON.stringify({ idImpresora }),
     }),
-  desmontar: (idMontajeRollo: number, body: { yardasFinales: number; estado: EstadoRollo }) =>
+  /**
+   * Solo el estado final: las yardas finales las calcula el servidor desde el
+   * restante del rollo. Mandarlas desde acá sería dejar que el cliente decida
+   * un dato de inventario.
+   */
+  desmontar: (idMontajeRollo: number, body: { estado: EstadoRollo }) =>
     apiFetch<MontajeDetalle>(`/costeo/rollos/montajes/${idMontajeRollo}/desmontar`, {
       method: 'PATCH',
       body: JSON.stringify(body),

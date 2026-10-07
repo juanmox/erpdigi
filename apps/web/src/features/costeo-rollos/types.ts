@@ -60,8 +60,6 @@ export interface MontajeDetalle {
   yardasAlIniciarEsteMontaje: number | null
   /** Restante real del rollo físico ahora mismo (yardas_iniciales − consumo histórico total). */
   yardasRestantesRollo: number | null
-  yardasUsadasFisicas: number | null
-  merma: number | null
   /** Quién montó. Se resuelve en el servidor: la columna guarda solo el id. */
   montadoPorUsuario: { idUsuario: number; username: string; nombreCompleto: string } | null
   /** Quién desmontó. null mientras el montaje siga vigente. */

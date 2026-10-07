@@ -370,12 +370,41 @@ export class CosteoRollosService {
 
     const ahora = new Date();
 
+    // Las yardas finales las calcula el SERVIDOR, no se reciben del cliente.
+    //
+    // Antes eran la lectura física que tecleaba quien desmontaba, pero el
+    // usuario confirmó (2026-10-06) que en planta el rollo **se estima a ojo
+    // por el diámetro**: no hay instrumento. Pedir un número de cuatro
+    // decimales sobre eso era falsa precisión, y la merma que salía de su
+    // diferencia medía en buena parte el pulso de quien estimaba.
+    //
+    // Se GUARDA aunque sea derivable: congela cuánto quedaba en ESE momento. Si
+    // después se cargan consumos con fecha retroactiva contra este montaje,
+    // recalcularlo daría otro número y el hecho histórico se perdería.
+    //
+    // Queda en null si el rollo no trae `yardas_iniciales`: sin ese dato no hay
+    // de dónde restar, y null dice "no se sabe" mejor que un 0 inventado.
+    const { consumoTotalHistorico } = await this.historialConsumoRollo(
+      montaje.idRolloPapel,
+    );
+    const rollo = await this.prisma.rolloPapel.findUniqueOrThrow({
+      where: { idRolloPapel: montaje.idRolloPapel },
+      select: { yardasIniciales: true },
+    });
+    const yardasFinales =
+      rollo.yardasIniciales != null
+        ? // Lo que quedaba al iniciar este montaje, menos lo consumido en él.
+          // Equivale a `yardas_iniciales - consumo de TODOS los montajes`, que
+          // es el mismo "Restante" que muestra el panel.
+          +(Number(rollo.yardasIniciales) - consumoTotalHistorico).toFixed(4)
+        : null;
+
     await this.prisma.$transaction(async (tx) => {
       await tx.montajeRollo.update({
         where: { idMontajeRollo },
         data: {
           desmontadoEn: ahora,
-          yardasFinales: dto.yardasFinales,
+          yardasFinales,
           desmontadoPor: idUsuarioActor,
         },
       });
@@ -392,7 +421,7 @@ export class CosteoRollosService {
       accion: 'UPDATE',
       datosNuevos: {
         desmontadoEn: ahora,
-        yardasFinales: dto.yardasFinales,
+        yardasFinales,
         estadoRollo: dto.estado,
       },
     });
@@ -438,17 +467,15 @@ export class CosteoRollosService {
     const yardasRestantesRollo =
       yardasIniciales != null ? yardasIniciales - consumoTotalHistorico : null;
 
-    const yardasFinales = montaje.yardasFinales
-      ? Number(montaje.yardasFinales)
-      : null;
-    const yardasUsadasFisicas =
-      yardasAlIniciarEsteMontaje != null && yardasFinales != null
-        ? yardasAlIniciarEsteMontaje - yardasFinales
-        : null;
-    const merma =
-      yardasUsadasFisicas != null
-        ? yardasUsadasFisicas - consumoEsteMontaje
-        : null;
+    // `merma` y `yardasUsadasFisicas` SE QUITARON de esta respuesta el
+    // 2026-10-06. Desde que `yardas_finales` la calcula el servidor como
+    // `iniciales - consumo`, la merma da CERO por construcción —los términos se
+    // cancelan—, así que no medía nada y un campo que siempre vale 0 termina
+    // en un reporte creyendo que significa algo.
+    //
+    // La columna `yardas_finales` sigue guardándose, así que si algún día hay
+    // un instrumento de medición real en planta, basta volver a recibirla del
+    // cliente y estas dos líneas se recuperan tal cual.
 
     // `creadoPor`/`desmontadoPor` son enteros sin @relation (decisión de F1:
     // evitar ~12 arrays inversos en core.Usuario), así que los nombres se
@@ -471,8 +498,6 @@ export class CosteoRollosService {
       consumoTotalHistoricoRollo: consumoTotalHistorico,
       yardasAlIniciarEsteMontaje,
       yardasRestantesRollo,
-      yardasUsadasFisicas,
-      merma,
       montadoPorUsuario: porId.get(montaje.creadoPor) ?? null,
       desmontadoPorUsuario:
         montaje.desmontadoPor != null

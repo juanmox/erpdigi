@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError } from '@/lib/api'
 import { costeoRollosApi } from '../api'
@@ -24,7 +23,6 @@ const OPCIONES_ESTADO: { valor: EstadoRollo; etiqueta: string; descripcion: stri
 
 export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: ModalDesmontajeProps) {
   const queryClient = useQueryClient()
-  const [yardasFinales, setYardasFinales] = useState('')
   const [estado, setEstado] = useState<EstadoRollo>('EN_BODEGA')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -43,7 +41,6 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
 
   useEffect(() => {
     if (open) {
-      setYardasFinales('')
       setEstado('EN_BODEGA')
       setError(null)
     }
@@ -54,26 +51,18 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
 
   const yardasAlIniciar = detalle?.yardasAlIniciarEsteMontaje ?? null
   const consumoEsteMontaje = detalle?.consumoEsteMontaje ?? 0
-  const finalesNum = Number(yardasFinales)
-  const usadasFisicas =
-    yardasAlIniciar != null && yardasFinales !== '' && !Number.isNaN(finalesNum) ? yardasAlIniciar - finalesNum : null
-  const merma = usadasFisicas != null ? usadasFisicas - consumoEsteMontaje : null
-  // Lo que el sistema CREE que queda: mismo número que muestra el panel como
-  // "Restante". Es el atajo de "no hubo merma", no un valor por defecto — ver
-  // el comentario del campo de yardas finales.
+  // Lo que queda en el rollo: el mismo número que el panel muestra como
+  // "Restante". Acá es informativo — el servidor lo recalcula al desmontar, así
+  // que la pantalla no decide el valor que se guarda.
   const restanteCalculado =
     yardasAlIniciar != null ? yardasAlIniciar - consumoEsteMontaje : null
 
   async function confirmar() {
     if (!idMontajeRollo) return
-    if (yardasFinales === '' || Number.isNaN(finalesNum) || finalesNum < 0) {
-      setError('Ingresá las yardas finales del rollo')
-      return
-    }
     setGuardando(true)
     setError(null)
     try {
-      await costeoRollosApi.desmontar(idMontajeRollo, { yardasFinales: finalesNum, estado })
+      await costeoRollosApi.desmontar(idMontajeRollo, { estado })
       queryClient.invalidateQueries({ queryKey: ['costeo-rollos'] })
       onDesmontado()
       onOpenChange(false)
@@ -120,69 +109,36 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
             )}
           </div>
 
-          <div>
-            <Label className="mb-1 block text-xs">Yardas al iniciar este montaje</Label>
-            <Input value={isLoading ? 'Cargando…' : (yardasAlIniciar ?? '—')} disabled />
-          </div>
-          {/* ARRANCA VACÍO A PROPÓSITO. Este campo es la lectura FÍSICA del rollo,
-              y la merma sale justo de su diferencia contra lo que el sistema
-              calculó. Si se precargara con el restante calculado, la merma
-              daría 0 siempre que alguien confirme sin mirar, y la medición
-              perdería todo sentido. El atajo de abajo deja registrar "no hubo
-              merma" en un clic, pero como acto deliberado. */}
-          <div>
-            <Label className="mb-1 block text-xs">Yardas finales (lectura al desmontar)</Label>
-            <Input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              value={yardasFinales}
-              onChange={(e) => setYardasFinales(e.target.value)}
-              placeholder="Lectura real del rollo"
-              autoFocus
-            />
-            {restanteCalculado != null && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setYardasFinales(restanteCalculado.toFixed(4))}
-                  className="text-accent-brand text-xs font-medium underline-offset-2 hover:underline"
-                >
-                  Coincide con lo calculado ({restanteCalculado.toFixed(2)} yd)
-                </button>
-                <span className="text-ink-faint text-xs">— usalo solo si no hubo merma</span>
-              </div>
-            )}
-          </div>
+          {/* Las yardas finales ya NO se teclean: las calcula el servidor y acá
+              solo se muestran, para que quien desmonta vea con qué queda el
+              rollo. En planta el rollo se estima a ojo por el diámetro, así que
+              pedir un número de cuatro decimales era falsa precisión.
 
+              Y por eso se fue también "Merma calculada": con el valor derivado
+              del propio cálculo, la merma daría cero SIEMPRE. Un cero
+              permanente no es un dato, es ruido que parece uno. */}
           <div className="grid grid-cols-2 gap-3 rounded-md border border-border p-3 text-sm">
             <div>
               <div className="text-ink-faint">Consumo de este montaje</div>
               <div className="font-medium">{consumoEsteMontaje.toFixed(2)} yd</div>
-              {/* Se aclara qué incluye porque de este número sale la merma, y
-                  quien desmonta lo está comparando contra una lectura física. */}
               <div className="text-ink-faint text-[11px] leading-tight">
                 impresión + enguiamiento + en blanco + reposiciones
               </div>
             </div>
             <div>
-              <div className="text-ink-faint">Merma calculada</div>
-              <div
-                className={
-                  'font-medium ' +
-                  (merma == null ? '' : merma < -0.01 ? 'text-destructive' : '')
-                }
-              >
-                {merma != null ? `${merma.toFixed(2)} yd` : '—'}
+              <div className="text-ink-faint">Queda en el rollo</div>
+              <div className="font-medium">
+                {isLoading
+                  ? '…'
+                  : restanteCalculado != null
+                    ? `${restanteCalculado.toFixed(2)} yd`
+                    : '—'}
               </div>
-              {/* Merma negativa = se usó menos papel del que se registró como
-                  consumido. No es desperdicio, es un dato que no cuadra: o la
-                  lectura está mal, o se cargó consumo de más. */}
-              {merma != null && merma < -0.01 && (
-                <div className="text-destructive mt-0.5 text-xs">
-                  Negativa: revisá la lectura
-                </div>
-              )}
+              <div className="text-ink-faint text-[11px] leading-tight">
+                {restanteCalculado != null
+                  ? 'es lo que se va a registrar'
+                  : 'el rollo no trae yardas declaradas'}
+              </div>
             </div>
           </div>
 

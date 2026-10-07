@@ -347,6 +347,121 @@ export class CosteoReportesService {
     totalRow.eachCell((c) => Object.assign(c, negrita));
     resumen.columns.forEach((c, i) => (c.width = i < 2 ? 22 : 16));
 
+    // Hoja consolidada: TODO el consumo en una sola lista, una fila por
+    // registro. Existe porque las dos hojas de detalle tienen columnas
+    // distintas (una habla de LINE/Producto/Talla y la otra de No.
+    // repo/Departamento/Defecto), así que juntarlas exigía copiar y pegar a
+    // mano cada vez.
+    //
+    // Cada concepto va en SU columna y vacía donde no aplica, en vez de
+    // mezclar "LINE / No. repo" en una sola: una columna con dos significados
+    // no se puede agrupar ni filtrar.
+    //
+    // ⚠️ Sin fila TOTAL a propósito. Esta hoja está pensada como fuente de
+    // tablas dinámicas y filtros, y una fila de totales dentro del rango se
+    // cuela en cualquier agregación. El total ya vive en "Resumen".
+    const cons = wb.addWorksheet('Consolidado');
+    const encC = cons.addRow([
+      'Fecha',
+      'Tipo',
+      'OP',
+      'Cliente',
+      'LINE',
+      'Producto',
+      'Talla',
+      'Cantidad',
+      'No. repo',
+      'Departamento',
+      'Defecto',
+      'Impresora',
+      'Tipo de papel',
+      'Papel (yd)',
+      'Enguiamiento (yd)',
+      'Total papel (yd)',
+      'Tela',
+      'Tela (yd)',
+    ]);
+    encC.eachCell((c) => Object.assign(c, negrita));
+
+    // El cliente vive en el resumen (es de la orden, no de cada fila), así que
+    // se resuelve por código de OP en vez de repetir la consulta.
+    const clientePorOp = new Map(
+      d.resumen.map((r) => [r.codigo, r.cliente ?? '']),
+    );
+
+    type FilaConsolidada = { fecha: Date; celdas: (string | number)[] };
+    const filas: FilaConsolidada[] = [];
+
+    for (const x of d.detalleImpresion)
+      filas.push({
+        fecha: x.fecha,
+        celdas: [
+          fecha(x.fecha),
+          // Las filas de papel en blanco ya viajan dentro del detalle de
+          // impresión rotuladas con esta etiqueta (F5-1B), así que el tipo se
+          // deriva de ahí y no hace falta consultarlas aparte.
+          x.producto === ETIQUETA_EN_BLANCO ? 'En blanco' : 'Impresión',
+          x.orden,
+          clientePorOp.get(x.orden) ?? '',
+          x.codigoLine ?? '',
+          x.producto ?? '',
+          x.talla ?? '',
+          x.cantidad ?? '',
+          '',
+          '',
+          '',
+          x.impresora,
+          x.tipoPapel,
+          x.consumoYd,
+          x.enguiamientoYd,
+          x.totalYd,
+          '',
+          '',
+        ],
+      });
+
+    for (const x of d.detalleReposiciones)
+      filas.push({
+        fecha: x.fecha,
+        celdas: [
+          fecha(x.fecha),
+          'Reposición',
+          x.orden,
+          clientePorOp.get(x.orden) ?? '',
+          '',
+          '',
+          '',
+          '',
+          x.codigoRepo ?? '',
+          x.departamento,
+          x.defecto,
+          x.impresora ?? '',
+          x.tipoPapel ?? '',
+          x.yardasPapel,
+          0,
+          x.yardasPapel,
+          x.tela ?? '',
+          // La tela va en su columna y NO suma al papel: es otro material y no
+          // sale del rollo. Sumarla daría un número sin significado físico.
+          x.yardasTela,
+        ],
+      });
+
+    // Ordenadas por fecha para que la hoja se lea como una línea de tiempo:
+    // mezcladas por tipo es justamente lo que se quiere poder agrupar después.
+    filas.sort((a, b) => a.fecha.getTime() - b.fecha.getTime());
+    for (const f2 of filas) cons.addRow(f2.celdas);
+    cons.columns.forEach((c, i) => (c.width = i === 5 || i === 10 ? 24 : 14));
+    // Fila de encabezado congelada: con cientos de filas, perder de vista los
+    // nombres de columna al bajar vuelve la hoja ilegible.
+    cons.views = [{ state: 'frozen', ySplit: 1 }];
+    // Autofiltro sobre el rango real, que es lo que hace usable la hoja sin
+    // tener que seleccionarla a mano cada vez.
+    cons.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: 1, column: 18 },
+    };
+
     const imp = wb.addWorksheet('Detalle impresión');
     const encI = imp.addRow([
       'Fecha',
