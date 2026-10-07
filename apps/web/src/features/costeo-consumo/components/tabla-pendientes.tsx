@@ -1,8 +1,8 @@
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { GrupoColapsable } from '@/components/shared/grupo-colapsable'
+import { ControlEnBlanco } from './control-en-blanco'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type {
   GrupoImpresoraPendiente,
@@ -10,14 +10,6 @@ import type {
   OrdenPendiente,
   RolloDelGrupo,
 } from '../types'
-
-/**
- * Rango permitido del papel en blanco. Es el mismo que impone el CHECK de la
- * base y el DTO: tenerlo acá es solo para que el `<input>` no deje escribir
- * algo que el servidor va a rechazar igual.
- */
-export const EN_BLANCO_MIN = 2
-export const EN_BLANCO_MAX = 10
 
 interface Props {
   grupos: GrupoImpresoraPendiente[]
@@ -170,72 +162,6 @@ function ContrasteSeleccion({
   )
 }
 
-/**
- * El control del papel en blanco: la casilla y su cantidad, siempre juntas.
- *
- * ⚠️ La cantidad se guarda al SALIR del campo (o con Enter), no en cada tecla.
- * Un primer diseño guardaba en cada `change`, y al probarlo se vio el costo
- * real: elegir 7 con las flechas disparó diez PATCH seguidos (4·2·6·7·8·9·10…).
- * Sobre una orden sin imprimir eso solo ensucia la auditoría, pero sobre una ya
- * impresa cada paso ANULA Y RECREA la fila de consumo, así que dejaría cinco
- * pares anulado/creado en el histórico para un solo cambio de opinión.
- */
-function ControlEnBlanco({
-  orden,
-  onEnBlanco,
-  habilitado,
-}: {
-  orden: OrdenPendiente
-  onEnBlanco: Props['onEnBlanco']
-  habilitado: boolean
-}) {
-  const [valor, setValor] = useState(String(orden.enBlancoYd))
-  // El servidor es la fuente: si la cantidad cambia por fuera (otro refetch, o
-  // un rechazo que revierte), el campo tiene que reflejarlo.
-  useEffect(() => setValor(String(orden.enBlancoYd)), [orden.enBlancoYd])
-
-  function confirmar() {
-    const n = Number(valor)
-    const valido = Number.isInteger(n) && n >= EN_BLANCO_MIN && n <= EN_BLANCO_MAX
-    // Un valor fuera de rango no se manda: se descarta y vuelve el del
-    // servidor, en vez de dejar al operario creyendo que guardó algo.
-    if (!valido) return setValor(String(orden.enBlancoYd))
-    if (n !== orden.enBlancoYd) onEnBlanco(orden, true, n)
-  }
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <Checkbox
-        checked={orden.consumoEnBlanco}
-        disabled={!habilitado}
-        aria-label={`Papel en blanco de ${orden.codigo}`}
-        onCheckedChange={(c) => onEnBlanco(orden, c === true, orden.enBlancoYd)}
-      />
-      {/* La cantidad solo se habilita si está marcada: un número editable con
-          la casilla apagada invita a creer que ya se cargó algo. */}
-      <input
-        type="number"
-        min={EN_BLANCO_MIN}
-        max={EN_BLANCO_MAX}
-        step={1}
-        value={valor}
-        disabled={!habilitado || !orden.consumoEnBlanco}
-        aria-label={`Yardas en blanco de ${orden.codigo}`}
-        onChange={(e) => setValor(e.target.value)}
-        onBlur={confirmar}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            e.currentTarget.blur()
-          }
-        }}
-        className="border-border bg-background text-ink h-7 w-12 rounded border px-1 text-center text-xs disabled:opacity-40"
-      />
-      <span className="text-ink-faint text-[11px]">yd</span>
-    </div>
-  )
-}
-
 export function TablaPendientes({
   grupos,
   seleccionadas,
@@ -365,8 +291,10 @@ export function TablaPendientes({
                       </TableCell>
                       <TableCell>
                         <ControlEnBlanco
-                          orden={o}
-                          onEnBlanco={onEnBlanco}
+                          codigo={o.codigo}
+                          consumoEnBlanco={o.consumoEnBlanco}
+                          enBlancoYd={o.enBlancoYd}
+                          onCambiar={(marcado, yardas) => onEnBlanco(o, marcado, yardas)}
                           habilitado={puedeMarcarEnBlanco}
                         />
                       </TableCell>
@@ -431,8 +359,10 @@ export function TablaPendientes({
                       </div>
                       <div className="mt-1.5">
                         <ControlEnBlanco
-                          orden={o}
-                          onEnBlanco={onEnBlanco}
+                          codigo={o.codigo}
+                          consumoEnBlanco={o.consumoEnBlanco}
+                          enBlancoYd={o.enBlancoYd}
+                          onCambiar={(marcado, yardas) => onEnBlanco(o, marcado, yardas)}
                           habilitado={puedeMarcarEnBlanco}
                         />
                       </div>

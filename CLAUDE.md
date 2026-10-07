@@ -2245,6 +2245,76 @@ sin i18n (todo en español).
       desperdicio — el riesgo estaba en el sentido contrario. El usuario decidió **no** separar el
       papel descartado por daño de la merma inexplicada por ahora.
 
+  - **Plantilla de Órdenes: fuera Enguiamiento e Imagen, y el parser deja de leer por posición
+    (2026-10-07)**. Tres dudas del usuario probando la carga
+    real, las tres verificadas contra el código y los datos antes de responder:
+    1. **La línea de producto lleva SOLO el nombre, sin el cliente** (que ya va en su columna). Los
+       valores reales son `Basketball`, `Jersey` y `Short`. El modelo guarda el par
+       `(cliente, nombre)`, así que escribir `BSN Basketball` deja la fila pendiente. La confusión
+       venía del legacy, donde el campo CLIENTE traía los dos pegados — justamente lo que motivó
+       modelarlo como catálogo aparte.
+    2. **El enguiamiento SÍ lo calcula el servidor** (`cantidad × factorEnguiamiento` al capturar
+       el consumo). El valor de la plantilla **no alimentaba ningún cálculo**: su único uso era un
+       aviso de contraste en Impresión de OPs. Y ese contraste vale poco, medido: el enguiamiento
+       que Diseño teclea **es la misma fórmula redondeada a un decimal** (desviación media 0.02 yd
+       sobre 1,128 filas reales), contra un umbral de 0.15 — o sea que compara el cálculo consigo
+       mismo y prácticamente nunca salta.
+    3. **`imagen` no la mostraba ninguna pantalla** (solo existía en el tipo, con un comentario que
+       dice que se omite a propósito) y venía **vacía en las 253 líneas reales**. Entró en F3 por
+       "no perder los campos que el `copiarDatos()` legacy descartaba", pero nadie la va a llenar a
+       mano en un Excel.
+    - La plantilla pasa de **36 a 34 columnas**. Las columnas siguen en la base —
+      `enguiamiento_yd` toma su default 0 e `imagen` queda null— para cuando exista el módulo de
+      Producción; lo que se quitó es la obligación de teclearlas.
+    - ⚠️ **El riesgo real no era quitar las columnas sino el parser.** Leía TODO por índice fijo y
+      las tallas desde `IDX_TALLA_INICIO = 18`, así que quitar dos columnas del medio corre todas
+      las siguientes: un archivo armado con la plantilla anterior habría cargado las cantidades en
+      **la talla equivocada, sin ningún error** — el modo de falla que ya estaba advertido en el
+      comentario de `TALLAS_IMPORT_LINEAS`, y que esta vez iba a ocurrir de verdad.
+      - Corregido: `resolverColumnas()` ubica **todas** las columnas por NOMBRE de encabezado
+        (`ALIAS_COLUMNAS`, normalizado sin tildes), incluidas las tallas una por una. Los nombres
+        viejos quedan como alias, así que las dos plantillas conviven: la vieja trae columnas de
+        más que simplemente se ignoran.
+      - **Verificado con los dos formatos en paralelo**: el archivo nuevo y el viejo (con
+        Enguiamiento, Imagen y "Línea de producto") cargan **ambos** `M:7 · XL:3`. Sin esto el
+        viejo habría cargado esas cantidades corridas dos tallas.
+      - De paso, un archivo sin la fila de encabezado esperada ahora da **400 nombrando qué
+        columnas faltan** —con el nombre legible, no el normalizado— en vez de leer filas vacías.
+    - **Dos hojas de referencia nuevas** en la plantilla, mismo patrón que "Tipos de papel" del
+      import de rollos: **Clientes** (código + nombre, 100 filas) y **Líneas de producto**. Esta
+      última lleva el **cliente además del nombre** a propósito: el valor válido depende del
+      cliente, así que una lista suelta de nombres dejaría elegir una que no existe para ése. Si no
+      hay ninguna dada de alta, la hoja lo dice en vez de salir vacía.
+    - ⚠️ **"Línea de producto" se renombró a "Deporte" y se REVIRTIÓ el mismo día.** Queda
+      anotado porque el error de criterio es reutilizable: al renombrarlo verifiqué los *valores*
+      del catálogo (y advertí que `Jersey` quedaba forzado) pero **no verifiqué si ya existía algo
+      llamado "deporte"** en el sistema. Existía: `recetas.deportes`, con 9 deportes reales
+      (Football, Basketball, Soccer, Baseball, Volleyball, Compression, Track, Training, Lacrosse).
+      El usuario lo encontró al abrir la plantilla nueva.
+      - **Son dos cosas distintas y ambas tienen razón de ser.** `costeo.linea_producto` es la
+        agrupación comercial **por cliente** heredada del legacy (de ahí `Jersey` y `Short`), y
+        `costeo.plantilla_insumo` cuelga de ella para F5. `recetas.deportes` es el catálogo global
+        que valida `recetas.productos.deporte` vía `deporteEsValido()`.
+      - **Dónde vive el deporte, decidido con el usuario**: en el PRODUCTO. Una camiseta de
+        basketball lo es sin importar qué cliente la pida, así que una estadística por deporte sale
+        de `linea_produccion → producto → deporte` **sin capturar nada nuevo en la OP**. Capturarlo
+        también en la orden habría creado dos fuentes que se contradicen — y la de la OP es la peor
+        de las dos: no tiene catálogo cerrado (acepta cualquier texto) y está partida por cliente,
+        así que `Volleyball` y `Voleibol` serían deportes distintos para siempre.
+      - ⚠️ **El corte por deporte NO se puede usar todavía**: el campo está en **4 de 1,287
+        productos** (todos "Football") y en **0 de los 13** que usan las OP cargadas. El modelo está
+        bien; lo que falta es llenarlo. Pendiente, con el usuario al tanto.
+      - **El parser acepta los cuatro nombres** (`Línea de producto (nombre, opcional)`, el alias
+        corto, y los dos con "Deporte" que existieron ese rato), así que cualquier archivo ya
+        armado carga igual. Verificado con los tres encabezados sobre las mismas cantidades.
+    - **Verificado con curl y en navegador**: plantilla de 34 columnas con 3 hojas, los tres
+      encabezados viejos ausentes; preview y aplicar con la plantilla nueva (deporte válido pasa,
+      uno inexistente queda pendiente con el mensaje que indica dónde darlo de alta) y lo escrito
+      en la base con `enguiamiento_yd = 0`, `imagen = null` y las tallas correctas. En navegador el
+      modal dice "Deportes"/"Deporte" y no queda ningún "Líneas de producto" en pantalla, consola
+      limpia. Datos y usuarios de prueba borrados — la base volvió a 68 OP / 253 líneas / 7,969
+      piezas.
+
   - **Hoja "Consolidado" en el Excel del reporte (2026-10-06)**. Pedido del usuario: las dos hojas
     de detalle tienen columnas distintas (una habla de LINE/Producto/Talla y la otra de No.
     repo/Departamento/Defecto), así que juntarlas exigía copiar y pegar cada vez.

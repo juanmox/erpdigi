@@ -44,6 +44,123 @@ const FILA_INICIO_DATOS = 5;
  */
 const ENCABEZADO_EN_BLANCO = 'En blanco (SI/NO)';
 
+/**
+ * Las columnas de la plantilla se ubican POR NOMBRE de encabezado, no por
+ * posición.
+ *
+ * Hasta 2026-10-07 se leían por índice fijo, y eso convertía cualquier cambio
+ * de columnas en una trampa: quitar una del medio corre todas las siguientes,
+ * así que un archivo armado con la plantilla anterior cargaba las cantidades en
+ * la talla equivocada **sin ningún error** — el peor modo de falla posible acá.
+ * Al quitar "Enguiamiento" e "Imagen" eso habría pasado de verdad.
+ *
+ * Con esto conviven las dos plantillas: la vieja trae columnas de más (se
+ * ignoran) y el encabezado renombrado se reconoce por su alias. Cada clave
+ * lista sus nombres aceptados ya normalizados (minúsculas, sin tildes).
+ */
+const ALIAS_COLUMNAS = {
+  op: ['op (ej. 26op014154)', 'op'],
+  cliente: ['cliente (codigo)', 'cliente'],
+  // ⚠️ Esta columna NO es el deporte. Es `costeo.linea_producto`, la
+  // agrupación comercial POR CLIENTE heredada del legacy (donde el campo
+  // CLIENTE traía "BSN Basketball", "BSN Jersey"), y por eso contiene también
+  // prendas como Jersey o Short.
+  //
+  // Llegó a llamarse "Deporte" unas horas el 2026-10-07 y se revirtió el mismo
+  // día: el deporte REAL vive en `recetas.productos.deporte`, validado contra
+  // el catálogo `recetas.deportes`. Dos campos llamados igual —uno de ellos
+  // sin catálogo cerrado— eran la receta para que una estadística por deporte
+  // diera números distintos según de dónde se leyera.
+  //
+  // Los cuatro alias se conservan para que cargue cualquier archivo ya armado,
+  // con el nombre de siempre o con el que existió ese rato.
+  lineaProducto: [
+    'linea de producto (nombre, opcional)',
+    'linea de producto',
+    'deporte (opcional)',
+    'deporte',
+  ],
+  ordenCompra: ['orden de compra'],
+  fechaRecibidoOp: ['fecha recibido (op)', 'fecha recibido'],
+  fechaCompromisoOp: ['fecha compromiso (op)', 'fecha compromiso'],
+  codigoLine: ['codigo de linea'],
+  producto: ['producto (codigo)', 'producto'],
+  desarrollo: ['desarrollo'],
+  impresora: ['impresora (codigo, opcional)', 'impresora'],
+  fechaData: ['fecha data'],
+  fechaCliente: ['fecha cliente'],
+  fechaEntregar: ['fecha entregar'],
+  estatus: ['estatus'],
+  prioridad: ['prioridad (opcional)', 'prioridad'],
+  enBlanco: [ENCABEZADO_EN_BLANCO.toLowerCase()],
+} as const;
+
+type ClaveColumna = keyof typeof ALIAS_COLUMNAS;
+
+/** Sin tildes, sin dobles espacios y en minúsculas, para comparar encabezados. */
+function normalizarEncabezado(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Las que sin nombre no se puede leer nada: el archivo está mal armado. El
+ * segundo valor es el encabezado tal como se ve en la plantilla — los alias
+ * están normalizados (minúsculas, sin tildes) y mostrarlos así en un error que
+ * lee una persona se vería como un descuido.
+ */
+const COLUMNAS_OBLIGATORIAS: [ClaveColumna, string][] = [
+  ['op', 'OP (ej. 26OP014154)'],
+  ['cliente', 'Cliente (código)'],
+  ['codigoLine', 'Código de línea'],
+  ['producto', 'Producto (código)'],
+];
+
+/**
+ * Resuelve el índice de cada columna leyendo la fila de encabezado, más el de
+ * cada talla por su nombre.
+ */
+function resolverColumnas(ws: ExcelJS.Worksheet) {
+  const porNombre = new Map<string, number>();
+  const encabezado = ws.getRow(FILA_INICIO_DATOS - 1);
+  encabezado.eachCell((cell, col) => {
+    const n = normalizarEncabezado(textoCelda(cell.value));
+    // El primero gana: si un nombre estuviera repetido, quedarse con el de más
+    // a la izquierda es arbitrario pero estable.
+    if (n && !porNombre.has(n)) porNombre.set(n, col);
+  });
+
+  const idx = {} as Record<ClaveColumna, number | null>;
+  for (const [clave, alias] of Object.entries(ALIAS_COLUMNAS) as [
+    ClaveColumna,
+    readonly string[],
+  ][]) {
+    idx[clave] =
+      alias.map((a) => porNombre.get(a)).find((c) => c != null) ?? null;
+  }
+
+  const faltan = COLUMNAS_OBLIGATORIAS.filter(([c]) => idx[c] == null);
+  if (faltan.length > 0)
+    throw new BadRequestException(
+      `El archivo no tiene la fila de encabezado esperada en la fila ${FILA_INICIO_DATOS - 1}: ` +
+        `faltan las columnas ${faltan.map(([, nombre]) => `"${nombre}"`).join(', ')}. ` +
+        'Descargá la plantilla y copiá los datos ahí.',
+    );
+
+  // Cada talla por su propio nombre, así que agregar o quitar tallas de la
+  // plantilla tampoco desalinea nada.
+  const tallas = TALLAS_IMPORT_LINEAS.map((talla) => ({
+    talla,
+    col: porNombre.get(normalizarEncabezado(talla)) ?? null,
+  })).filter((t): t is typeof t & { col: number } => t.col != null);
+
+  return { idx, tallas };
+}
+
 const EN_BLANCO_SI = ['si', 'sí', 's', 'x', '1', 'true', 'verdadero'];
 const EN_BLANCO_NO = ['no', 'n', '0', 'false', 'falso'];
 
@@ -341,19 +458,14 @@ export class CosteoOrdenesService {
     const ws = wb.worksheets[0];
     if (!ws) throw new BadRequestException('El archivo no tiene hojas');
 
-    const IDX_TALLA_INICIO = 18;
-
-    // La columna "En blanco" se ubica por su encabezado (fila 4), no por
-    // índice: ver la nota de ENCABEZADO_EN_BLANCO.
-    const filaEncabezado = ws.getRow(FILA_INICIO_DATOS - 1);
-    let idxEnBlanco = 0;
-    filaEncabezado.eachCell((celda, col) => {
-      if (
-        textoCelda(celda.value).trim().toLowerCase() ===
-        ENCABEZADO_EN_BLANCO.toLowerCase()
-      )
-        idxEnBlanco = col;
-    });
+    // TODAS las columnas por nombre de encabezado — ver ALIAS_COLUMNAS. Así
+    // conviven la plantilla actual y la anterior (que traía "Enguiamiento" e
+    // "Imagen", quitadas el 2026-10-07) sin que las tallas se desalineen.
+    const { idx, tallas: colTallas } = resolverColumnas(ws);
+    const texto = (row: ExcelJS.Row, c: ClaveColumna) =>
+      idx[c] == null ? '' : textoCelda(row.getCell(idx[c]).value).trim();
+    const fecha = (row: ExcelJS.Row, c: ClaveColumna) =>
+      idx[c] == null ? null : fechaCelda(row.getCell(idx[c]).value);
 
     const crudo: {
       fila: number;
@@ -367,13 +479,11 @@ export class CosteoOrdenesService {
       producto: string;
       desarrollo: string;
       impresora: string;
-      enguiamiento: unknown;
       fechaData: Date | null;
       fechaCliente: Date | null;
       fechaEntregar: Date | null;
       estatus: string;
       prioridad: string;
-      imagen: string;
       /** null = la celda traía texto que no se pudo interpretar. */
       enBlanco: boolean | null;
       tallas: FilaTallaCantidad[];
@@ -381,39 +491,40 @@ export class CosteoOrdenesService {
 
     ws.eachRow((row, rowNumber) => {
       if (rowNumber < FILA_INICIO_DATOS) return;
-      const op = textoCelda(row.getCell(1).value).trim();
+      const op = texto(row, 'op');
       if (!op) return;
 
       const tallas: FilaTallaCantidad[] = [];
-      TALLAS_IMPORT_LINEAS.forEach((talla, i) => {
-        const valor = row.getCell(IDX_TALLA_INICIO + i).value;
+      for (const { talla, col } of colTallas) {
+        const valor = row.getCell(col).value;
         const cantidad = valor == null || valor === '' ? 0 : Number(valor);
         if (Number.isFinite(cantidad) && cantidad > 0)
           tallas.push({ talla, cantidad });
-      });
+      }
 
       crudo.push({
         fila: rowNumber,
-        enBlanco: idxEnBlanco
-          ? leerEnBlanco(row.getCell(idxEnBlanco).value)
-          : false,
+        // Sin la columna, la orden simplemente no lleva papel en blanco: es el
+        // caso de un archivo armado antes de que esa columna existiera.
+        enBlanco:
+          idx.enBlanco == null
+            ? false
+            : leerEnBlanco(row.getCell(idx.enBlanco).value),
         op,
-        cliente: textoCelda(row.getCell(2).value).trim(),
-        lineaProducto: textoCelda(row.getCell(3).value).trim(),
-        ordenCompra: textoCelda(row.getCell(4).value).trim(),
-        fechaRecibidoOp: fechaCelda(row.getCell(5).value),
-        fechaCompromisoOp: fechaCelda(row.getCell(6).value),
-        codigoLine: textoCelda(row.getCell(7).value).trim(),
-        producto: textoCelda(row.getCell(8).value).trim(),
-        desarrollo: textoCelda(row.getCell(9).value).trim(),
-        impresora: textoCelda(row.getCell(10).value).trim(),
-        enguiamiento: row.getCell(11).value,
-        fechaData: fechaCelda(row.getCell(12).value),
-        fechaCliente: fechaCelda(row.getCell(13).value),
-        fechaEntregar: fechaCelda(row.getCell(14).value),
-        estatus: textoCelda(row.getCell(15).value).trim(),
-        prioridad: textoCelda(row.getCell(16).value).trim(),
-        imagen: textoCelda(row.getCell(17).value).trim(),
+        cliente: texto(row, 'cliente'),
+        lineaProducto: texto(row, 'lineaProducto'),
+        ordenCompra: texto(row, 'ordenCompra'),
+        fechaRecibidoOp: fecha(row, 'fechaRecibidoOp'),
+        fechaCompromisoOp: fecha(row, 'fechaCompromisoOp'),
+        codigoLine: texto(row, 'codigoLine'),
+        producto: texto(row, 'producto'),
+        desarrollo: texto(row, 'desarrollo'),
+        impresora: texto(row, 'impresora'),
+        fechaData: fecha(row, 'fechaData'),
+        fechaCliente: fecha(row, 'fechaCliente'),
+        fechaEntregar: fecha(row, 'fechaEntregar'),
+        estatus: texto(row, 'estatus'),
+        prioridad: texto(row, 'prioridad'),
         tallas,
       });
     });
@@ -480,10 +591,6 @@ export class CosteoOrdenesService {
       const idImpresora = r.impresora
         ? (impresoraPorCodigo.get(r.impresora.toLowerCase()) ?? null)
         : null;
-      const enguiamientoYd =
-        r.enguiamiento == null || r.enguiamiento === ''
-          ? 0
-          : Number(r.enguiamiento);
       const totalPiezas = r.tallas.reduce((acc, t) => acc + t.cantidad, 0);
 
       let error: string | null = null;
@@ -498,7 +605,7 @@ export class CosteoOrdenesService {
       else if (idCliente === null)
         error = `Cliente "${r.cliente}" no reconocido`;
       else if (r.lineaProducto && idLineaProducto === null)
-        error = `Línea de producto "${r.lineaProducto}" no existe para el cliente "${r.cliente}" — dar de alta primero`;
+        error = `Línea de producto "${r.lineaProducto}" no existe para el cliente "${r.cliente}" — dar de alta primero desde Órdenes de Producción → "Líneas de producto"`;
       else if (!r.producto) error = 'Producto vacío';
       else if (idProducto === null)
         error = `Producto "${r.producto}" no existe en recetas — dar de alta primero`;
@@ -515,8 +622,6 @@ export class CosteoOrdenesService {
         error = `Desarrollo "${r.desarrollo}" no coincide con el desarrollo ya registrado para "${r.producto}" ("${desarrolloPorIdProducto.get(idProducto)}")`;
       else if (r.impresora && idImpresora === null)
         error = `Impresora "${r.impresora}" no reconocida`;
-      else if (!Number.isFinite(enguiamientoYd) || enguiamientoYd < 0)
-        error = 'Enguiamiento inválido';
       else if (totalPiezas <= 0)
         error = 'Sin cantidad en ninguna talla reconocida';
       // Un typo en esa celda tiene que verse, no convertirse en un `false`
@@ -544,13 +649,11 @@ export class CosteoOrdenesService {
         desarrollo: r.desarrollo || null,
         impresoraCodigo: r.impresora || null,
         idImpresora,
-        enguiamientoYd: Number.isFinite(enguiamientoYd) ? enguiamientoYd : 0,
         fechaData: r.fechaData?.toISOString() ?? null,
         fechaCliente: r.fechaCliente?.toISOString() ?? null,
         fechaEntregar: r.fechaEntregar?.toISOString() ?? null,
         estatus: r.estatus || 'ABIERTO',
         prioridad: r.prioridad || null,
-        imagen: r.imagen || null,
         tallas: r.tallas,
         totalPiezas,
         consumoEnBlanco: r.enBlanco === true,
@@ -654,7 +757,6 @@ export class CosteoOrdenesService {
             idEmpresa,
             idProducto: f.idProducto,
             idImpresora: f.idImpresora,
-            enguiamientoYd: f.enguiamientoYd,
             fechaData: f.fechaData ? new Date(f.fechaData) : null,
             fechaRecibido: f.fechaRecibidoOp
               ? new Date(f.fechaRecibidoOp)
@@ -662,7 +764,6 @@ export class CosteoOrdenesService {
             fechaCliente: f.fechaCliente ? new Date(f.fechaCliente) : null,
             fechaEntregar: f.fechaEntregar ? new Date(f.fechaEntregar) : null,
             estatus: f.estatus,
-            imagen: f.imagen,
             prioridad: f.prioridad,
             creadoPor: idUsuarioActor,
           },
@@ -705,12 +806,30 @@ export class CosteoOrdenesService {
   }
 
   async plantillaImportarLineas(): Promise<ExcelJS.Buffer> {
+    // Los catálogos van EN la plantilla, en hojas aparte: sin ellos hay que
+    // adivinar el código del cliente y el nombre exacto de la línea, que es
+    // justo lo que deja filas pendientes en el preview. Mismo patrón que la
+    // hoja "Tipos de papel" del import de rollos.
+    const [clientes, lineas] = await Promise.all([
+      this.prisma.cliente.findMany({
+        select: { codigo: true, nombre: true },
+        orderBy: { nombre: 'asc' },
+      }),
+      this.prisma.lineaProducto.findMany({
+        select: {
+          nombre: true,
+          cliente: { select: { codigo: true, nombre: true } },
+        },
+        orderBy: [{ cliente: { nombre: 'asc' } }, { nombre: 'asc' }],
+      }),
+    ]);
+
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Digitexsa ERP';
     wb.created = new Date();
 
     const ws = wb.addWorksheet('Órdenes e ítems');
-    const totalCols = 17 + TALLAS_IMPORT_LINEAS.length + 1;
+    const totalCols = 15 + TALLAS_IMPORT_LINEAS.length + 1;
     ws.mergeCells(1, 1, 1, totalCols);
     ws.getCell('A1').value =
       'Digital Textil, S.A. (Digitexsa) — Carga de Órdenes de Producción e ítems (consumo de papel)';
@@ -723,13 +842,15 @@ export class CosteoOrdenesService {
     ws.getCell('A2').value =
       'Una fila por ítem/línea. Si varias filas comparten la misma OP, los datos de OP se toman de la primera fila donde aparece. ' +
       'Cliente y Producto deben coincidir con códigos ya existentes — un producto que no exista todavía queda pendiente en el preview, no se crea automáticamente. ' +
-      'Línea de producto es opcional, pero si se indica debe existir ya para ese Cliente (Cliente + Línea, ej. "BSN SPORTS" + "Basketball") — igual que Producto, si no existe la fila queda pendiente, no se crea automáticamente.';
+      'Línea de producto es opcional, pero si se indica debe existir ya para ese Cliente — ver las hojas "Clientes" y "Líneas de producto". Igual que Producto, si no existe la fila queda pendiente y no se crea automáticamente.';
     ws.getCell('A2').font = { size: 9, color: { argb: 'FF888888' } };
 
     const headerRow = ws.getRow(4);
     headerRow.values = [
       'OP (ej. 26OP014154)',
       'Cliente (código)',
+      // NO es el deporte — ver la nota de ALIAS_COLUMNAS. El parser acepta los
+      // dos nombres, así que cualquier archivo ya armado sigue cargando.
       'Línea de producto (nombre, opcional)',
       'Orden de compra',
       'Fecha recibido (OP)',
@@ -738,39 +859,71 @@ export class CosteoOrdenesService {
       'Producto (código)',
       'Desarrollo',
       'Impresora (código, opcional)',
-      'Enguiamiento (yd)',
+      // Sin "Enguiamiento" ni "Imagen" desde 2026-10-07: el enguiamiento lo
+      // calcula el servidor al capturar el consumo (el valor del archivo no
+      // alimentaba ningún cálculo, solo un aviso de contraste que casi nunca
+      // saltaba porque Diseño usa la misma fórmula), e "Imagen" no la mostraba
+      // ninguna pantalla y venía vacía en las 253 líneas reales. Las columnas
+      // siguen en la base para cuando exista el módulo de Producción.
       'Fecha data',
       'Fecha cliente',
       'Fecha entregar',
       'Estatus',
       'Prioridad (opcional)',
-      'Imagen (opcional)',
       ...TALLAS_IMPORT_LINEAS,
       ENCABEZADO_EN_BLANCO,
     ];
     headerRow.eachCell(estiloEncabezado);
+    // 15 columnas fijas (antes 17: se quitaron Enguiamiento e Imagen) + tallas
+    // + "En blanco".
     const anchos = [
-      16,
-      16,
-      22,
-      14,
-      14,
-      14,
-      16,
-      16,
-      12,
-      20,
-      12,
-      12,
-      12,
-      12,
-      12,
-      12,
-      16,
+      16, // OP
+      16, // Cliente
+      22, // Línea de producto
+      14, // Orden de compra
+      14, // Fecha recibido
+      14, // Fecha compromiso
+      16, // Código de línea
+      16, // Producto
+      12, // Desarrollo
+      20, // Impresora
+      12, // Fecha data
+      12, // Fecha cliente
+      12, // Fecha entregar
+      12, // Estatus
+      12, // Prioridad
       ...TALLAS_IMPORT_LINEAS.map(() => 8),
-      16,
+      16, // En blanco
     ];
     anchos.forEach((w, i) => (ws.getColumn(i + 1).width = w));
+
+    // --- Hoja "Clientes": el código es lo que valida la columna Cliente ---
+    const wsClientes = wb.addWorksheet('Clientes');
+    const encClientes = wsClientes.getRow(1);
+    encClientes.values = ['Código', 'Cliente'];
+    encClientes.eachCell(estiloEncabezado);
+    [14, 46].forEach((w, i) => (wsClientes.getColumn(i + 1).width = w));
+    clientes.forEach((c) => wsClientes.addRow([c.codigo, c.nombre]));
+
+    // --- Hoja "Líneas de producto": el valor válido depende del CLIENTE ---
+    //
+    // Por eso lleva las dos columnas y no solo el nombre: la misma línea de dos
+    // clientes son dos registros distintos, así que una lista suelta de nombres
+    // haría elegir una que no existe para ese cliente.
+    const wsLineas = wb.addWorksheet('Líneas de producto');
+    const encLineas = wsLineas.getRow(1);
+    encLineas.values = ['Cliente (código)', 'Cliente', 'Línea de producto'];
+    encLineas.eachCell(estiloEncabezado);
+    [18, 40, 28].forEach((w, i) => (wsLineas.getColumn(i + 1).width = w));
+    lineas.forEach((l) =>
+      wsLineas.addRow([l.cliente.codigo, l.cliente.nombre, l.nombre]),
+    );
+    if (lineas.length === 0)
+      wsLineas.addRow([
+        '',
+        '',
+        'Todavía no hay líneas dadas de alta — se crean desde Órdenes de Producción → "Líneas de producto".',
+      ]);
 
     return wb.xlsx.writeBuffer();
   }

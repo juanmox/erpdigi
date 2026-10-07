@@ -13,6 +13,7 @@ import { costeoConsumoApi } from './api'
 import type { GrupoImpresoraPendiente } from './types'
 import { DetalleOrden } from './components/detalle-orden'
 import { TablaPendientes } from './components/tabla-pendientes'
+import { ControlEnBlanco } from './components/control-en-blanco'
 import { TarjetaLinea } from './components/tarjeta-linea'
 import type { LineaConsumo, ResultadoLote } from './types'
 
@@ -204,7 +205,10 @@ export function ConsumoPage() {
   const enBlanco = useMutation({
     mutationFn: (v: { codigo: string; marcado: boolean; yardas: number }) =>
       costeoConsumoApi.editarEnBlanco(v.codigo, v.marcado, v.marcado ? v.yardas : undefined),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['consumo', 'pendientes'] }),
+    // Las DOS vistas, no solo la cola: el control vive también en la cabecera
+    // de la orden buscada, y sin invalidarla el checkbox se quedaba marcado y
+    // el campo habilitado después de desmarcar.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['consumo'] }),
     onError: (e) =>
       setMensaje({
         tipo: 'error',
@@ -553,6 +557,30 @@ export function ConsumoPage() {
                 <span className="text-destructive">{resumen.bloqueadas} sin estándar</span>
               )}
             </div>
+
+            {/* El papel en blanco también acá, no solo en la cola de
+                pendientes: una orden ya impresa por completo desaparece de esa
+                cola, y desde que el checkbox salió de Órdenes de Producción
+                éste es el único lugar donde se puede corregir. */}
+            {puedeCapturar && (
+              <div className="flex flex-wrap items-center gap-2 border-t pt-2 text-xs">
+                <span className="text-ink-faint">Papel en blanco</span>
+                <ControlEnBlanco
+                  codigo={data.orden.codigo}
+                  consumoEnBlanco={data.orden.consumoEnBlanco}
+                  enBlancoYd={data.orden.enBlancoYd}
+                  onCambiar={(marcado, yardas) =>
+                    enBlanco.mutate({ codigo: data.orden.codigo, marcado, yardas })
+                  }
+                  habilitado={!enBlanco.isPending}
+                />
+                <span className="text-ink-faint">
+                  {data.orden.consumoEnBlanco
+                    ? 'se descuenta del rollo que imprima esta orden'
+                    : 'esta orden no lleva papel en blanco'}
+                </span>
+              </div>
+            )}
 
             {puedeCapturar && enviables.length > 0 && (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t pt-2">

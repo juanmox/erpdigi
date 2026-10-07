@@ -1,7 +1,6 @@
 import { apiFetch, descargarArchivo } from '@/lib/api'
 import type {
   ClienteRef,
-  EstadoEnBlanco,
   EstadoListadoOrdenes,
   FilaPreviewLinea,
   LineaProductoDetalle,
@@ -32,14 +31,4 @@ export const costeoOrdenesApi = {
       method: 'POST',
       body: JSON.stringify(dto),
     }),
-  /**
-   * El papel en blanco es por ORDEN y vive en Consumo de Papel, no en Órdenes:
-   * lo que hace es crear o anular una fila de consumo, no editar un atributo
-   * descriptivo de la orden.
-   */
-  editarEnBlanco: (codigoOp: string, consumoEnBlanco: boolean) =>
-    apiFetch<EstadoEnBlanco>(
-      `/costeo/consumo-papel/orden/${encodeURIComponent(codigoOp)}/en-blanco`,
-      { method: 'PATCH', body: JSON.stringify({ consumoEnBlanco }) },
-    ),
 }

@@ -55,13 +55,11 @@ export interface FilaPreviewLinea {
   desarrollo: string | null;
   impresoraCodigo: string | null;
   idImpresora: number | null;
-  enguiamientoYd: number;
   fechaData: string | null;
   fechaCliente: string | null;
   fechaEntregar: string | null;
   estatus: string;
   prioridad: string | null;
-  imagen: string | null;
   tallas: FilaTallaCantidad[];
   totalPiezas: number;
   /** Columna "En blanco" de la plantilla; false si el archivo no la trae. */

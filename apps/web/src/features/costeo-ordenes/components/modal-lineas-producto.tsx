@@ -15,12 +15,18 @@ interface ModalLineasProductoProps {
   onOpenChange: (open: boolean) => void
 }
 
-// Pantalla mínima de alta — Cliente + Línea de producto vienen colapsados en
-// un solo campo de texto libre en el sistema legacy (ANEXO_A_Hallazgos.md
-// §2.3, ej. "BSN Basketball", "BSN Jersey"); acá quedan separados en un
-// catálogo con FK. A diferencia de Producto (alta en /catalogo, con receta y
-// costos asociados), Línea de producto es liviano — se da de alta directo,
+// Pantalla mínima de alta de la línea de producto. Cliente + línea vienen
+// colapsados en un solo campo de texto libre en el sistema legacy
+// (ANEXO_A_Hallazgos.md §2.3, ej. "BSN Basketball", "BSN Jersey"); acá quedan
+// separados en un catálogo con FK. A diferencia de Producto (alta en /catalogo,
+// con receta y costos asociados), la línea es liviana — se da de alta directo,
 // sin flujo de pendientes/aprobación.
+//
+// ⚠️ NO es el deporte, aunque algunos valores lo parezcan: este catálogo es por
+// CLIENTE y mezcla deportes con prendas (Jersey, Short). El deporte real vive
+// en recetas.productos.deporte, validado contra el catálogo recetas.deportes;
+// mantenerlos separados es lo que evita que una estadística por deporte tenga
+// dos fuentes que se contradigan.
 export function ModalLineasProducto({ open, onOpenChange }: ModalLineasProductoProps) {
   const queryClient = useQueryClient()
   const [idCliente, setIdCliente] = useState('')

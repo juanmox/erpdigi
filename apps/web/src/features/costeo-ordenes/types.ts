@@ -21,13 +21,11 @@ export interface FilaPreviewLinea {
   desarrollo: string | null
   impresoraCodigo: string | null
   idImpresora: number | null
-  enguiamientoYd: number
   fechaData: string | null
   fechaCliente: string | null
   fechaEntregar: string | null
   estatus: string
   prioridad: string | null
-  imagen: string | null
   tallas: FilaTallaCantidad[]
   totalPiezas: number
   error: string | null
@@ -114,12 +112,3 @@ export interface ListadoOrdenes {
   ordenes: OrdenPendiente[]
 }
 
-/** Respuesta de marcar/desmarcar el papel en blanco de una orden. */
-export interface EstadoEnBlanco {
-  codigo: string
-  consumoEnBlanco: boolean
-  enBlancoYd: number
-  /** Ya descontado de un rollo. Si es false, se descuenta al imprimir. */
-  cargado: boolean
-  idMontajeRollo: number | null
-}

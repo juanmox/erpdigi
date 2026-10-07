@@ -5,7 +5,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ApiError } from '@/lib/api'
@@ -38,21 +37,6 @@ export function OrdenesPage() {
       setError(err instanceof ApiError ? err.message : 'Error al buscar la orden')
     } finally {
       setBuscando(false)
-    }
-  }
-
-  async function toggleEnBlanco(consumoEnBlanco: boolean) {
-    if (!orden) return
-    setError(null)
-    // Optimista: la pantalla no espera a la respuesta para reflejar el click.
-    setOrden({ ...orden, consumoEnBlanco })
-    try {
-      await costeoOrdenesApi.editarEnBlanco(orden.codigo, consumoEnBlanco)
-    } catch (err) {
-      // Revierte si el servidor rechazó el cambio (ej. quitar un papel en
-      // blanco ya cargado sin tener `costeo.consumo.anular`).
-      setOrden((prev) => (prev ? { ...prev, consumoEnBlanco: !consumoEnBlanco } : prev))
-      setError(err instanceof ApiError ? err.message : 'Error al actualizar el papel en blanco')
     }
   }
 
@@ -116,20 +100,11 @@ export function OrdenesPage() {
                   <div className="text-ink-faint">Estatus</div>
                   <Badge variant="secondary">{orden.estatus}</Badge>
                 </div>
-                {/* El papel en blanco es de la ORDEN, no de cada línea: son
-                    yardas fijas que no dependen de cuántas prendas lleve. */}
-                <div>
-                  <div className="text-ink-faint">Papel en blanco</div>
-                  <label className="mt-1 flex items-center gap-2">
-                    <Checkbox
-                      checked={orden.consumoEnBlanco}
-                      onCheckedChange={(c) => toggleEnBlanco(c === true)}
-                    />
-                    <span className="text-ink text-[13px]">
-                      {orden.consumoEnBlanco ? `${orden.enBlancoYd} yd` : 'No lleva'}
-                    </span>
-                  </label>
-                </div>
+                {/* El papel en blanco NO se muestra acá desde 2026-10-07: se
+                    gestiona solo desde Impresión de OPs, que es donde el
+                    operario decide la cantidad (2-10 yd) al momento de
+                    imprimir. Tenerlo en dos pantallas invitaba a cambiarlo
+                    desde la que no ve el rollo. */}
               </div>
 
               <Table>

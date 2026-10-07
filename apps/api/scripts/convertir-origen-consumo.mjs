@@ -18,8 +18,20 @@ if (!ORIGEN || !SALIDA) {
   process.exit(1);
 }
 
-// Orden EXACTO de la plantilla (plantillaImportarLineas), 17 columnas de
-// metadata + una por talla.
+// Encabezados con los que se convirtió OrigenConsumo en agosto de 2026: 17
+// columnas de metadata + una por talla.
+//
+// ⚠️ Ya NO coinciden con la plantilla actual, y da igual: desde 2026-10-07 el
+// import ubica las columnas POR NOMBRE, así que "Línea de producto" se reconoce
+// como alias de "Deporte" y las dos columnas que se quitaron de la plantilla
+// (Enguiamiento, Imagen) simplemente se ignoran. Verificado volviendo a correr
+// este script contra el Origen.xlsx real: las 253 filas se leen con las mismas
+// tallas y las mismas 7,969 piezas.
+//
+// Se dejan tal cual a propósito — es una herramienta de migración de un solo
+// uso, ya ejecutada; tocarla sin necesidad es riesgo sin beneficio. Si alguna
+// vez se usa de molde para otro convertidor, copiar los encabezados de
+// plantillaImportarLineas(), no estos.
 const TALLAS = ['YXS','YS','YM','YL','YXL','XS','S','M','L','XL','2XL','3XL','4XL'];
 const ENCABEZADOS = [
   'OP (ej. 26OP014154)', 'Cliente (código)', 'Línea de producto (nombre, opcional)',

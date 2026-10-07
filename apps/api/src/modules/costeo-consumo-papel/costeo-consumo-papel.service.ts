@@ -319,6 +319,13 @@ export class CosteoConsumoPapelService {
         ordenCompra: orden.ordenCompra,
         cliente: orden.cliente,
         lineaProducto: orden.lineaProducto,
+        // El papel en blanco se gestiona SOLO desde esta pantalla desde
+        // 2026-10-07 (antes el checkbox vivía en Órdenes de Producción). Hace
+        // falta acá y no solo en la cola de pendientes: una orden ya impresa
+        // por completo desaparece de esa cola, y sin esto no quedaría ninguna
+        // forma de corregirle el papel en blanco.
+        consumoEnBlanco: orden.consumoEnBlanco,
+        enBlancoYd: Number(orden.enBlancoYd),
       },
       lineas: lineasCalculadas,
     };
