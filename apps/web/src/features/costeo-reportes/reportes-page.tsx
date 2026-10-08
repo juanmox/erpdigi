@@ -229,7 +229,7 @@ export function ReportesPage() {
                   <TableRow>
                     <TableHead>Fecha</TableHead>
                     <TableHead>OP</TableHead>
-                    <TableHead>LINE</TableHead>
+                    <TableHead>Item</TableHead>
                     <TableHead>Producto</TableHead>
                     <TableHead>Talla</TableHead>
                     <TableHead className="text-right">Cant.</TableHead>

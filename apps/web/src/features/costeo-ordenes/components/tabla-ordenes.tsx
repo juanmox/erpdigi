@@ -221,7 +221,7 @@ export function TablaOrdenes({ onAbrirOrden }: { onAbrirOrden: (codigo: string) 
         <Table className="table-fixed" style={{ minWidth: ANCHO_FIJO + tallas.length * ANCHO.talla }}>
           <TableHeader>
             <TableRow>
-              <TableHead style={{ width: ANCHO.linea }}>Línea</TableHead>
+              <TableHead style={{ width: ANCHO.linea }}>Item</TableHead>
               <TableHead style={{ width: ANCHO.producto }}>Producto</TableHead>
               <TableHead style={{ width: ANCHO.impresora }}>Impr.</TableHead>
               <TableHead style={{ width: ANCHO.fecha }}>F. cliente</TableHead>

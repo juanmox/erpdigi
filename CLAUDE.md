@@ -2442,6 +2442,56 @@ sin i18n (todo en español).
       rotación del refresh token borra cualquier rastro del original. Es trabajo aparte, no un
       ajuste del límite de arriba.
 
+  - **El Item de la línea lo genera el servidor, y arranca en 1 (2026-10-08)**. El usuario cargó
+    una plantilla con la columna "Línea de producto" vacía y le dio error. **La columna C no era el
+    problema** —es opcional de verdad— sino la **G, "Código de línea"**, que es otra cosa:
+    obligatoria y única. Las dos se leen como "línea", así que confundirlas era lo esperable.
+    - **Medido antes de decidir nada**, contra las 253 líneas reales: el Item **siempre** deriva de
+      la orden de compra (62 iguales a la OC, 191 con sufijo `-N`, **0 excepciones**), así que la
+      regla de formación que describió el usuario es exacta. **Pero el correlativo tenía huecos en
+      6 de 67 órdenes de compra (9%)**: `0,2,3,4,5` · `2,3` · `2,4` · `2,3,4,5,6,7` · `2,3,4` ·
+      `1,2,3,4,5,6,7`.
+    - Mi primera recomendación fue **no** generarlo, leyendo esos huecos como el número de línea de
+      la orden de compra del cliente. **El usuario corrigió esa lectura**: son error humano de
+      captura. Tiene respaldo — ya estaba confirmado que **1 orden de compra = 1 orden de
+      producción** (verificado otra vez: 0 OC repartidas en varias OP), así que si todas las líneas
+      de la OC caen en la misma OP, un hueco no debería existir.
+    - **La columna salió de la plantilla** (34 → 33 columnas). El Item lo arma el servidor como
+      `<orden de compra>-<n>`, con **n de 1 a N** en el orden de las filas. **Nunca 0**: el formato
+      viejo usaba la OC pelada como correlativo 0 y seguía en `-2`.
+    - **Las 253 líneas ya cargadas NO se renumeraron** (decisión del usuario: ese formato es el que
+      ya viajó a los Google Sheets que leen los Dashboards, y allá no se puede corregir). O sea que
+      **las dos convenciones conviven**, y `correlativoDeItem()` entiende las dos a propósito.
+    - ⚠️ **Por eso la numeración continúa desde el mayor correlativo existente, no desde 1.** Hoy se
+      pueden agregar líneas a una OP ya cargada; reiniciar en 1 chocaría contra el
+      `UNIQUE (id_empresa, codigo_line)`. Verificado sobre la OP real con hueco: `7011685109-UA`
+      tiene `UA · -2 · -3 · -4 · -5` y la línea nueva sale **`-6`**.
+    - **La Orden de compra pasa a ser obligatoria** — el Item se deriva de ella. No rompe nada: 0 de
+      68 OP la tenían vacía.
+    - **Guarda nueva**: si dos OP del mismo archivo comparten orden de compra, la segunda queda con
+      error. Hoy no pasa (0 casos), pero al dejar de teclearse el Item nada más lo impediría.
+    - **Las filas con error no consumen correlativo.** Si lo consumieran dejarían exactamente los
+      huecos que este cambio vino a eliminar. Por eso `FilaPreviewLinea.codigoLine` pasó a
+      `string | null`, y el preview muestra el Item que va a quedar.
+    - El `aplicar` lo **regenera dentro de la transacción** en vez de confiar en lo que vuelve del
+      navegador (convención #1), leyendo los existentes ahí mismo para que dos imports simultáneos
+      no calculen el mismo correlativo.
+    - ⚠️ **Consecuencia a tener presente: el orden de las filas del Excel pasó a ser un dato.** Antes
+      el Item venía escrito y reordenar no cambiaba nada; ahora el orden *es* el Item.
+    - **Un archivo viejo que todavía traiga la columna carga igual y su valor se ignora en
+      silencio** — el usuario eligió eso sobre un aviso.
+    - **"Item" es ahora el nombre del concepto en las pantallas** (ficha de OP, tabla de órdenes,
+      reporte en pantalla y PDF). **La columna LINE de los Google Sheets NO se tocó**: ese
+      encabezado lo fija el libro legacy que leen los Dashboards.
+    - **Verificado con curl y en navegador**: plantilla de 33 columnas sin "Código de línea"; 3
+      líneas de una OP → `-1 -2 -3`, aplicadas y confirmadas en la base; 2 líneas más a la misma OP
+      → continúa en `-4 -5`; orden de compra vacía → error; dos OP con la misma OC → la segunda con
+      error; **fila inválida en el medio → las válidas quedan `-1` y `-2`, sin hueco**; archivo
+      viejo con Items escritos a mano → se ignoran y se generan; y sobre la OP real de formato
+      viejo, `-6`. En navegador el encabezado dice "Item", no queda ningún "Línea" suelto, y cero
+      desborde a 1600/820/390 px con consola limpia. Datos y usuarios de prueba borrados — la base
+      volvió a 68 OP / 253 líneas / 7,969 piezas.
+
   - **Hoja "Consolidado" en el Excel del reporte (2026-10-06)**. Pedido del usuario: las dos hojas
     de detalle tienen columnas distintas (una habla de LINE/Producto/Talla y la otra de No.
     repo/Departamento/Defecto), así que juntarlas exigía copiar y pegar cada vez.
@@ -2680,6 +2730,32 @@ Sheets) desplegado en `192.168.2.13`, junto con `39b32b1` que venía sin pushear
 - **No hizo falta correr el seed**: esta release no agregó permisos (el reporte usa
   `costeo.dashboard.ver`, que existía desde F1). Sí hay que **cerrar sesión y volver a entrar**
   para ver los logos, porque viajan en los datos de la sesión.
+
+### Despliegue del 2026-10-08 (`530a3ca`) — cierre por inactividad
+
+Desplegado por SSH en `192.168.2.13`. Respaldo previo de `core`
+(`~/backups/core-antes-inactividad-20261008-072710.sql`, 128K) porque la migración altera
+`core.roles` y `core.usuarios`.
+
+- La migración toca **solo `core`**, que es de `digitexsa_erp`, así que `migrate deploy` con la
+  `DATABASE_URL` de la app alcanzó — no hizo falta partirla por dueños como en agosto.
+- `bash scripts/deploy.sh` corrió los 6 pasos hasta "Listo". La API reinició con **117 rutas**
+  (antes 116: la de `PATCH /roles/:id/inactividad`), todas declarando su acceso, sin errores.
+- **No hizo falta correr el seed**: la release no agrega permisos y `seed.ts` no cambió.
+- **Verificado en la base de producción**: las dos columnas `minutos_inactividad` (integer,
+  nullable) y los dos CHECK existen; rechazan un typo de 1500 y un −5, y aceptan 0 y 15. Los
+  **0 roles y 0 usuarios con valor propio** confirman que todo el mundo arranca con el default
+  de 15 min, que es lo esperado.
+- **Verificado desde fuera**: `/` redirige 302 a `/erp/`, el frontend da 200, la API 401 sin
+  token, y `PATCH /roles/:id/inactividad` da **401 y no 404** (o sea existe y está gateada).
+  `index.html` sigue con `no-cache` y los assets con `immutable`.
+- **Verificado que lo desplegado es de verdad el código nuevo**, no solo que el commit está: el
+  bundle servido trae `ultimaActividad` y el texto "Seguir conectado", y el `dist` de la API trae
+  `MINUTOS_INACTIVIDAD_DEFAULT = 15` con sus 2 usos de `resolverMinutosInactividad`.
+- ⚠️ **Esta vez NO es obligatorio que todos cierren sesión**, a diferencia del despliegue del
+  2026-08-31. Los tokens ya emitidos no traen el claim nuevo, pero `auth-context.tsx` lo lee con
+  `?? 15`, así que una sesión abierta durante el despliegue cae al default en vez de romperse.
+  Quien quiera estrenar un tiempo distinto del default sí tiene que volver a entrar.
 
 ## Desarrollo, dueño de la receta (refactor mayor del 2026-08-26/27)
 Hasta ahora la receta (BOM) colgaba del **Producto** (`recetas.producto_insumos`) y `desarrollo` era

@@ -83,7 +83,10 @@ const ALIAS_COLUMNAS = {
   ordenCompra: ['orden de compra'],
   fechaRecibidoOp: ['fecha recibido (op)', 'fecha recibido'],
   fechaCompromisoOp: ['fecha compromiso (op)', 'fecha compromiso'],
-  codigoLine: ['codigo de linea'],
+  // "Código de línea" (el Item) SALIÓ de la plantilla el 2026-10-08: ahora lo
+  // genera el servidor. Si un archivo viejo todavía la trae, se ignora —
+  // decisión explícita del usuario, que prefirió eso a un aviso.
+
   producto: ['producto (codigo)', 'producto'],
   desarrollo: ['desarrollo'],
   impresora: ['impresora (codigo, opcional)', 'impresora'],
@@ -108,6 +111,83 @@ function normalizarEncabezado(texto: string): string {
 }
 
 /**
+ * El Item (`codigo_line`) lo genera el servidor desde el 2026-10-08: es la
+ * orden de compra más un correlativo, `7011883171-1`, `-2`, `-3`…
+ *
+ * ⚠️ Arranca SIEMPRE en 1 y nunca en 0. El formato anterior usaba la orden de
+ * compra pelada como correlativo 0 y seguía en `-2`; se cambió porque medir
+ * los datos reales mostró que **6 de 67 órdenes de compra (9%) traían huecos**
+ * en el correlativo escrito a mano (`0,2,3,4,5` · `2,3` · `2,4`…), y el
+ * usuario confirmó que esos huecos son error humano, no un dato del cliente.
+ *
+ * Las líneas ya cargadas NO se renumeraron (decisión del usuario: el formato
+ * viejo es el que ya viajó a los Google Sheets que leen los Dashboards), así
+ * que las dos convenciones conviven y todo lo que calcule "dónde sigo" tiene
+ * que entender las dos.
+ */
+function correlativoDeItem(
+  codigoLine: string,
+  ordenCompra: string,
+): number | null {
+  // Formato viejo: la orden de compra pelada era el correlativo 0.
+  if (codigoLine === ordenCompra) return 0;
+  if (!codigoLine.startsWith(`${ordenCompra}-`)) return null;
+  const resto = codigoLine.slice(ordenCompra.length + 1);
+  // La orden de compra puede traer guiones adentro (`7011685109-UA`), así que
+  // esto solo acepta lo que queda DESPUÉS del prefijo completo y solo si son
+  // dígitos: `...-UA-2` da 2, pero `...-UA-BIS` no es un correlativo.
+  return /^\d+$/.test(resto) ? Number(resto) : null;
+}
+
+/**
+ * Por dónde sigue la numeración de una orden de compra, mirando lo que ya está
+ * guardado. Sin esto, agregar líneas a una OP ya cargada reiniciaría en 1 y
+ * chocaría contra el `UNIQUE (id_empresa, codigo_line)`.
+ */
+function siguienteCorrelativo(
+  ordenCompra: string,
+  codigosExistentes: readonly string[],
+): number {
+  let mayor: number | null = null;
+  for (const codigo of codigosExistentes) {
+    const n = correlativoDeItem(codigo, ordenCompra);
+    if (n !== null && (mayor === null || n > mayor)) mayor = n;
+  }
+  return mayor === null ? 1 : mayor + 1;
+}
+
+/**
+ * Asigna el Item a cada fila válida, en el ORDEN DEL ARCHIVO, continuando la
+ * numeración que ya exista para esa orden de compra.
+ *
+ * La usan el preview (para mostrar exactamente lo que se va a guardar) y el
+ * aplicar, que lo REGENERA en vez de confiar en lo que vuelve del navegador
+ * (convención #1). Que los dos pasen por acá es lo que garantiza que
+ * coincidan.
+ *
+ * Las filas con error se saltean a propósito: si consumieran correlativo
+ * dejarían justamente los huecos que este diseño vino a eliminar.
+ */
+function asignarItems(
+  filas: {
+    ordenCompraOp: string | null;
+    error: string | null;
+    codigoLine: string | null;
+  }[],
+  codigosExistentes: readonly string[],
+): void {
+  const siguientePorOc = new Map<string, number>();
+  for (const f of filas) {
+    if (f.error || !f.ordenCompraOp) continue;
+    const oc = f.ordenCompraOp;
+    const n =
+      siguientePorOc.get(oc) ?? siguienteCorrelativo(oc, codigosExistentes);
+    f.codigoLine = `${oc}-${n}`;
+    siguientePorOc.set(oc, n + 1);
+  }
+}
+
+/**
  * Las que sin nombre no se puede leer nada: el archivo está mal armado. El
  * segundo valor es el encabezado tal como se ve en la plantilla — los alias
  * están normalizados (minúsculas, sin tildes) y mostrarlos así en un error que
@@ -116,7 +196,9 @@ function normalizarEncabezado(texto: string): string {
 const COLUMNAS_OBLIGATORIAS: [ClaveColumna, string][] = [
   ['op', 'OP (ej. 26OP014154)'],
   ['cliente', 'Cliente (código)'],
-  ['codigoLine', 'Código de línea'],
+  // La Orden de compra es obligatoria desde el 2026-10-08: el Item se deriva
+  // de ella, así que sin ese dato no hay nada que generar.
+  ['ordenCompra', 'Orden de compra'],
   ['producto', 'Producto (código)'],
 ];
 
@@ -475,7 +557,6 @@ export class CosteoOrdenesService {
       ordenCompra: string;
       fechaRecibidoOp: Date | null;
       fechaCompromisoOp: Date | null;
-      codigoLine: string;
       producto: string;
       desarrollo: string;
       impresora: string;
@@ -516,7 +597,6 @@ export class CosteoOrdenesService {
         ordenCompra: texto(row, 'ordenCompra'),
         fechaRecibidoOp: fecha(row, 'fechaRecibidoOp'),
         fechaCompromisoOp: fecha(row, 'fechaCompromisoOp'),
-        codigoLine: texto(row, 'codigoLine'),
         producto: texto(row, 'producto'),
         desarrollo: texto(row, 'desarrollo'),
         impresora: texto(row, 'impresora'),
@@ -543,9 +623,10 @@ export class CosteoOrdenesService {
         this.prisma.impresora.findMany({
           select: { idImpresora: true, codigo: true },
         }),
-        // Solo los LINE de ESTA empresa: el código de línea es único por
-        // empresa, así que marcar duplicado contra los de la otra rechazaría
-        // importaciones perfectamente válidas.
+        // Solo los Item de ESTA empresa — el UNIQUE es
+        // `(id_empresa, codigo_line)`. Se usan para saber por dónde sigue la
+        // numeración de cada orden de compra, no para marcar duplicados: el
+        // Item ya no viene del archivo.
         this.prisma.lineaProduccion.findMany({
           where: { idEmpresa },
           select: { codigoLine: true },
@@ -569,11 +650,20 @@ export class CosteoOrdenesService {
     const impresoraPorCodigo = new Map(
       impresoras.map((i) => [i.codigo.toLowerCase(), i.idImpresora]),
     );
-    const codigosLineExistentes = new Set(
-      existentesLine.map((l) => l.codigoLine),
-    );
+    const codigosExistentes = existentesLine.map((l) => l.codigoLine);
 
-    const vistosLine = new Set<string>();
+    // Dos OP del mismo archivo que compartan orden de compra generarían Item
+    // idénticos y chocarían contra el UNIQUE. Hoy no pasa (0 casos en los
+    // datos reales, y 1 orden de compra = 1 OP), pero al dejar de teclearse el
+    // Item nada más lo impediría.
+    const opPorOrdenCompra = new Map<string, string>();
+    const ocDeOtraOp = new Set<number>();
+    for (const r of crudo) {
+      if (!r.ordenCompra || !r.op) continue;
+      const duenia = opPorOrdenCompra.get(r.ordenCompra);
+      if (duenia === undefined) opPorOrdenCompra.set(r.ordenCompra, r.op);
+      else if (duenia !== r.op) ocDeOtraOp.add(r.fila);
+    }
     const filas: FilaPreviewLinea[] = crudo.map((r) => {
       const opParsed = parsearCodigoOp(r.op);
       const idCliente = r.cliente
@@ -596,11 +686,11 @@ export class CosteoOrdenesService {
       let error: string | null = null;
       if (!opParsed)
         error = `OP "${r.op}" con formato inválido (esperado 26OP014154)`;
-      else if (!r.codigoLine) error = 'Código de línea vacío';
-      else if (vistosLine.has(r.codigoLine))
-        error = 'Código de línea duplicado en el archivo';
-      else if (codigosLineExistentes.has(r.codigoLine))
-        error = 'Ya existe una línea de producción con ese código';
+      // El Item ya no se teclea (lo genera el servidor), pero sale de la
+      // orden de compra: sin ella no hay nada de qué derivarlo.
+      else if (!r.ordenCompra) error = 'Orden de compra vacía';
+      else if (ocDeOtraOp.has(r.fila))
+        error = `La orden de compra "${r.ordenCompra}" ya la usa otra OP del archivo — los Item quedarían repetidos`;
       else if (!r.cliente) error = 'Cliente vacío';
       else if (idCliente === null)
         error = `Cliente "${r.cliente}" no reconocido`;
@@ -629,7 +719,6 @@ export class CosteoOrdenesService {
       else if (r.enBlanco === null)
         error =
           'La columna "En blanco" no se pudo interpretar (usá SI o NO, o dejala vacía)';
-      if (r.codigoLine) vistosLine.add(r.codigoLine);
 
       return {
         fila: r.fila,
@@ -643,7 +732,10 @@ export class CosteoOrdenesService {
         ordenCompraOp: r.ordenCompra || null,
         fechaRecibidoOp: r.fechaRecibidoOp?.toISOString() ?? null,
         fechaCompromisoOp: r.fechaCompromisoOp?.toISOString() ?? null,
-        codigoLine: r.codigoLine,
+        // Lo que se va a guardar, calculado acá para que el preview lo
+        // muestre tal cual. Las filas con error no consumen correlativo: si
+        // consumieran, quedarían los huecos que este cambio vino a eliminar.
+        codigoLine: null as string | null,
         productoCodigo: r.producto || null,
         idProducto,
         desarrollo: r.desarrollo || null,
@@ -677,6 +769,8 @@ export class CosteoOrdenesService {
         f.error = `La OP ${f.opTexto} tiene filas con "${ENCABEZADO_EN_BLANCO}" distinto. El papel en blanco es por orden, no por línea: poné el mismo valor en todas las filas de la OP.`;
     }
 
+    asignarItems(filas, codigosExistentes);
+
     return { filas };
   }
 
@@ -694,6 +788,25 @@ export class CosteoOrdenesService {
     const idTallaPorNombre = new Map(tallas.map((t) => [t.nombre, t.idTalla]));
 
     const resultado = await this.prisma.$transaction(async (tx) => {
+      // El Item se REGENERA acá y no se toma de lo que mandó el navegador: el
+      // preview corre en el servidor, pero su salida pasa por el cliente y
+      // vuelve. Se lee dentro de la transacción para que dos imports
+      // simultáneos no calculen el mismo correlativo.
+      const existentes = await tx.lineaProduccion.findMany({
+        where: { idEmpresa },
+        select: { codigoLine: true },
+      });
+      asignarItems(
+        filas,
+        existentes.map((l) => l.codigoLine),
+      );
+      for (const f of filas) {
+        if (!f.codigoLine)
+          throw new BadRequestException(
+            `La fila ${f.fila} no tiene orden de compra, así que no se le puede asignar un Item`,
+          );
+      }
+
       const idOrdenPorCodigo = new Map<string, number>();
       let ordenesCreadas = 0;
       let lineasCreadas = 0;
@@ -748,9 +861,16 @@ export class CosteoOrdenesService {
         }
         const idOrdenProduccion = idOrdenPorCodigo.get(f.opTexto)!;
 
+        // Ya quedó asignado por `asignarItems` y validado al entrar a la
+        // transacción, antes de crear nada. El const es para que TypeScript lo
+        // vea: el chequeo vive en otro bucle y no puede estrecharlo solo.
+        const codigoLine = f.codigoLine;
+        if (!codigoLine)
+          throw new BadRequestException(`La fila ${f.fila} se quedó sin Item`);
+
         const linea = await tx.lineaProduccion.create({
           data: {
-            codigoLine: f.codigoLine,
+            codigoLine,
             idOrdenProduccion,
             // La FK compuesta de la base rechaza cualquier desajuste con la
             // empresa de la OP; esto solo se lo dice a Prisma.
@@ -842,7 +962,8 @@ export class CosteoOrdenesService {
     ws.getCell('A2').value =
       'Una fila por ítem/línea. Si varias filas comparten la misma OP, los datos de OP se toman de la primera fila donde aparece. ' +
       'Cliente y Producto deben coincidir con códigos ya existentes — un producto que no exista todavía queda pendiente en el preview, no se crea automáticamente. ' +
-      'Línea de producto es opcional, pero si se indica debe existir ya para ese Cliente — ver las hojas "Clientes" y "Líneas de producto". Igual que Producto, si no existe la fila queda pendiente y no se crea automáticamente.';
+      'Línea de producto es opcional, pero si se indica debe existir ya para ese Cliente — ver las hojas "Clientes" y "Líneas de producto". Igual que Producto, si no existe la fila queda pendiente y no se crea automáticamente. ' +
+      'El Item lo asigna el sistema: es la Orden de compra más un correlativo que arranca en 1 (7011883171-1, -2, -3…), en el orden en que van las filas. Por eso la Orden de compra es obligatoria y el orden de las filas importa.';
     ws.getCell('A2').font = { size: 9, color: { argb: 'FF888888' } };
 
     const headerRow = ws.getRow(4);
@@ -855,7 +976,10 @@ export class CosteoOrdenesService {
       'Orden de compra',
       'Fecha recibido (OP)',
       'Fecha compromiso (OP)',
-      'Código de línea',
+      // Sin "Código de línea" (el Item) desde 2026-10-08: lo genera el
+      // servidor como `<orden de compra>-<n>` con n arrancando en 1. Se quitó
+      // porque el 9% de las órdenes de compra traía huecos en el correlativo
+      // escrito a mano, y el usuario confirmó que eran error humano.
       'Producto (código)',
       'Desarrollo',
       'Impresora (código, opcional)',
@@ -874,7 +998,7 @@ export class CosteoOrdenesService {
       ENCABEZADO_EN_BLANCO,
     ];
     headerRow.eachCell(estiloEncabezado);
-    // 15 columnas fijas (antes 17: se quitaron Enguiamiento e Imagen) + tallas
+    // 14 columnas fijas (antes 15: se quitó "Código de línea") + tallas
     // + "En blanco".
     const anchos = [
       16, // OP
@@ -883,7 +1007,6 @@ export class CosteoOrdenesService {
       14, // Orden de compra
       14, // Fecha recibido
       14, // Fecha compromiso
-      16, // Código de línea
       16, // Producto
       12, // Desarrollo
       20, // Impresora

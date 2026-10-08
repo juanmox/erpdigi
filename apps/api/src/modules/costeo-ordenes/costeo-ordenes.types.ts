@@ -49,7 +49,12 @@ export interface FilaPreviewLinea {
   ordenCompraOp: string | null;
   fechaRecibidoOp: string | null;
   fechaCompromisoOp: string | null;
-  codigoLine: string;
+  /**
+   * El Item, `<orden de compra>-<n>`. Lo GENERA el servidor desde 2026-10-08
+   * (antes era una columna de la plantilla). Null en las filas con error: esas
+   * no se importan, así que no consumen correlativo.
+   */
+  codigoLine: string | null;
   productoCodigo: string | null;
   idProducto: number | null;
   desarrollo: string | null;

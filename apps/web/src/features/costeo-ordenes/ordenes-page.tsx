@@ -110,7 +110,7 @@ export function OrdenesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Línea</TableHead>
+                    <TableHead>Item</TableHead>
                     <TableHead>Desarrollo</TableHead>
                     <TableHead>Producto</TableHead>
                     <TableHead>Estatus</TableHead>
@@ -147,7 +147,9 @@ export function OrdenesPage() {
         onDescargarPlantilla={() => costeoOrdenesApi.plantillaImportar()}
         columnas={[
           { key: 'op', header: 'OP', render: (f) => f.opTexto },
-          { key: 'linea', header: 'Línea', render: (f) => f.codigoLine },
+          // El Item lo asigna el servidor, así que acá se ve el que va a
+          // quedar. Las filas con error no reciben uno: no se importan.
+          { key: 'linea', header: 'Item', render: (f) => f.codigoLine ?? '—' },
           { key: 'producto', header: 'Producto', render: (f) => f.productoCodigo ?? '—' },
           { key: 'cliente', header: 'Cliente', render: (f) => f.clienteCodigo ?? '—' },
           { key: 'lineaProducto', header: 'Línea de producto', render: (f) => f.lineaProductoNombre ?? '—' },

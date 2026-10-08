@@ -15,7 +15,8 @@ export interface FilaPreviewLinea {
   ordenCompraOp: string | null
   fechaRecibidoOp: string | null
   fechaCompromisoOp: string | null
-  codigoLine: string
+  /** El Item. Lo genera el servidor; null en las filas con error. */
+  codigoLine: string | null
   productoCodigo: string | null
   idProducto: number | null
   desarrollo: string | null

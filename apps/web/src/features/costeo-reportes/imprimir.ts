@@ -150,7 +150,7 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
   <h2>Detalle de impresión</h2>
   <table>
     <thead><tr>
-      <th>Fecha</th><th>OP</th><th>LINE</th><th>Producto</th><th>Talla</th><th class="n">Cant.</th>
+      <th>Fecha</th><th>OP</th><th>Item</th><th>Producto</th><th>Talla</th><th class="n">Cant.</th>
       <th>Impresora</th><th class="n">Consumo</th><th class="n">Enguiam.</th><th class="n">Total</th>
     </tr></thead>
     <tbody>${filasImpresion || '<tr><td colspan="10">Sin impresiones en el rango.</td></tr>'}</tbody>
