@@ -11,6 +11,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/features/auth/auth-context'
+import { useInactividad } from '@/features/auth/use-inactividad'
+import { Button } from '@/components/ui/button'
 import { Sidebar } from './sidebar'
 
 function inicialesDe(nombre: string | undefined): string {
@@ -29,6 +31,15 @@ export function Shell() {
   const colorEmpresa = empresaActual?.colorMarca ?? undefined
   const queryClient = useQueryClient()
   const [cambiandoEmpresa, setCambiandoEmpresa] = useState(false)
+
+  // Cierre por inactividad. Va en el Shell y no en cada página porque envuelve
+  // todo lo autenticado: una sola instancia cuenta para la aplicación entera.
+  const { minutosInactividad } = useAuth()
+  const { segundosRestantes, seguirConectado } = useInactividad(
+    minutosInactividad,
+    !!usuario,
+    () => void logout(),
+  )
   // Cambiar de empresa sin cerrar sesión: `seleccionarEmpresa` reemite el token
   // con los permisos de la empresa nueva. Antes el único camino era salir y
   // volver a entrar.
@@ -46,6 +57,23 @@ export function Shell() {
 
   return (
     <div className="flex min-h-svh bg-surface-paper">
+      {/* Aviso antes de cerrar: sin él, alguien que estaba leyendo una pantalla
+          o con un formulario a medio llenar pierde el trabajo sin entender por
+          qué. El botón devuelve el contador a cero sin tocar nada más. */}
+      {segundosRestantes != null && (
+        <div
+          role="alertdialog"
+          aria-live="assertive"
+          className="fixed inset-x-0 top-0 z-50 flex flex-wrap items-center justify-center gap-3 border-b border-amber-500/40 bg-amber-500/15 px-4 py-2 text-sm backdrop-blur"
+        >
+          <span className="text-ink">
+            Tu sesión se va a cerrar en <strong>{segundosRestantes}s</strong> por inactividad.
+          </span>
+          <Button size="sm" onClick={seguirConectado}>
+            Seguir conectado
+          </Button>
+        </div>
+      )}
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Franja del color de la empresa activa, a todo el ancho y arriba de

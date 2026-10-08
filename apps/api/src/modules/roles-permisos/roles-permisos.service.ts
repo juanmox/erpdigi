@@ -6,7 +6,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
-import { ActualizarPermisosRolDto, CrearRolDto } from './dto/roles.dto';
+import {
+  ActualizarInactividadRolDto,
+  ActualizarPermisosRolDto,
+  CrearRolDto,
+} from './dto/roles.dto';
 
 /**
  * ADMIN no se edita desde la pantalla, a propósito.
@@ -37,6 +41,45 @@ export class RolesPermisosService {
 
   listarPermisos() {
     return this.prisma.permiso.findMany({ orderBy: { codigo: 'asc' } });
+  }
+
+  /**
+   * Minutos de inactividad del rol.
+   *
+   * ⚠️ A diferencia de los permisos, esto NO marca el rol como
+   * `personalizado`: esa bandera existe para que el seed deje de reconciliar
+   * los PERMISOS, y encenderla por un cambio de tiempo de sesión congelaría de
+   * paso los permisos del rol en el próximo despliegue, sin que nadie lo haya
+   * pedido.
+   *
+   * Por el mismo motivo ADMIN sí se puede editar acá, aunque no se pueda en
+   * permisos: el tiempo de inactividad no es parte de lo que el seed garantiza.
+   */
+  async actualizarInactividadRol(
+    idRol: number,
+    dto: ActualizarInactividadRolDto,
+    idUsuarioActor: number,
+  ) {
+    const rol = await this.prisma.rol.findUnique({ where: { idRol } });
+    if (!rol) throw new NotFoundException('Rol no encontrado');
+
+    const actualizado = await this.prisma.rol.update({
+      where: { idRol },
+      // `undefined` deja el valor como está; `null` lo borra para que el rol
+      // "no opine" y sus usuarios caigan al default o a otro de sus roles.
+      data: { minutosInactividad: dto.minutosInactividad },
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      entidad: 'roles',
+      idEntidad: String(idRol),
+      accion: 'UPDATE',
+      datosAnteriores: { minutosInactividad: rol.minutosInactividad },
+      datosNuevos: { minutosInactividad: actualizado.minutosInactividad },
+    });
+
+    return actualizado;
   }
 
   async crearRol(dto: CrearRolDto, idUsuarioActor: number) {

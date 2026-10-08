@@ -16,6 +16,8 @@ export interface UsuarioAdmin {
   activo: boolean
   ultimoLoginEn: string | null
   creadoEn: string
+  /** Minutos de inactividad propios; null = usar el de sus roles. */
+  minutosInactividad: number | null
   empresaRoles: EmpresaRolUsuario[]
 }
 

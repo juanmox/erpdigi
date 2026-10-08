@@ -5,7 +5,16 @@ export const usuariosApi = {
   listar: () => apiFetch<UsuarioAdmin[]>('/usuarios'),
   crear: (body: { username: string; email?: string; password: string; nombreCompleto: string }) =>
     apiFetch<UsuarioAdmin>('/usuarios', { method: 'POST', body: JSON.stringify(body) }),
-  editar: (id: number, body: { username?: string; email?: string; nombreCompleto?: string }) =>
+  editar: (
+    id: number,
+    body: {
+      username?: string
+      email?: string
+      nombreCompleto?: string
+      /** null borra el valor propio y devuelve al usuario al de su rol. */
+      minutosInactividad?: number | null
+    },
+  ) =>
     apiFetch<UsuarioAdmin>(`/usuarios/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   establecerPassword: (id: number, password: string) =>
     apiFetch<UsuarioAdmin>(`/usuarios/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password }) }),

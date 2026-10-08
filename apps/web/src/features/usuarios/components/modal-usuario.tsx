@@ -27,6 +27,9 @@ export function ModalUsuario({ usuario, open, onOpenChange, onGuardado }: ModalU
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [nombreCompleto, setNombreCompleto] = useState('')
+  // Texto y no número: vacío significa "usar el del rol", que es distinto de 0
+  // ("nunca cerrar"). Con un number se pierde esa diferencia.
+  const [minutosInactividad, setMinutosInactividad] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -35,6 +38,9 @@ export function ModalUsuario({ usuario, open, onOpenChange, onGuardado }: ModalU
       setUsername(usuario?.username ?? '')
       setEmail(usuario?.email ?? '')
       setNombreCompleto(usuario?.nombreCompleto ?? '')
+      setMinutosInactividad(
+        usuario?.minutosInactividad == null ? '' : String(usuario.minutosInactividad),
+      )
       setPassword('')
       setError(null)
     }
@@ -50,6 +56,11 @@ export function ModalUsuario({ usuario, open, onOpenChange, onGuardado }: ModalU
     try {
       if (editando) {
         await usuariosApi.editar(usuario.idUsuario, {
+          // null borra el valor propio y devuelve al usuario a lo que diga su
+          // rol; Prisma distingue null de undefined, así que no hace falta un
+          // control aparte para "limpiar".
+          minutosInactividad:
+            minutosInactividad.trim() === '' ? null : Number(minutosInactividad),
           username: username.trim(),
           email: email.trim() || undefined,
           nombreCompleto: nombreCompleto.trim(),
@@ -100,6 +111,23 @@ export function ModalUsuario({ usuario, open, onOpenChange, onGuardado }: ModalU
           <div>
             <Label className="mb-1 block text-xs">Correo electrónico (opcional)</Label>
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+          <div>
+            <Label className="mb-1 block text-xs">
+              Cierre por inactividad (minutos, opcional)
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              max={1440}
+              value={minutosInactividad}
+              onChange={(e) => setMinutosInactividad(e.target.value)}
+              placeholder="Vacío = usar el de sus roles"
+            />
+            <p className="text-ink-faint mt-1 text-[11px]">
+              Solo para este usuario, por encima de lo que diga su rol. <strong>0</strong> = nunca
+              cerrar. En blanco se usa el del rol, o 15 minutos si el rol tampoco define uno.
+            </p>
           </div>
           {!editando && (
             <div>

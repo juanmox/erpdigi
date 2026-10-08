@@ -1,10 +1,14 @@
+import { Type } from 'class-transformer';
 import {
   ArrayUnique,
   IsArray,
+  IsInt,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 
@@ -40,4 +44,21 @@ export class ActualizarPermisosRolDto {
   @ArrayUnique()
   @IsString({ each: true })
   codigosPermisos!: string[];
+}
+
+/**
+ * Minutos de inactividad del rol. Tiene su propio endpoint y no viaja con los
+ * permisos porque son cosas distintas, y una no debe arrastrar a la otra:
+ * editar permisos marca el rol como `personalizado` y hace que el seed deje de
+ * reconciliarlos. Sería una sorpresa fea que cambiar un tiempo de sesión
+ * congelara de paso los permisos del rol ante el próximo despliegue.
+ */
+export class ActualizarInactividadRolDto {
+  /** null = el rol no opina; sus usuarios caen al default o a otro rol suyo. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  minutosInactividad?: number | null;
 }

@@ -30,6 +30,7 @@ export class UsuariosService {
         username: true,
         email: true,
         nombreCompleto: true,
+        minutosInactividad: true,
         activo: true,
         ultimoLoginEn: true,
         creadoEn: true,
@@ -50,6 +51,7 @@ export class UsuariosService {
         username: true,
         email: true,
         nombreCompleto: true,
+        minutosInactividad: true,
         activo: true,
         ultimoLoginEn: true,
         creadoEn: true,
@@ -135,6 +137,10 @@ export class UsuariosService {
         username: dto.username,
         email: dto.email,
         nombreCompleto: dto.nombreCompleto,
+        // `undefined` deja el valor como está (un PATCH que no lo menciona),
+        // `null` lo borra para volver a lo que diga el rol. Prisma distingue
+        // los dos, así que no hace falta un campo aparte para "limpiar".
+        minutosInactividad: dto.minutosInactividad,
       },
     });
 
@@ -147,6 +153,7 @@ export class UsuariosService {
         username: usuario.username,
         email: usuario.email,
         nombreCompleto: usuario.nombreCompleto,
+        minutosInactividad: usuario.minutosInactividad,
       },
     });
 

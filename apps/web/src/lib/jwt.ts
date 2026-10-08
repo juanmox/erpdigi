@@ -4,6 +4,8 @@ export interface JwtClaims {
   idEmpresa: number | null
   roles: string[]
   permisos: string[]
+  /** Minutos sin actividad antes de cerrar la sesión; 0 = nunca. */
+  minutosInactividad?: number
   exp: number
 }
 

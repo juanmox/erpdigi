@@ -10,6 +10,18 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { JwtPayload } from './types/jwt-payload.type';
 
 const ACCESS_TOKEN_TTL = '15m';
+
+/**
+ * Minutos sin actividad del usuario antes de cerrar la sesión, cuando ni el
+ * usuario ni sus roles definen uno propio.
+ *
+ * ⚠️ No confundir con `ACCESS_TOKEN_TTL`, que casualmente vale lo mismo. Son
+ * mecanismos distintos: el token se renueva SOLO —la app hace peticiones sola, el
+ * panel de impresoras refresca cada 30s— así que una pantalla olvidada nunca
+ * caduca por sí misma. Este contador mira la actividad REAL del usuario (mouse
+ * y teclado) y es el único que cierra una máquina desatendida en planta.
+ */
+const MINUTOS_INACTIVIDAD_DEFAULT = 15;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 días
 
 export interface EmpresaDisponible {
@@ -106,11 +118,42 @@ export class AuthService {
     });
     const roles = new Set<string>();
     const permisos = new Set<string>();
+    // Con varios roles gana el MÁS CORTO. Si ganara el más largo bastaría
+    // sumar un rol permisivo para anular el control en toda la planta.
+    // Los roles sin valor propio (null) no participan: son "no opino".
+    let minutosDeRoles: number | null = null;
     for (const a of asignaciones) {
       roles.add(a.rol.codigo);
       for (const rp of a.rol.permisos) permisos.add(rp.permiso.codigo);
+      const m = a.rol.minutosInactividad;
+      if (m != null && (minutosDeRoles == null || m < minutosDeRoles))
+        minutosDeRoles = m;
     }
-    return { roles: [...roles], permisos: [...permisos] };
+    return {
+      roles: [...roles],
+      permisos: [...permisos],
+      minutosDeRoles,
+    };
+  }
+
+  /**
+   * Minutos de inactividad que rigen para esta sesión.
+   *
+   * Cadena: lo del USUARIO gana sobre lo del rol, y si ninguno define nada
+   * queda el default. El valor del usuario es la excepción puntual — así no hay
+   * que crear un rol entero para una sola persona.
+   *
+   * `0` significa "nunca cerrar" y es un valor legítimo, no un vacío: por eso
+   * la comparación es contra `null` y no un `||`, que lo trataría como falsy y
+   * silenciosamente activaría el cierre en un rol de oficina.
+   */
+  private resolverMinutosInactividad(
+    delUsuario: number | null | undefined,
+    deRoles: number | null,
+  ): number {
+    if (delUsuario != null) return delUsuario;
+    if (deRoles != null) return deRoles;
+    return MINUTOS_INACTIVIDAD_DEFAULT;
   }
 
   private async emitirSesion(
@@ -119,13 +162,17 @@ export class AuthService {
       username: string;
       email: string | null;
       nombreCompleto: string;
+      // Obligatorio a propósito, no opcional: los tres llamadores arman este
+      // objeto a mano y, siendo opcional, olvidarlo pasaba desapercibido y el
+      // valor del usuario se perdía en silencio. Así el compilador los señala.
+      minutosInactividad: number | null;
     },
     idEmpresa: number | null,
   ): Promise<SesionEmitida> {
     const empresasDisponibles = await this.empresasActivasDe(usuario.idUsuario);
-    const { roles, permisos } = idEmpresa
+    const { roles, permisos, minutosDeRoles } = idEmpresa
       ? await this.claimsParaEmpresa(usuario.idUsuario, idEmpresa)
-      : { roles: [], permisos: [] };
+      : { roles: [], permisos: [], minutosDeRoles: null };
 
     const payload: JwtPayload = {
       sub: usuario.idUsuario,
@@ -133,6 +180,14 @@ export class AuthService {
       idEmpresa,
       roles,
       permisos,
+      // Viaja en el token y no en un endpoint aparte: el navegador ya lo tiene
+      // desde el primer render, sin una llamada extra antes de poder contar.
+      // ⚠️ Como consecuencia, cambiarlo tarda hasta 15 minutos en llegar a una
+      // sesión abierta (hasta el próximo refresco) — igual que los permisos.
+      minutosInactividad: this.resolverMinutosInactividad(
+        usuario.minutosInactividad,
+        minutosDeRoles,
+      ),
     };
     const accessToken = await this.jwt.signAsync(payload, {
       expiresIn: ACCESS_TOKEN_TTL,
@@ -192,6 +247,7 @@ export class AuthService {
         username: usuario.username,
         email: usuario.email,
         nombreCompleto: usuario.nombreCompleto,
+        minutosInactividad: usuario.minutosInactividad,
       },
       idEmpresa,
     );
@@ -217,6 +273,7 @@ export class AuthService {
         username: usuario.username,
         email: usuario.email,
         nombreCompleto: usuario.nombreCompleto,
+        minutosInactividad: usuario.minutosInactividad,
       },
       idEmpresa,
     );
@@ -268,6 +325,7 @@ export class AuthService {
         username: usuario.username,
         email: usuario.email,
         nombreCompleto: usuario.nombreCompleto,
+        minutosInactividad: usuario.minutosInactividad,
       },
       idEmpresa,
     );

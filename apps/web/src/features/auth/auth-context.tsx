@@ -37,6 +37,12 @@ interface AuthState {
   empresasDisponibles: EmpresaDisponible[]
   roles: string[]
   permisos: string[]
+  /**
+   * Minutos sin actividad antes de cerrar la sesión; 0 = nunca cerrar. Lo
+   * resuelve el servidor (usuario → rol → 15 por defecto) y viaja en el token,
+   * así que la pantalla no conoce la regla ni puede alterarla.
+   */
+  minutosInactividad: number
 }
 
 interface AuthContextValue extends AuthState {
@@ -55,6 +61,7 @@ const ESTADO_VACIO: AuthState = {
   empresasDisponibles: [],
   roles: [],
   permisos: [],
+  minutosInactividad: 15,
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -67,6 +74,9 @@ function estadoDesdeSesion(sesion: SesionRespuesta): AuthState {
     empresasDisponibles: sesion.empresasDisponibles,
     roles: claims?.roles ?? [],
     permisos: claims?.permisos ?? [],
+    // ?? y no ||: 0 es "nunca cerrar", un valor legítimo que || convertiría
+    // en 15 y activaría el cierre justo donde se pidió desactivarlo.
+    minutosInactividad: claims?.minutosInactividad ?? 15,
   }
 }
 

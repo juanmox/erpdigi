@@ -2245,6 +2245,64 @@ sin i18n (todo en español).
       desperdicio — el riesgo estaba en el sentido contrario. El usuario decidió **no** separar el
       papel descartado por daño de la merma inexplicada por ahora.
 
+  - **Bitácora de usuarios — analizado y decidido, NO construido (2026-10-07)**. El usuario preguntó
+    cómo ver qué hace cada usuario. **Pidió explícitamente no construirlo todavía**; queda esto
+    anotado para no repetir el análisis cuando lo retome.
+    - **Lo que YA existe**: `core.auditoria` con 365 registros desde el 2026-07-24 (usuario,
+      empresa, entidad, id de entidad, acción, `datos_anteriores`, `datos_nuevos`, IP, user agent,
+      fecha), y un `GET /erp/api/auditoria` gateado con `plataforma.auditoria.ver` — permiso que hoy
+      solo tiene ADMIN. Cubre consumos, montajes, reposiciones, órdenes, usuarios, productos y
+      desarrollos. Es lo que se usó en esta misma sesión para reconstruir las pruebas del usuario y
+      encontrar el bug de los diez PATCH del campo de cantidad.
+    - **Por qué ese endpoint no alcanza**: devuelve `idUsuario` y no el nombre; solo filtra por
+      empresa y entidad —no por usuario ni por fecha, que es justo lo que se pregunta—; y tiene un
+      tope fijo de 50 sin paginación. No lo consume ninguna pantalla.
+    - ⚠️ **El problema de fondo: 112 de los 365 registros (31%) no tienen autor.**
+      `auditoria.id_usuario` es `ON DELETE SET NULL`, así que **borrar un usuario le borra el nombre
+      a todo su histórico**. Buena parte de esos 112 son usuarios de prueba desechables de sesiones
+      anteriores, pero el mecanismo es idéntico para un empleado que se va. Choca de frente con el
+      propósito de una bitácora — es la misma razón por la que `montaje_rollo.desmontado_por` se
+      hizo con FK `RESTRICT`, que la auditoría no tiene.
+    - **Decisión del usuario: guardar el username como TEXTO** en cada registro, no cambiar la FK a
+      RESTRICT. Su criterio, textual: *"si el usuario se retira de la empresa, ya no me interesa,
+      pero sí me interesa saber qué hizo"*. O sea el usuario debe poder borrarse y el rastro
+      sobrevivirle — lo contrario de lo que se eligió para `desmontado_por`, y acá es lo correcto
+      porque la auditoría no protege ninguna integridad referencial, solo narra.
+      - Al implementarlo: el backfill recupera el nombre de **253 de los 365** registros (los que
+        todavía tienen `id_usuario`). **Los 112 ya perdidos no vuelven** — ese dato se fue con los
+        usuarios borrados.
+    - **Alcance: no requiere nada nuevo.** `plataforma.auditoria.ver` ya existe y la pantalla de
+      Roles permite asignarlo a cualquier rol sin tocar código ni desplegar. El usuario pidió
+      poder dárselo a Gerencia y dejar abierto habilitarlo a otros: eso ya es exactamente cómo
+      funciona hoy.
+    - **Lo que faltaría construir**, por orden: (1) la columna de texto y su backfill; (2) extender
+      `listar()` para devolver el nombre y aceptar filtros por usuario, rango de fechas, entidad y
+      acción, con paginación; (3) la pantalla en el desplegable del avatar junto a Usuarios y Roles
+      —donde ya estaba anticipado que iría—, mostrando el antes/después de cada cambio, que es el
+      dato más útil y ya está guardado.
+    - ⚠️ **La pantalla debe narrar en lenguaje natural, no volcar la tabla** (pedido del usuario
+      2026-10-07, tras correr la consulta SQL de abajo: *"solo las personas técnicas lo
+      entenderían"*). La forma que pidió, textual: *"el usuario kevin editó una orden en la fecha
+      dd/mm/yyyy HH:mm desde la pc con IP xx.xx.xx.xx"*, y así para cada tipo de actividad según
+      los campos disponibles.
+      - O sea hace falta un **traductor de entidad+acción a frase**: `costeo.orden_produccion` +
+        `UPDATE` → "editó una orden". Son ~15 combinaciones de entidad×acción en los datos
+        actuales, así que es una tabla de textos, no lógica.
+      - El `id_entidad` debería resolverse al código legible cuando exista (la orden #56 es
+        `26OP013582`), no mostrarse como número — el número no le dice nada a quien lee.
+      - `datos_anteriores`/`datos_nuevos` ya están guardados: el "de X a Y" es lo más útil del
+        registro y conviene mostrarlo, pero traducido ("cambió el papel en blanco de 4 a 7 yd"),
+        no como JSON crudo.
+    - **Consulta que sirve mientras tanto**, sin construir nada:
+      ```sql
+      SELECT a.creado_en, COALESCE(u.username, '(usuario borrado)') AS usuario,
+             a.entidad, a.accion, a.id_entidad, a.datos_anteriores, a.datos_nuevos
+      FROM core.auditoria a
+      LEFT JOIN core.usuarios u ON u.id_usuario = a.id_usuario
+      WHERE a.creado_en >= now() - interval '7 days'
+      ORDER BY a.creado_en DESC;
+      ```
+
   - **Plantilla de Órdenes: fuera Enguiamiento e Imagen, y el parser deja de leer por posición
     (2026-10-07)**. Tres dudas del usuario probando la carga
     real, las tres verificadas contra el código y los datos antes de responder:
@@ -2314,6 +2372,75 @@ sin i18n (todo en español).
       modal dice "Deportes"/"Deporte" y no queda ningún "Líneas de producto" en pantalla, consola
       limpia. Datos y usuarios de prueba borrados — la base volvió a 68 OP / 253 líneas / 7,969
       piezas.
+
+  - **Cierre de sesión por inactividad, configurable por usuario y por rol (2026-10-07)**. El
+    usuario preguntó en cuánto tiempo se cierra la sesión si deja la computadora, y la respuesta
+    honesta era **que no se cierra nunca**. Lo construido es el cierre por inactividad; el **tope
+    duro de 13 horas** quedó explícitamente **para después**, por decisión suya tras ver el costo de
+    cada parte.
+    - ⚠️ **Lo que había NO era un cierre de sesión, y confundirlos llevaba al arreglo equivocado.**
+      El access token dura 15 minutos, pero `apiFetch` lo **renueva solo** con el refresh token de
+      30 días en cuanto recibe un 401. O sea que una pantalla abierta se mantenía viva
+      indefinidamente, y una abandonada con una pantalla que refresca sola (Impresión de OPs tiene
+      `refetchInterval: 30_000`) **se renovaba para siempre sin que nadie la tocara**. Acortar el
+      TTL del token no cerraba nada: solo renovaba más seguido.
+    - **La actividad se mide por el teclado y el mouse, no por tráfico de red**
+      (`mousedown · mousemove · keydown · touchstart · scroll · wheel`). Es la distinción que hace
+      que esto funcione: contar las peticiones habría dejado vivas justamente las pantallas que se
+      auto-refrescan, que es el caso que se quería cerrar.
+    - **Cadena de resolución, de más específico a más general**: lo del **usuario** manda sobre lo
+      del **rol**; con varios roles gana el **más corto**; si nadie opina, **15 minutos**. Se
+      resuelve con `!= null` y no con `||`, porque **0 significa "nunca cerrar"** y un `||` lo
+      habría tratado como "sin valor" — el bug clásico de este tipo de cadena.
+    - Migración `20261007200000_inactividad_por_usuario_y_rol` (+ `rollback.sql`): columna
+      `minutos_inactividad` **nullable** en `core.roles` y `core.usuarios`, con
+      `CHECK (IS NULL OR BETWEEN 0 AND 1440)`. NULL y 0 dicen cosas distintas a propósito: NULL es
+      "mirá el nivel siguiente", 0 es "nunca cerrar". El rango va en la base y no solo en el DTO,
+      mismo criterio que el 2-10 del papel en blanco.
+    - **El valor viaja en los claims del JWT**, así que el navegador no necesita pedirlo aparte y
+      no hay una petición extra por sesión. La contracara: **cambiarlo le aplica al usuario en su
+      próximo login**, no al instante.
+      - ⚠️ `emitirSesion()` arma los claims a mano en **3 lugares** (login, selección de empresa,
+        refresh). El campo nuevo se declaró **obligatorio y no opcional** justamente para que el
+        compilador señalara los tres; con un `?` habría compilado perfecto dejando dos caminos
+        emitiendo tokens sin el dato, y el síntoma sería "a veces no cierra".
+    - **Aviso antes de cerrar, con un botón para seguir.** El aviso dura `min(60s, 20% del límite)`
+      — **el primer intento usaba 60s fijos y con un límite de 1 minuto el banner quedaba visible
+      todo el tiempo**, encontrado en la prueba de navegador, no por el typecheck. El reloj es un
+      `setInterval` de 1 segundo y no un `setTimeout` largo: una laptop suspendida retrasa el
+      timeout y despertaría con la sesión todavía abierta.
+    - La última actividad se comparte entre pestañas por `localStorage`, con try/catch: tocar una
+      pestaña mantiene vivas las demás, que es lo que espera cualquiera con el ERP abierto en dos
+      lados.
+    - **Dónde se edita**: en el usuario, dentro de su modal de `/usuarios`; en el rol, en `/roles`.
+      - ⚠️ **El tiempo del rol NO marca el rol como `personalizado`**, a diferencia de sus permisos.
+        Esa bandera existe para que el seed deje de reconciliar **permisos**, y encenderla por un
+        cambio de tiempo de sesión le congelaría los permisos en el próximo despliegue sin que nadie
+        lo haya pedido. Por lo mismo **ADMIN sí se edita acá** aunque no se editen sus permisos: el
+        tiempo de inactividad no es algo que el seed garantice.
+      - Los campos se manejan como **texto y no como número** en los dos formularios: vacío ("usar
+        el del nivel siguiente") es distinto de 0 ("nunca cerrar"), y un `number` pierde esa
+        diferencia.
+    - ⚠️ **Bug propio, atrapado por el guard de arranque y no por mí**: al insertar el método nuevo
+      en el controller quedó **entre** el `@RequirePermissions` existente y `@Patch('roles/:id/
+      permisos')`, o sea le robó el decorador al método de abajo. `verificarRutasGateadas()` abortó
+      el arranque nombrando exactamente `PATCH /roles/:id/permisos`. Es precisamente el modo de
+      falla para el que se escribió ese guard: sin él, ese endpoint habría quedado abierto a
+      cualquier autenticado sin ningún síntoma.
+    - **Verificado**: el CHECK rechazando −5, 1500 y 4.5 por SQL directo; la cadena completa con 5
+      logins reales (`15` por default · `60` solo del rol · `5` con dos roles · `3` del usuario
+      sobre el rol · `0` que no cae al rol); el endpoint del rol en 9 casos (45/0/null OK, −5/1441/
+      4.5 → 400, rol inexistente → 404, sin permiso → 403, ADMIN → 200) más que `personalizado`
+      quedó en `false` y la auditoría registró el antes/después. En navegador: el aviso salió a los
+      ~145s de un límite de 3 min con "33s" en el contador (exactamente `180 − min(60, 36)`),
+      "Seguir conectado" lo escondió sin perder la sesión, y con un límite de 1 min la sesión sí
+      llegó al login. La pantalla de Roles guarda, vacía y valida fuera de rango; el campo del
+      modal de Usuarios persiste y vuelve a vacío. Cero desborde a 1440/820/390 px y consola
+      limpia. Usuarios y roles de prueba borrados.
+    - **Lo que falta, y por qué no está**: el **tope duro** necesita un instante de "cuándo empezó
+      la sesión" que **no se renueve** en cada refresh — hoy no existe ningún campo así, y la
+      rotación del refresh token borra cualquier rastro del original. Es trabajo aparte, no un
+      ajuste del límite de arriba.
 
   - **Hoja "Consolidado" en el Excel del reporte (2026-10-06)**. Pedido del usuario: las dos hojas
     de detalle tienen columnas distintas (una habla de LINE/Producto/Talla y la otra de No.

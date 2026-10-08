@@ -45,6 +45,9 @@ export function RolesPage() {
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
   const [creando, setCreando] = useState(false)
   const [nuevo, setNuevo] = useState({ codigo: '', nombre: '' })
+  // null = no se tocó, así que se muestra lo que diga el rol. Texto y no número
+  // porque vacío ("el rol no opina") es distinto de 0 ("nunca cerrar").
+  const [minutos, setMinutos] = useState<string | null>(null)
 
   const { data: roles } = useQuery({ queryKey: ['roles'], queryFn: () => rolesApi.listar() })
   const { data: permisos } = useQuery({ queryKey: ['permisos'], queryFn: () => rolesApi.permisos() })
@@ -66,6 +69,7 @@ export function RolesPage() {
   function elegirRol(r: Rol) {
     setIdSeleccionado(r.idRol)
     setMarcados(null)
+    setMinutos(null)
     setMensaje(null)
   }
 
@@ -99,6 +103,37 @@ export function RolesPage() {
       }),
   })
 
+  const minutosDelRol = rol?.minutosInactividad == null ? '' : String(rol.minutosInactividad)
+  const minutosTexto = minutos ?? minutosDelRol
+  const minutosValidos =
+    minutosTexto.trim() === '' ||
+    (/^\d+$/.test(minutosTexto.trim()) && Number(minutosTexto) <= 1440)
+  const minutosSucio = minutos !== null && minutosTexto !== minutosDelRol
+
+  const guardarInactividad = useMutation({
+    mutationFn: () =>
+      rolesApi.actualizarInactividad(
+        rol!.idRol,
+        minutosTexto.trim() === '' ? null : Number(minutosTexto),
+      ),
+    onSuccess: async (actualizado) => {
+      setMinutos(null)
+      setMensaje({
+        tipo: 'ok',
+        texto:
+          actualizado.minutosInactividad == null
+            ? `"${actualizado.nombre}" ya no define un tiempo de inactividad propio.`
+            : `Cierre por inactividad de "${actualizado.nombre}": ${actualizado.minutosInactividad} min.`,
+      })
+      await queryClient.invalidateQueries({ queryKey: ['roles'] })
+    },
+    onError: (e) =>
+      setMensaje({
+        tipo: 'error',
+        texto: e instanceof ApiError ? e.message : 'No se pudo guardar el tiempo de inactividad',
+      }),
+  })
+
   const crear = useMutation({
     mutationFn: () => rolesApi.crear({ codigo: nuevo.codigo.trim(), nombre: nuevo.nombre.trim() }),
     onSuccess: async (creado) => {
@@ -124,6 +159,7 @@ export function RolesPage() {
       (p.descripcion ?? '').toLowerCase().includes(texto),
   )
   const grupos = agrupar(visibles)
+
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4 p-4 lg:p-6">
@@ -232,6 +268,48 @@ export function RolesPage() {
                   mano.
                 </p>
               )}
+
+              {/* El tiempo de inactividad SÍ se edita en ADMIN: a diferencia de
+                  los permisos, no es algo que el seed garantice. */}
+              <div className="rounded-md border border-border p-3">
+                <div className="flex flex-wrap items-end gap-3">
+                  <div>
+                    <Label className="mb-1 block text-xs">Cierre por inactividad (minutos)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={1440}
+                      value={minutosTexto}
+                      onChange={(e) => setMinutos(e.target.value)}
+                      placeholder="Sin definir"
+                      className="w-40"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    disabled={!minutosSucio || !minutosValidos || guardarInactividad.isPending}
+                    onClick={() => guardarInactividad.mutate()}
+                  >
+                    Guardar tiempo
+                  </Button>
+                  {minutosSucio && (
+                    <Button size="sm" variant="ghost" onClick={() => setMinutos(null)}>
+                      Descartar
+                    </Button>
+                  )}
+                </div>
+                <p className="text-muted-foreground mt-2 text-[11px]">
+                  En blanco, este rol no opina y sus usuarios usan 15 minutos (o lo que diga otro de
+                  sus roles). <strong>0</strong> = nunca cerrar por inactividad. Con varios roles
+                  gana el tiempo <strong>más corto</strong>, y lo que se fije en el usuario manda
+                  sobre cualquier rol.
+                  {!minutosValidos && (
+                    <span className="text-destructive block">
+                      Tiene que ser un número entero de 0 a 1440.
+                    </span>
+                  )}
+                </p>
+              </div>
 
               <div className="flex flex-wrap items-center gap-2">
                 <Input

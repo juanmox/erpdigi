@@ -10,7 +10,11 @@ import {
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
-import { ActualizarPermisosRolDto, CrearRolDto } from './dto/roles.dto';
+import {
+  ActualizarInactividadRolDto,
+  ActualizarPermisosRolDto,
+  CrearRolDto,
+} from './dto/roles.dto';
 import { RolesPermisosService } from './roles-permisos.service';
 
 @Controller()
@@ -37,6 +41,20 @@ export class RolesPermisosController {
   @Post('roles')
   crearRol(@Body() dto: CrearRolDto, @CurrentUser() usuario: JwtPayload) {
     return this.rolesPermisosService.crearRol(dto, usuario.sub);
+  }
+
+  @RequirePermissions('plataforma.roles.administrar')
+  @Patch('roles/:id/inactividad')
+  actualizarInactividadRol(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ActualizarInactividadRolDto,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.rolesPermisosService.actualizarInactividadRol(
+      id,
+      dto,
+      usuario.sub,
+    );
   }
 
   @RequirePermissions('plataforma.roles.administrar')

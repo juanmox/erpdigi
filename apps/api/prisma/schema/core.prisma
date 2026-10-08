@@ -47,6 +47,11 @@ model Usuario {
   mfaSecret      String?             @map("mfa_secret")
   ultimoLoginEn  DateTime?           @map("ultimo_login_en") @db.Timestamptz(3)
   creadoEn       DateTime            @default(now()) @map("creado_en") @db.Timestamptz(3)
+  /// Minutos sin actividad antes de cerrar la sesión, propios de ESTE usuario.
+  /// NULL = usar el de sus roles. Tiene precedencia sobre el rol: es la
+  /// excepción puntual, para no tener que crear un rol por una persona.
+  /// + SQL: CHECK (NULL o entre 0 y 1440).
+  minutosInactividad Int?               @map("minutos_inactividad")
   auditorias     Auditoria[]
   refreshTokens  RefreshToken[]
   empresaRoles   UsuarioEmpresaRol[]
@@ -65,6 +70,12 @@ model Rol {
   /// ya no los reconcilia. Lo prende `PATCH /roles/:id/permisos`; ADMIN nunca
   /// llega a prenderlo porque no es editable desde la pantalla.
   personalizado       Boolean             @default(false)
+  /// Minutos sin actividad del usuario antes de cerrar la sesión. NULL = no
+  /// definido acá, se mira el siguiente nivel (usuario → rol → 15 por defecto);
+  /// 0 = nunca cerrar. Con varios roles gana el MÁS CORTO: si no, bastaría
+  /// sumar un rol permisivo para anular el control.
+  /// + SQL: CHECK (NULL o entre 0 y 1440).
+  minutosInactividad  Int?                @map("minutos_inactividad")
   permisos            RolPermiso[]
   usuarioEmpresaRoles UsuarioEmpresaRol[]
 
