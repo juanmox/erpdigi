@@ -20,6 +20,7 @@ import { DesmontarMontajeDto } from './dto/desmontar-montaje.dto';
 import { EditarIngresoDto } from './dto/editar-ingreso.dto';
 import { IngresoFacturaPapelDto } from './dto/ingreso-factura-papel.dto';
 import { ListarRollosDto } from './dto/listar-rollos.dto';
+import { MarcarConsumidoFueraDto } from './dto/marcar-consumido-fuera.dto';
 import { MontarRolloDto } from './dto/montar-rollo.dto';
 
 @Controller('costeo/rollos')
@@ -133,6 +134,21 @@ export class CosteoRollosController {
   @Get('facturas/:numeroFactura')
   buscarFactura(@Param('numeroFactura') numeroFactura: string) {
     return this.service.buscarFacturaPorNumero(numeroFactura);
+  }
+
+  /**
+   * Permiso propio y NO `costeo.rollo.ingresar`: BODEGUERO tiene ese y esto es
+   * una excepción que, mal usada, saca rollos buenos de circulación. Vive en
+   * PERMISOS_COSTEO, así que lo reciben solo ADMIN y ADMIN_IT_COSTEO — y se le
+   * puede dar a otro rol desde /roles sin tocar código.
+   */
+  @RequirePermissions('costeo.rollo.marcar_consumido_fuera')
+  @Patch('marcar-consumido-fuera')
+  marcarConsumidoFuera(
+    @Body() dto: MarcarConsumidoFueraDto,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.marcarConsumidoFuera(dto, usuario.sub);
   }
 
   @RequirePermissions('costeo.rollo.ingresar')

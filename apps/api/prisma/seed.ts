@@ -68,6 +68,7 @@ const PERMISOS_COSTEO = [
   // los roles granulares de planta, que listan sus permisos uno por uno. Para
   // abrirlo después basta agregarlo a un rol desde /usuarios, sin tocar código.
   'costeo.rollo.historial',
+  'costeo.rollo.marcar_consumido_fuera',
   'costeo.orden.ver',
   'costeo.orden.importar',
   'costeo.reposicion.ver',
@@ -603,6 +604,8 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
   'costeo.rollo.ingresar':
     'Ingresar facturas de papel a bodega, corregirlas e importarlas por plantilla',
   'costeo.rollo.historial': 'Ver el historial de montajes: quién montó y quién desmontó cada rollo',
+  'costeo.rollo.marcar_consumido_fuera':
+    'Sacar de circulación rollos que ya se gastaron fuera de este ERP (por ejemplo antes de arrancarlo), para que no se monten por error',
 
   // ── Costeo: órdenes ──
   'costeo.orden.ver': 'Buscar órdenes de producción y ver sus líneas',

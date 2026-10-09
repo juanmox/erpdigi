@@ -289,8 +289,21 @@ model RolloPapel {
   idTipoPapel      Int      @map("id_tipo_papel")
   yardasIniciales  Decimal? @map("yardas_iniciales") @db.Decimal(12, 4)
   costoUnitario    Decimal? @map("costo_unitario") @db.Decimal(12, 6)
-  /// EN_BODEGA·MONTADO·AGOTADO·DESCARTADO (CHECK en migración)
+  /// EN_BODEGA·MONTADO·AGOTADO·DESCARTADO·CONSUMIDO_FUERA (CHECK en migración)
+  ///
+  /// CONSUMIDO_FUERA = se gastó, pero NO en este ERP (típicamente antes de
+  /// arrancarlo, registrado en el WebApp legacy). Es un estado aparte y no
+  /// AGOTADO a propósito: un AGOTADO tiene su consumo registrado acá y éste no,
+  /// así que mezclarlos haría que un reporte de "comprado contra consumido"
+  /// los contara como merma.
   estado           String   @default("EN_BODEGA") @db.VarChar(20)
+  /// Obligatorio cuando el estado es CONSUMIDO_FUERA, y prohibido si no lo es
+  /// (CHECK `ck_rollo_papel_consumido_fuera`).
+  consumidoFueraMotivo String?   @map("consumido_fuera_motivo")
+  /// FK RESTRICT hacia core.usuarios — sin @relation, mismo criterio que el
+  /// resto de las columnas de auditoría de `costeo` (ver F1).
+  consumidoFueraPor    Int?      @map("consumido_fuera_por")
+  consumidoFueraEn     DateTime? @map("consumido_fuera_en") @db.Timestamptz(3)
   creadoEn         DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
 
   facturaPapel FacturaPapel   @relation(fields: [idFacturaPapel], references: [idFacturaPapel])

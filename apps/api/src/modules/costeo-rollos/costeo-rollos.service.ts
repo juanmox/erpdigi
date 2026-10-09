@@ -14,6 +14,7 @@ import { DesmontarMontajeDto } from './dto/desmontar-montaje.dto';
 import { EditarIngresoDto } from './dto/editar-ingreso.dto';
 import { IngresoFacturaPapelDto } from './dto/ingreso-factura-papel.dto';
 import { ListarRollosDto } from './dto/listar-rollos.dto';
+import { MarcarConsumidoFueraDto } from './dto/marcar-consumido-fuera.dto';
 import { MontarRolloDto } from './dto/montar-rollo.dto';
 
 const INCLUDE_ROLLO = { tipoPapel: true, facturaPapel: true } as const;
@@ -280,6 +281,123 @@ export class CosteoRollosService {
     });
 
     return this.obtenerFactura(idFacturaPapel);
+  }
+
+  /**
+   * Saca de circulación un rango de rollos de una factura, o lo revierte.
+   *
+   * El caso que lo motiva: una factura de 40 rollos cuyos primeros 20 se
+   * gastaron en el WebApp legacy antes de que existiera Costeo. Se registran
+   * los 40 —la factura es por 40 y ese es el costo real— y se marcan los 20
+   * que ya no existen físicamente, para que nadie los monte por error.
+   *
+   * No usa AGOTADO a propósito: ver el comentario del estado en el schema.
+   */
+  async marcarConsumidoFuera(
+    dto: MarcarConsumidoFueraDto,
+    idUsuarioActor: number,
+  ) {
+    const marcar = dto.marcar !== false;
+    if (dto.desde > dto.hasta)
+      throw new BadRequestException(
+        'El rango está invertido: "desde" tiene que ser menor o igual que "hasta"',
+      );
+    if (marcar && !dto.motivo?.trim())
+      throw new BadRequestException(
+        'El motivo es obligatorio al sacar rollos de circulación: es lo que explica, dentro de un año, por qué no están disponibles',
+      );
+
+    const factura = await this.prisma.facturaPapel.findUnique({
+      where: { idFacturaPapel: dto.idFacturaPapel },
+    });
+    if (!factura) throw new NotFoundException('Factura de papel no encontrada');
+
+    const rollos = await this.prisma.rolloPapel.findMany({
+      where: {
+        idFacturaPapel: dto.idFacturaPapel,
+        secuencia: { gte: dto.desde, lte: dto.hasta },
+      },
+      // Un rollo que se montó ACÁ sí se usó acá: marcarlo como consumido fuera
+      // sería mentira, y además dejaría su consumo colgando de un rollo que el
+      // sistema declara no haber visto nunca.
+      include: { _count: { select: { montajes: true } } },
+      orderBy: { secuencia: 'asc' },
+    });
+    if (rollos.length === 0)
+      throw new NotFoundException(
+        `La factura ${factura.numeroFactura} no tiene rollos entre el ${dto.desde} y el ${dto.hasta}`,
+      );
+
+    if (marcar) {
+      const montados = rollos.filter((r) => r.estado === 'MONTADO');
+      if (montados.length > 0)
+        throw new ConflictException(
+          `Hay ${montados.length} rollo(s) montados ahora mismo en el rango (secuencia ${montados
+            .map((r) => r.secuencia)
+            .join(', ')}). Desmontalos primero.`,
+        );
+      const conHistorial = rollos.filter((r) => r._count.montajes > 0);
+      if (conHistorial.length > 0)
+        throw new ConflictException(
+          `Hay ${conHistorial.length} rollo(s) que YA se montaron en este ERP (secuencia ${conHistorial
+            .map((r) => r.secuencia)
+            .join(
+              ', ',
+            )}), así que su consumo sí está registrado acá. No se pueden marcar como consumidos fuera.`,
+        );
+    } else {
+      const noMarcados = rollos.filter((r) => r.estado !== 'CONSUMIDO_FUERA');
+      if (noMarcados.length === rollos.length)
+        throw new ConflictException(
+          'Ninguno de los rollos del rango está marcado como consumido fuera del ERP',
+        );
+    }
+
+    const afectados = marcar
+      ? rollos.filter((r) => r.estado !== 'CONSUMIDO_FUERA')
+      : rollos.filter((r) => r.estado === 'CONSUMIDO_FUERA');
+
+    await this.prisma.rolloPapel.updateMany({
+      where: { idRolloPapel: { in: afectados.map((r) => r.idRolloPapel) } },
+      data: marcar
+        ? {
+            estado: 'CONSUMIDO_FUERA',
+            consumidoFueraMotivo: dto.motivo!.trim(),
+            consumidoFueraPor: idUsuarioActor,
+            consumidoFueraEn: new Date(),
+          }
+        : {
+            // Vuelven a bodega: es el único estado desde el que se puede
+            // montar, y revertir esto significa justamente "sí estaba".
+            estado: 'EN_BODEGA',
+            consumidoFueraMotivo: null,
+            consumidoFueraPor: null,
+            consumidoFueraEn: null,
+          },
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      entidad: 'costeo.rollo_papel',
+      idEntidad: String(dto.idFacturaPapel),
+      accion: 'UPDATE',
+      datosNuevos: {
+        accion: marcar ? 'CONSUMIDO_FUERA' : 'REVERTIDO_A_EN_BODEGA',
+        numeroFactura: factura.numeroFactura,
+        desde: dto.desde,
+        hasta: dto.hasta,
+        secuencias: afectados.map((r) => r.secuencia),
+        motivo: marcar ? dto.motivo!.trim() : null,
+      },
+    });
+
+    return {
+      afectados: afectados.length,
+      secuencias: afectados.map((r) => r.secuencia),
+      // Los que ya estaban como se pedía: no es un error, pero decirlo evita
+      // que alguien crea que marcó 20 cuando 5 ya lo estaban.
+      sinCambio: rollos.length - afectados.length,
+    };
   }
 
   async montar(

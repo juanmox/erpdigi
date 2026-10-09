@@ -65,6 +65,22 @@ export const costeoRollosApi = {
       `/costeo/rollos/montajes${idImpresora ? `?idImpresora=${idImpresora}` : ''}`,
     ),
 
+  /**
+   * Saca de circulación un rango de rollos, o lo revierte. Exige el permiso
+   * `costeo.rollo.marcar_consumido_fuera`, que no tiene ningún rol de planta.
+   */
+  marcarConsumidoFuera: (body: {
+    idFacturaPapel: number
+    desde: number
+    hasta: number
+    marcar?: boolean
+    motivo?: string
+  }) =>
+    apiFetch<{ afectados: number; secuencias: number[]; sinCambio: number }>(
+      '/costeo/rollos/marcar-consumido-fuera',
+      { method: 'PATCH', body: JSON.stringify(body) },
+    ),
+
   plantillaImportar: () =>
     descargarArchivo('/costeo/rollos/plantilla-importar', 'plantilla_ingreso_rollos.xlsx'),
   previewImportar: (archivo: File) =>

@@ -2442,6 +2442,64 @@ sin i18n (todo en español).
       rotación del refresh token borra cualquier rastro del original. Es trabajo aparte, no un
       ajuste del límite de arriba.
 
+  - **Rollos que ya se gastaron FUERA del ERP: estado `CONSUMIDO_FUERA` (2026-10-09)**. Escenario
+    real del usuario: una factura de 40 rollos cuyos **primeros 20 se consumieron en el WebApp
+    legacy de Google Sheets**, antes de que existiera Costeo. Si se registran los 40, esos 20
+    quedan montables por error aunque físicamente ya no existan; si se registran solo 20, el
+    código sale `X-20-1`…`X-20-20` en vez de `X-40-21`…`X-40-40`.
+    - **El hallazgo que simplificó todo: el modelo YA lo permitía.** El código del rollo es
+      `numero_factura || '-' || total_rollos || '-' || secuencia`, y las únicas restricciones son
+      `secuencia > 0` y `UNIQUE (factura, secuencia)`. **Nada exige que la secuencia empiece en 1
+      ni que sea contigua**, y `total_rollos` es independiente de cuántas filas existan. Lo único
+      que lo bloqueaba era el código del ingreso (`secuencia: i + 1` y `secuencia: ++secuencia`).
+    - **Decisión del usuario, que resultó mejor que mi primera propuesta.** Yo había propuesto que
+      el ingreso aceptara "primer rollo" y se registraran solo 20. Él aclaró que **los primeros 20
+      sí están registrados en el legacy**, y eligió registrar los 40 y marcar los que ya no
+      existen. Es superior: la factura conserva sus 40 rollos y su costo completo, que es lo que
+      un día va a querer conciliar F5 contra la factura del proveedor.
+    - ⚠️ **Un estado NUEVO y no `AGOTADO`.** Un rollo AGOTADO en este sistema tiene su consumo
+      registrado acá; éste no. Mezclarlos haría que un reporte de "yardas compradas contra
+      consumidas" los contara como una **merma gigante que nunca ocurrió**. El estado propio los
+      deja excluibles. **Pendiente para F5: cualquier reporte de consumo debe excluir
+      `CONSUMIDO_FUERA`.**
+    - ⚠️ **Un estado y no una columna `activo`.** `rollosDisponibles()` filtra `EN_BODEGA` y
+      `montar()` lo **revalida con un 409** (verificado antes de diseñar: no es solo un filtro de
+      lista), así que un valor nuevo queda fuera de los dos **sin tocar esa lógica**. Un booleano
+      aparte además permitiría el estado contradictorio "EN_BODEGA pero inactivo".
+    - Migración `20261009120000_rollo_consumido_fuera` (+ rollback): amplía el CHECK de `estado` y
+      agrega `consumido_fuera_motivo`/`_por`/`_en`, con un CHECK que los exige **juntos y solo**
+      con ese estado, y FK `RESTRICT` hacia `core.usuarios` (mismo criterio que
+      `montaje_rollo.desmontado_por`: el rastro sobrevive al borrado del usuario). El rollback pasa
+      los marcados a `DESCARTADO` **antes** de restaurar el CHECK viejo, o el ALTER fallaría.
+    - **`PATCH /costeo/rollos/marcar-consumido-fuera` va por RANGO**, no de a uno: el caso real son
+      bloques seguidos y marcar 20 rollos uno por uno serían 20 clics. Es **reversible** con el
+      mismo permiso (los devuelve a `EN_BODEGA`), e idempotente: re-marcar devuelve
+      `afectados: 0, sinCambio: 20` en vez de fallar.
+    - **Dos rechazos que importan**: un rollo `MONTADO` ahora, y un rollo **con historial de
+      montaje en este ERP aunque ya esté desmontado** — si se montó acá, su consumo sí está
+      registrado acá y el estado sería mentira.
+    - **Permiso nuevo `costeo.rollo.marcar_consumido_fuera`**, pedido explícito del usuario ("que
+      pueda hacerlo solo un administrador"). Vive en `PERMISOS_COSTEO`, así que lo reciben **solo
+      ADMIN y ADMIN_IT_COSTEO** — BODEGUERO tiene `costeo.rollo.ingresar` y **no** alcanza, que era
+      justamente el punto. Asignable a otro rol desde `/roles` sin tocar código.
+    - **El motivo es obligatorio**, en el DTO y en la base. Dentro de un año, "se consumieron en el
+      Google Sheets antes de arrancar el ERP" explica lo que de otro modo parece un error de carga.
+    - La tarjeta del frontend va en "Corregir ingreso" pero **fuera del gate de `editable`**: una
+      factura con un rollo ya montado no se puede corregir, pero sus rollos que nunca se usaron sí
+      se pueden marcar. El servidor rechaza uno por uno los que tengan historial.
+    - **Verificado**: el CHECK probado a propósito en sus 6 casos (sin motivo, motivo en blanco,
+      motivo sin el estado y estado inventado → rechazados; el caso bueno y los 4 estados de
+      siempre → aceptados). El endpoint con usuarios desechables: BODEGUERO **403**, sin motivo
+      400, marcar 1-20 deja 20 montables, **montar uno marcado pasando el id directo → 409**,
+      re-marcar 0/20, revertir 1-5, rango invertido 400, fuera de la factura 404, factura
+      inexistente 404, rollo montado 409, y **rollo desmontado con historial 409**. Contra la API,
+      los disponibles quedaron en las secuencias **21..40** con códigos `QA-UI-40-40-21`..`-40`.
+      En navegador: ADMIN ve el control y BODEGUERO no, el botón se habilita solo con motivo, cero
+      desborde a 1600/1280/820/390 px y consola limpia. Toda la data de prueba borrada.
+    - *Nota de método*: una aserción de la prueba en navegador ("en Montaje no se ofrece ninguna")
+      era un defecto de mi selector —esa pestaña pide elegir impresora antes de listar—, no del
+      código. Se verificó aparte contra la API, que devuelve los 20 correctos.
+
   - **Vuelve el envío por línea, y la selección pasa a ser por línea (2026-10-08)**. El usuario
     notó que el botón "Enviar" de cada tarjeta había desaparecido y preguntó si fue adrede.
     - **Sí fue adrede, pero la decisión fue MÍA y no se la consulté.** Al construir la vista

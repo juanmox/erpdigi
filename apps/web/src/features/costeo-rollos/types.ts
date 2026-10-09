@@ -28,7 +28,13 @@ export interface FacturaPapel {
   creadoEn: string
 }
 
-export type EstadoRollo = 'EN_BODEGA' | 'MONTADO' | 'AGOTADO' | 'DESCARTADO'
+export type EstadoRollo =
+  | 'EN_BODEGA'
+  | 'MONTADO'
+  | 'AGOTADO'
+  | 'DESCARTADO'
+  /** Se gastó, pero NO en este ERP (típicamente antes de arrancarlo). */
+  | 'CONSUMIDO_FUERA'
 
 export interface RolloPapel {
   idRolloPapel: number
@@ -73,6 +79,8 @@ export interface RolloDeFactura {
   yardasIniciales: string | null
   costoUnitario: string | null
   estado: EstadoRollo
+  /** Por qué está fuera de circulación. Solo cuando estado = CONSUMIDO_FUERA. */
+  consumidoFueraMotivo: string | null
   tipoPapel: TipoPapel
 }
 

@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
 import { costeoRollosApi } from '../api'
 import type { RolloDeFactura } from '../types'
@@ -14,6 +16,15 @@ type FilaEdicion = { idTipoPapel: string; yardasIniciales: string; costoUnitario
 
 export function TabCorregirIngreso() {
   const queryClient = useQueryClient()
+  const { tienePermiso } = useAuth()
+  // Permiso propio: BODEGUERO tiene `costeo.rollo.ingresar` y esto, mal usado,
+  // saca rollos buenos de circulación.
+  const puedeMarcarFuera = tienePermiso('costeo.rollo.marcar_consumido_fuera')
+  const [rangoDesde, setRangoDesde] = useState('')
+  const [rangoHasta, setRangoHasta] = useState('')
+  const [motivoFuera, setMotivoFuera] = useState('')
+  const [marcando, setMarcando] = useState(false)
+  const [msgFuera, setMsgFuera] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
   const { data: tiposPapel } = useQuery({
     queryKey: ['costeo-rollos', 'tipos-papel'],
     queryFn: () => costeoRollosApi.listarTiposPapel(),
@@ -47,6 +58,39 @@ export function TabCorregirIngreso() {
     setExito(null)
     setError(null)
   }, [factura])
+
+  async function marcarFuera(marcar: boolean) {
+    if (!factura) return
+    setMarcando(true)
+    setMsgFuera(null)
+    try {
+      const r = await costeoRollosApi.marcarConsumidoFuera({
+        idFacturaPapel: factura.idFacturaPapel,
+        desde: Number(rangoDesde),
+        hasta: Number(rangoHasta),
+        marcar,
+        motivo: marcar ? motivoFuera.trim() : undefined,
+      })
+      setMsgFuera({
+        tipo: 'ok',
+        texto:
+          `${r.afectados} rollo(s) ${marcar ? 'fuera de circulación' : 'de vuelta en bodega'}` +
+          // Decirlo evita que alguien crea que marcó 20 cuando 5 ya lo estaban.
+          (r.sinCambio > 0 ? ` · ${r.sinCambio} ya estaban así` : ''),
+      })
+      // El panel y la lista de disponibles cambian: un rollo menos para montar.
+      await queryClient.invalidateQueries({ queryKey: ['rollos'] })
+      setFactura(await costeoRollosApi.buscarFactura(factura.numeroFactura))
+      if (marcar) setMotivoFuera('')
+    } catch (e) {
+      setMsgFuera({
+        tipo: 'error',
+        texto: e instanceof ApiError ? e.message : 'No se pudo cambiar el estado de los rollos',
+      })
+    } finally {
+      setMarcando(false)
+    }
+  }
 
   async function buscar() {
     if (!numeroBuscar.trim()) return
@@ -126,6 +170,94 @@ export function TabCorregirIngreso() {
             dato original está mal, corregilo directamente en la base de datos.
           </AlertDescription>
         </Alert>
+      )}
+
+      {/* Va FUERA del gate de `editable` a propósito: corregir los datos de la
+          factura y sacar rollos de circulación son cosas distintas. Una factura
+          con un rollo ya montado no se puede corregir, pero sus rollos que
+          nunca se usaron sí se pueden marcar. El servidor rechaza uno por uno
+          los que tengan historial de montaje. */}
+      {factura && puedeMarcarFuera && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Sacar rollos de circulación</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-ink-faint text-xs">
+              Para rollos de esta factura que <strong>ya se gastaron fuera de este ERP</strong> — por
+              ejemplo los que se consumieron en el sistema anterior antes de arrancar Costeo. Quedan
+              registrados con su costo, pero nadie los puede montar por error. No se puede con un
+              rollo que ya se montó acá: ése sí tiene su consumo registrado.
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <Label className="mb-1 block text-xs">Del rollo #</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={rangoDesde}
+                  onChange={(e) => setRangoDesde(e.target.value)}
+                  className="w-24"
+                />
+              </div>
+              <div>
+                <Label className="mb-1 block text-xs">al #</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={rangoHasta}
+                  onChange={(e) => setRangoHasta(e.target.value)}
+                  className="w-24"
+                />
+              </div>
+              <div className="min-w-[260px] flex-1">
+                <Label className="mb-1 block text-xs">Motivo (obligatorio)</Label>
+                <Textarea
+                  rows={2}
+                  value={motivoFuera}
+                  onChange={(e) => setMotivoFuera(e.target.value)}
+                  placeholder="Consumidos en el sistema anterior antes de arrancar el ERP"
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                disabled={marcando || !rangoDesde || !rangoHasta || motivoFuera.trim().length < 3}
+                onClick={() => void marcarFuera(true)}
+              >
+                Sacar de circulación
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={marcando || !rangoDesde || !rangoHasta}
+                onClick={() => void marcarFuera(false)}
+              >
+                Revertir
+              </Button>
+              <span className="text-ink-faint text-xs">
+                Revertir los devuelve a bodega. El motivo no hace falta para revertir.
+              </span>
+            </div>
+            {msgFuera && (
+              <Alert variant={msgFuera.tipo === 'error' ? 'destructive' : 'default'}>
+                <AlertDescription>{msgFuera.texto}</AlertDescription>
+              </Alert>
+            )}
+            {factura.rollos.some((r) => r.estado === 'CONSUMIDO_FUERA') && (
+              <p className="text-ink-faint text-xs">
+                Fuera de circulación:{' '}
+                <strong>
+                  {factura.rollos
+                    .filter((r) => r.estado === 'CONSUMIDO_FUERA')
+                    .map((r) => r.secuencia)
+                    .join(', ')}
+                </strong>
+              </p>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {factura && factura.editable && (
