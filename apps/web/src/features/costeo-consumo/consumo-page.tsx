@@ -10,7 +10,7 @@ import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
 import { normalizarCodigoCosteo } from '@/lib/codigos-costeo'
 import { costeoConsumoApi } from './api'
-import type { GrupoImpresoraPendiente } from './types'
+import type { GrupoImpresoraPendiente, OrdenPendiente } from './types'
 import { DetalleOrden } from './components/detalle-orden'
 import { TablaPendientes } from './components/tabla-pendientes'
 import { ControlEnBlanco } from './components/control-en-blanco'
@@ -127,9 +127,14 @@ export function ConsumoPage() {
   // El panel de pendientes es para encontrar trabajo; con una OP abierta ya
   // cumplió su función y solo compite por espacio con las líneas.
   const [panelAbierto, setPanelAbierto] = useState(true)
-  // Selección de la tabla: por ORDEN, no por línea. Marcar una orden manda sus
-  // líneas pendientes EN ESA impresora — el servidor ya las agrupó así.
-  const [ordenesSel, setOrdenesSel] = useState<Set<string>>(new Set())
+  // Selección de la tabla: por LÍNEA, que es lo que de verdad se manda.
+  //
+  // Era por ORDEN hasta el 2026-10-08. El usuario pidió poder mandar algunos
+  // ítems y no todos ("esa OP tiene 8 ítems... si quiero mandar 6, debo hacer
+  // 6 clics"), y con el conjunto de códigos de OP la casilla de cada tarjeta no
+  // tenía dónde escribir. La casilla de la ORDEN sigue existiendo: marca o
+  // desmarca todas sus líneas, y queda en estado intermedio si van algunas.
+  const [lineasSel, setLineasSel] = useState<Set<number>>(new Set())
   const [expandidas, setExpandidas] = useState<Set<string>>(new Set())
   const [progreso, setProgreso] = useState<string | null>(null)
 
@@ -189,7 +194,7 @@ export function ConsumoPage() {
     onSuccess: (r) => {
       setProgreso(null)
       setMensaje(resumirLote(r))
-      setOrdenesSel(new Set())
+      setLineasSel(new Set())
       queryClient.invalidateQueries({ queryKey: ['consumo'] })
       queryClient.invalidateQueries({ queryKey: ['rollos'] })
     },
@@ -235,6 +240,7 @@ export function ConsumoPage() {
     onSuccess: (r) => {
       setMensaje(resumirLote(r))
       setSeleccion(new Set())
+      setLineasSel(new Set())
       queryClient.invalidateQueries({ queryKey: ['consumo', 'orden'] })
       // El consumo descuenta del rollo montado: el panel de Gestión de Rollos
       // muestra papel disponible y quedaría desactualizado.
@@ -248,37 +254,71 @@ export function ConsumoPage() {
       }),
   })
 
-  // Las órdenes seleccionadas resueltas a las líneas que de verdad se envían.
-  // La cuenta sale de acá y no de `ordenesSel.size` porque lo que se manda son
-  // líneas: decir "3 órdenes" cuando son 47 líneas confunde al estimar el rollo.
-  const idsSeleccionados = useMemo(() => {
-    const ids: number[] = []
-    for (const g of pendientes?.grupos ?? [])
-      for (const o of g.ordenes) if (ordenesSel.has(o.codigo)) ids.push(...o.idsLineaProduccion)
-    return ids
-  }, [pendientes, ordenesSel])
-  const totalSeleccionado = idsSeleccionados.length
-  const todasLasOrdenes = useMemo(
-    () => (pendientes?.grupos ?? []).flatMap((g) => g.ordenes.map((o) => o.codigo)),
+  // Todas las líneas que se PUEDEN marcar: las que no están bloqueadas por
+  // falta de estándar. Marcar una bloqueada solo generaría una falla en el
+  // resumen del envío.
+  const lineasSeleccionables = useMemo(
+    () =>
+      (pendientes?.grupos ?? []).flatMap((g) =>
+        g.ordenes.flatMap((o) =>
+          o.lineasDetalle.filter((l) => !l.bloqueada).map((l) => l.idLineaProduccion),
+        ),
+      ),
     [pendientes],
   )
 
-  function alternarOrden(codigo: string) {
-    setOrdenesSel((prev) => {
+  // La selección se filtra contra lo que sigue pendiente: si otro operario
+  // mandó una línea que yo tenía marcada, mandarla de nuevo solo sumaría ruido
+  // al resumen ("ya estaba"). El índice único la frenaría igual.
+  const idsSeleccionados = useMemo(() => {
+    const vivas = new Set(lineasSeleccionables)
+    return [...lineasSel].filter((id) => vivas.has(id))
+  }, [lineasSel, lineasSeleccionables])
+  const totalSeleccionado = idsSeleccionados.length
+
+  // Cuántas ÓRDENES toca la selección, para el texto del encabezado. Se deriva
+  // de las líneas en vez de guardarse aparte: dos fuentes de verdad para lo
+  // mismo es justo lo que hizo que la casilla de la tarjeta quedara muerta.
+  const ordenesTocadas = useMemo(() => {
+    const s = new Set<string>()
+    for (const g of pendientes?.grupos ?? [])
+      for (const o of g.ordenes)
+        if (o.lineasDetalle.some((l) => lineasSel.has(l.idLineaProduccion))) s.add(o.codigo)
+    return s
+  }, [pendientes, lineasSel])
+
+  /** Una línea suelta, desde la casilla de su tarjeta. */
+  function alternarLinea(id: number, marcar: boolean) {
+    setLineasSel((prev) => {
       const s = new Set(prev)
-      if (s.has(codigo)) s.delete(codigo)
-      else s.add(codigo)
+      if (marcar) s.add(id)
+      else s.delete(id)
+      return s
+    })
+  }
+
+  /** La casilla de la ORDEN: todas sus líneas seleccionables a la vez. */
+  function alternarOrden(orden: OrdenPendiente, marcar: boolean) {
+    setLineasSel((prev) => {
+      const s = new Set(prev)
+      for (const l of orden.lineasDetalle) {
+        if (l.bloqueada) continue
+        if (marcar) s.add(l.idLineaProduccion)
+        else s.delete(l.idLineaProduccion)
+      }
       return s
     })
   }
 
   function alternarGrupo(grupo: GrupoImpresoraPendiente, marcar: boolean) {
-    setOrdenesSel((prev) => {
+    setLineasSel((prev) => {
       const s = new Set(prev)
-      for (const o of grupo.ordenes) {
-        if (marcar) s.add(o.codigo)
-        else s.delete(o.codigo)
-      }
+      for (const o of grupo.ordenes)
+        for (const l of o.lineasDetalle) {
+          if (l.bloqueada) continue
+          if (marcar) s.add(l.idLineaProduccion)
+          else s.delete(l.idLineaProduccion)
+        }
       return s
     })
   }
@@ -401,7 +441,7 @@ export function ConsumoPage() {
             <h2 className="text-base font-semibold text-ink">Trabajo pendiente</h2>
             {totalSeleccionado > 0 && (
               <span className="text-ink-faint text-xs">
-                {ordenesSel.size} orden(es) · {totalSeleccionado} línea(s) por enviar
+                {ordenesTocadas.size} orden(es) · {totalSeleccionado} línea(s) por enviar
               </span>
             )}
             <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -411,16 +451,19 @@ export function ConsumoPage() {
                   siendo el camino normal (un operario trabaja una máquina). */}
               <label className="flex items-center gap-1.5">
                 <Checkbox
-                  checked={todasLasOrdenes.length > 0 && ordenesSel.size === todasLasOrdenes.length}
-                  aria-label="Seleccionar todas las órdenes pendientes"
+                  checked={
+                    lineasSeleccionables.length > 0 &&
+                    totalSeleccionado === lineasSeleccionables.length
+                  }
+                  aria-label="Seleccionar todas las líneas pendientes"
                   onCheckedChange={(c) =>
-                    setOrdenesSel(c === true ? new Set(todasLasOrdenes) : new Set())
+                    setLineasSel(c === true ? new Set(lineasSeleccionables) : new Set())
                   }
                 />
                 <span className="text-ink-faint text-xs">Todas</span>
               </label>
-              {ordenesSel.size > 0 && (
-                <Button variant="ghost" size="sm" onClick={() => setOrdenesSel(new Set())}>
+              {totalSeleccionado > 0 && (
+                <Button variant="ghost" size="sm" onClick={() => setLineasSel(new Set())}>
                   Limpiar selección
                 </Button>
               )}
@@ -445,12 +488,21 @@ export function ConsumoPage() {
 
           <TablaPendientes
             grupos={pendientes?.grupos ?? []}
-            seleccionadas={ordenesSel}
+            seleccionadas={lineasSel}
             onAlternarOrden={alternarOrden}
             onAlternarGrupo={alternarGrupo}
             expandidas={expandidas}
             onAlternarDetalle={alternarDetalle}
-            renderDetalle={(o) => <DetalleOrden codigo={o.codigo} />}
+            renderDetalle={(o) => (
+              <DetalleOrden
+                codigo={o.codigo}
+                puedeCapturar={puedeCapturar}
+                idsEnviando={capturar.isPending ? (capturar.variables?.ids ?? []) : []}
+                onEnviarLinea={(id) => capturar.mutate({ ids: [id] })}
+                seleccionadas={lineasSel}
+                onSeleccionarLinea={alternarLinea}
+              />
+            )}
             onEnBlanco={(o, marcado, yardas) =>
               enBlanco.mutate({ codigo: o.codigo, marcado, yardas })
             }

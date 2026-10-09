@@ -60,6 +60,14 @@ export interface OrdenPendiente {
   /** Lo que se envía al marcarla: sus líneas pendientes EN ESA impresora. */
   idsLineaProduccion: number[]
   /**
+   * Por línea, para poder seleccionar algunas y seguir estimando bien. Las
+   * líneas no pesan parejo, así que prorratear el total de la orden mentiría.
+   * `estimadoYd` es estándar + enguiamiento, sin el papel en blanco.
+   */
+  lineasDetalle: { idLineaProduccion: number; estimadoYd: number; bloqueada: boolean }[]
+  /** Papel en blanco sin cobrar: se suma UNA vez si va cualquier línea. */
+  enBlancoPendienteYd: number
+  /**
    * Yardas que esta orden le va a sacar al rollo (estándar + enguiamiento + el
    * papel en blanco que falte cobrar). Lo calcula el servidor con el mismo
    * estándar que usará la captura, así que no es una aproximación de la pantalla.

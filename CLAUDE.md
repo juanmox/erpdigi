@@ -2442,6 +2442,104 @@ sin i18n (todo en español).
       rotación del refresh token borra cualquier rastro del original. Es trabajo aparte, no un
       ajuste del límite de arriba.
 
+  - **Vuelve el envío por línea, y la selección pasa a ser por línea (2026-10-08)**. El usuario
+    notó que el botón "Enviar" de cada tarjeta había desaparecido y preguntó si fue adrede.
+    - **Sí fue adrede, pero la decisión fue MÍA y no se la consulté.** Al construir la vista
+      tabular de F5-1B lo apagué (`puedeCapturar={false}` en `detalle-orden.tsx`) razonando que
+      "dos caminos de envío en la misma pantalla producen el «creí que ya lo había mandado»". El
+      usuario había pedido la vista tabular con selección por orden; apagar el envío por línea fue
+      una interpretación mía. Su caso real lo desmiente: *"a veces un solo ítem es muy grande que
+      se manda solo"*.
+    - **La pregunta que hizo al devolverlo, respondida con una prueba y no con código leído**: si
+      mando un ítem solo y después selecciono la orden entera, ¿qué pasa? **Nada malo**, y está
+      protegido en tres capas independientes, verificadas sobre `26OP012954`:
+      1. `pendientes()` filtra por `consumosPapel: { none: { origen: 'PRODUCCION', anuladoEn:
+         null } }`, así que la línea enviada **sale de la cola** y la orden pasa a mostrar las que
+         quedan.
+      2. `capturarUna()` saltea las tallas ya registradas y las reporta en `yaEstaban`.
+      3. `ux_consumo_papel_produccion_natural` — UNIQUE `(id_linea_produccion, id_talla)` para
+         consumo vigente — lo prohíbe en la base. El papel en blanco tiene el suyo, por orden.
+      Medido: enviar 1 de 2 dejó la OP con 1 pendiente; reenviar las 2 dio `enviadas=1
+      yaEstaban=1`, y en la base quedaron 2 filas para 2 combinaciones línea+talla distintas.
+    - ⚠️ **Al devolver el botón introduje un defecto y el usuario lo encontró en minutos**: la
+      casilla de cada tarjeta volvió a renderizarse (`TarjetaLinea` la muestra cuando
+      `puedeCapturar && linea.enviable`) pero con `onSeleccionar={() => {}}` — **marcable y
+      muerta**. Su reporte fue exacto: *"esa OP tiene 8 ítems, y puedo mandar los 8 o uno por
+      uno... si quiero mandar 6, debo hacer 6 clics"*.
+    - **La causa de fondo era el modelo de selección**: la tabla guardaba `Set<string>` de códigos
+      de OP, así que la casilla de la línea no tenía dónde escribir. Ahora es **`Set<number>` de
+      ids de línea**, que es lo que de todos modos se manda al servidor. La casilla de la ORDEN
+      pasó a ser un atajo tri-estado: marca o desmarca todas sus líneas y queda en
+      `indeterminate` si van algunas.
+    - **Las líneas bloqueadas (sin estándar) no se pueden marcar** desde la casilla de la orden ni
+      desde la del grupo: marcarlas solo generaría fallas en el resumen.
+    - ⚠️ **El contraste contra el rollo exigió un cambio de backend, no bastaba el frontend.**
+      `pendientes()` devolvía el estimado **por orden**, así que con selección parcial habría que
+      prorratear — y las líneas no pesan parejo: en una OP real conviven una de 4.13 yd y otra de
+      38.39. Se agregó `lineasDetalle: {idLineaProduccion, estimadoYd, bloqueada}[]` y
+      `enBlancoPendienteYd` aparte, porque el papel en blanco es de la orden y se suma **una vez**
+      si va cualquiera de sus líneas, no una vez por línea.
+    - **Verificado**: invariante sobre las 66 órdenes reales — la suma de `lineasDetalle` más
+      `enBlancoPendienteYd` da **exactamente** el `estimadoYd` de la orden en las 66, cero
+      desvíos, y `lineasDetalle` cubre los mismos ids que `idsLineaProduccion`. En navegador,
+      sobre `26OP012587` (8 líneas): marcar 2 sueltas deja el contador en 2 y la casilla de la OP
+      en `indeterminate`; un clic en la casilla de la OP lleva a 8 y `checked`; otro clic vuelve a
+      0 y `unchecked`. Cero desborde a 1600/1280/820/390 px y consola limpia.
+    - **Hallazgo incidental**: la primera prueba de envío falló con *"Administrador viene usando la
+      MS 1 (último envío 5:19 p. m.)"* — el tope de impresora ajena de F5-1C funcionando sobre un
+      usuario de prueba distinto del que venía trabajando. Hubo que confirmar la impresora para
+      seguir, que es el comportamiento diseñado.
+
+  - **Los 39 errores de un import real, y por qué el marcador de desarrollo valió la pena
+    (2026-10-08)**. El usuario cargó una plantilla de 239 filas y 39 quedaron en error. Resultaron
+    ser **tres problemas distintos**, no uno:
+    | Causa | Filas |
+    |---|---|
+    | Desarrollo no coincide (`BSNS-AC-8800A` / `8800Y`) | 30 |
+    | Producto no existe en recetas | 9 |
+    - **El de desarrollo estaba previsto desde el 2026-09-30**: esos dos productos se crearon con un
+      marcador trazable (`BSNS-AC-8800A-DES`) porque nadie sabía el número real, y la nota de
+      entonces decía que bastaría un UPDATE gracias al `ON UPDATE CASCADE` de
+      `productos.desarrollo → desarrollos.codigo`. **Funcionó exactamente así**: dos UPDATE y el
+      producto siguió solo. El error no era un bug — era el aviso de que el dato que faltaba
+      apareció.
+    - Los números reales son `2500003078` (adulto) y `250003078Y` (youth). **Verifiqué que el
+      segundo no fuera un typo antes de aplicarlo**: los 1,287 códigos de desarrollo tienen
+      exactamente 10 caracteres —891 solo dígitos y 396 con una letra al final (`140001275A`)— así
+      que el youth lleva un cero menos de relleno porque la `Y` ocupa un lugar. Mi sospecha inicial
+      de dígito faltante era infundada.
+    - ⚠️ **Hallazgo que evitó una segunda vuelta: 17 de las 30 filas del desarrollo traían 0
+      piezas.** La validación del desarrollo corre **antes** que la de cantidades, así que estaba
+      tapando el otro error; al renombrar, esas 17 pasaron a fallar con "Sin cantidad en ninguna
+      talla reconocida" (`26OP030945` ×9, `26OP030967` ×7, `26OP030961` ×1). Se descartó que fuera
+      un problema de tallas: las 5 que usan los arm sleeves (`2XS-XS`, `S-M`, `L-XL`, `YS-YM`,
+      `YL-YXL`) están en la plantilla desde el 2026-09-22. **Decisión del usuario: las corrige a
+      mano tras verificar las órdenes de compra.**
+    - **Dos productos nuevos creados** en local y producción, con los datos que aportó el usuario:
+      `BSNS-SC-0001M` → `220002790A` y `BSNS-SC-0001Y` → `220002790Y`, los dos con patrón
+      `DPM-220001-BS`, talla base L, BSN SPORTS, sin receta y Q0.00 — igual que su hermano
+      `BSNS-SC-0001W`, que ya existía con el desarrollo `220002788A` que la misma captura confirma.
+      **Deporte queda vacío** como los 9 de la familia `BSNS-SC-*`; llenarlo es un UPDATE cuando se
+      decida completar ese campo.
+    - **Decisión del usuario: `BSNS-SC-0002M` NO se da de alta** — lo considera un error del
+      planificador. Sus 2 filas quedan en error a propósito.
+    - ⚠️ **Tropiezo propio**: el primer INSERT en producción incluía `creado_por` en
+      `recetas.productos`, columna que **no existe** en esa tabla (sí en `desarrollos`). En local no
+      se detectó porque ahí los productos se crearon por la API, no por SQL. El `ON_ERROR_STOP`
+      dentro de la transacción abortó todo y producción quedó intacta (verificado: seguía en 1,287
+      productos). *Lección*: tenía la lista de columnas de `information_schema` a la vista en la
+      misma sesión y no la miré antes de escribir el INSERT.
+    - Todo el SQL de producción resuelve cliente y talla **por código y nombre, nunca por id** —
+      misma regla que el despliegue del 2026-09-30, donde `2XS-XS` era 440 en local y 298 en
+      producción.
+    - **Verificado**: respaldos previos de `recetas` en el servidor
+      (`recetas-antes-renombre-desarrollo-20261008-130617.sql` y
+      `recetas-antes-sc0001-20261008-151843.sql`); tras aplicar, los dos ambientes dan
+      `productos = v_producto_costo = 1289` y cero marcadores `-DES`. Contra el import real: los
+      arm sleeves con cantidad dan OK y sin cantidad dan el error que estaba tapado; los dos
+      productos nuevos cargan con y sin desarrollo en la celda; `BSNS-SC-0002M` sigue rechazado,
+      como se decidió.
+
   - **El Item de la línea lo genera el servidor, y arranca en 1 (2026-10-08)**. El usuario cargó
     una plantilla con la columna "Línea de producto" vacía y le dio error. **La columna C no era el
     problema** —es opcional de verdad— sino la **G, "Código de línea"**, que es otra cosa:

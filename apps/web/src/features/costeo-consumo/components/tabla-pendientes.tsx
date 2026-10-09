@@ -13,9 +13,9 @@ import type {
 
 interface Props {
   grupos: GrupoImpresoraPendiente[]
-  /** Códigos de OP seleccionadas para enviar. */
-  seleccionadas: Set<string>
-  onAlternarOrden: (codigo: string) => void
+  /** Ids de LÍNEA seleccionados — lo que de verdad se manda al servidor. */
+  seleccionadas: Set<number>
+  onAlternarOrden: (orden: OrdenPendiente, marcar: boolean) => void
   onAlternarGrupo: (grupo: GrupoImpresoraPendiente, marcar: boolean) => void
   /** Códigos de OP expandidas; el detalle lo renderiza el padre. */
   expandidas: Set<string>
@@ -162,6 +162,47 @@ function ContrasteSeleccion({
   )
 }
 
+/**
+ * Cuántas de las líneas seleccionables de una orden están marcadas. De acá sale
+ * el estado de su casilla: marcada, a medias o vacía.
+ */
+function estadoOrden(o: OrdenPendiente, sel: Set<number>) {
+  const posibles = o.lineasDetalle.filter((l) => !l.bloqueada)
+  const marcadas = posibles.filter((l) => sel.has(l.idLineaProduccion)).length
+  return {
+    marcadas,
+    posibles: posibles.length,
+    // `indeterminate` es un estado real de Radix, no un truco visual: lo
+    // expone como data-state y los lectores de pantalla lo anuncian.
+    checked:
+      posibles.length > 0 && marcadas === posibles.length
+        ? true
+        : marcadas > 0
+          ? ('indeterminate' as const)
+          : false,
+  }
+}
+
+/**
+ * Las yardas que la selección le va a sacar a ESTE rollo. Se suma línea por
+ * línea y no prorrateando el total de la orden: en una OP real conviven una
+ * línea de 4.13 yd y otra de 38.39, así que un promedio mentiría. El papel en
+ * blanco se suma UNA vez por orden tocada, porque es de la orden.
+ */
+function estimadoDeLaSeleccion(g: GrupoImpresoraPendiente, sel: Set<number>) {
+  let total = 0
+  for (const o of g.ordenes) {
+    let algunaMarcada = false
+    for (const l of o.lineasDetalle)
+      if (sel.has(l.idLineaProduccion)) {
+        total += l.estimadoYd
+        algunaMarcada = true
+      }
+    if (algunaMarcada) total += o.enBlancoPendienteYd
+  }
+  return total
+}
+
 export function TablaPendientes({
   grupos,
   seleccionadas,
@@ -178,13 +219,16 @@ export function TablaPendientes({
   return (
     <div className="space-y-3">
       {grupos.map((g) => {
-        const todas = g.ordenes.every((o) => seleccionadas.has(o.codigo))
+        const seleccionablesDelGrupo = g.ordenes.flatMap((o) =>
+          o.lineasDetalle.filter((l) => !l.bloqueada),
+        )
+        const todas =
+          seleccionablesDelGrupo.length > 0 &&
+          seleccionablesDelGrupo.every((l) => seleccionadas.has(l.idLineaProduccion))
         const piezas = g.ordenes.reduce((a, o) => a + o.totalPiezas, 0)
         // Solo lo seleccionado EN ESTE grupo: el rollo es de esta máquina, así
         // que sumar la selección de las otras daría un contraste sin sentido.
-        const estimadoSel = g.ordenes
-          .filter((o) => seleccionadas.has(o.codigo))
-          .reduce((a, o) => a + o.estimadoYd, 0)
+        const estimadoSel = estimadoDeLaSeleccion(g, seleccionadas)
 
         return (
           <GrupoColapsable
@@ -240,9 +284,10 @@ export function TablaPendientes({
                     <TableRow key={o.codigo}>
                       <TableCell>
                         <Checkbox
-                          checked={seleccionadas.has(o.codigo)}
-                          aria-label={`Seleccionar ${o.codigo}`}
-                          onCheckedChange={() => onAlternarOrden(o.codigo)}
+                          checked={estadoOrden(o, seleccionadas).checked}
+                          disabled={estadoOrden(o, seleccionadas).posibles === 0}
+                          aria-label={`Seleccionar las líneas de ${o.codigo}`}
+                          onCheckedChange={(c) => onAlternarOrden(o, c !== false)}
                         />
                       </TableCell>
                       <TableCell>
@@ -320,9 +365,10 @@ export function TablaPendientes({
                 <div key={o.codigo} className="rounded-md border border-border p-2.5">
                   <div className="flex items-start gap-2">
                     <Checkbox
-                      checked={seleccionadas.has(o.codigo)}
-                      aria-label={`Seleccionar ${o.codigo}`}
-                      onCheckedChange={() => onAlternarOrden(o.codigo)}
+                      checked={estadoOrden(o, seleccionadas).checked}
+                      disabled={estadoOrden(o, seleccionadas).posibles === 0}
+                      aria-label={`Seleccionar las líneas de ${o.codigo}`}
+                      onCheckedChange={(c) => onAlternarOrden(o, c !== false)}
                       className="mt-0.5"
                     />
                     <div className="min-w-0 flex-1">

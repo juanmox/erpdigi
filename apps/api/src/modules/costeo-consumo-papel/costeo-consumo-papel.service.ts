@@ -109,6 +109,27 @@ export interface OrdenPendiente {
    * tallas afectadas, que además son las que impiden enviarla.
    */
   tallasSinEstandar: string[];
+  /**
+   * Por LÍNEA, para que la pantalla pueda seleccionar algunas y seguir
+   * estimando bien. Sin esto, con 6 de 8 ítems marcados el contraste contra el
+   * rollo tendría que prorratear, y las líneas no pesan parejo: en una OP real
+   * conviven una de 4.13 yd y otra de 38.39.
+   *
+   * `estimadoYd` acá es estándar + enguiamiento; el papel en blanco NO se
+   * prorratea (es por orden) y viaja en `enBlancoPendienteYd`.
+   */
+  lineasDetalle: {
+    idLineaProduccion: number;
+    estimadoYd: number;
+    /** Le falta el estándar de alguna talla: no se puede enviar ni estimar. */
+    bloqueada: boolean;
+  }[];
+  /**
+   * Papel en blanco que esta orden TODAVÍA no cobró. Va aparte del estimado
+   * por línea porque es de la orden: se suma una vez si se manda cualquiera de
+   * sus líneas, no una vez por línea.
+   */
+  enBlancoPendienteYd: number;
 }
 
 /** El rollo que está montado en una impresora, para el encabezado del grupo. */
@@ -548,6 +569,8 @@ export class CosteoConsumoPapelService {
           idsLineaProduccion: [],
           estimadoYd: 0,
           tallasSinEstandar: [],
+          lineasDetalle: [],
+          enBlancoPendienteYd: 0,
         };
         grupo.ordenes.push(orden);
       }
@@ -562,6 +585,8 @@ export class CosteoConsumoPapelService {
       // discrepar sin que nada lo delate.
       const factorEng =
         Number(l.factorEnguiamiento ?? 0) || FACTOR_ENGUIAMIENTO_DEFAULT;
+      let estimadoLinea = 0;
+      let lineaBloqueada = false;
       for (const t of l.tallas) {
         const yd = estandarPor.get(`${l.idProducto}|${t.idTalla}`);
         if (yd == null) {
@@ -569,10 +594,17 @@ export class CosteoConsumoPapelService {
           // vez de sumar cero en silencio.
           if (!orden.tallasSinEstandar.includes(t.talla.nombre))
             orden.tallasSinEstandar.push(t.talla.nombre);
+          lineaBloqueada = true;
           continue;
         }
-        orden.estimadoYd += yd * t.cantidad + t.cantidad * factorEng;
+        estimadoLinea += yd * t.cantidad + t.cantidad * factorEng;
       }
+      orden.estimadoYd += estimadoLinea;
+      orden.lineasDetalle.push({
+        idLineaProduccion: l.idLineaProduccion,
+        estimadoYd: +estimadoLinea.toFixed(4),
+        bloqueada: lineaBloqueada,
+      });
     }
 
     const resultado = [...grupos.values()];
@@ -620,8 +652,10 @@ export class CosteoConsumoPapelService {
         g.rollo = rollos.get(g.idImpresora) ?? null;
       }
       for (const o of g.ordenes) {
-        if (o.consumoEnBlanco && !enBlancoYaCobrado.has(o.idOrdenProduccion))
+        if (o.consumoEnBlanco && !enBlancoYaCobrado.has(o.idOrdenProduccion)) {
+          o.enBlancoPendienteYd = o.enBlancoYd;
           o.estimadoYd += o.enBlancoYd;
+        }
         o.estimadoYd = +o.estimadoYd.toFixed(4);
       }
     }
