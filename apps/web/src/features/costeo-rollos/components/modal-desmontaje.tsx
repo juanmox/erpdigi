@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { ApiError } from '@/lib/api'
 import { costeoRollosApi } from '../api'
 import type { EstadoRollo, PanelItem } from '../types'
+import { codigoRollo } from '../codigo-rollo'
 
 interface ModalDesmontajeProps {
   item: PanelItem | null
@@ -91,8 +92,7 @@ export function ModalDesmontaje({ item, open, onOpenChange, onDesmontado }: Moda
         <div className="space-y-3">
           <div className="rounded-md bg-black/[0.03] px-3 py-2 text-sm dark:bg-white/[0.04]">
             <div className="font-mono">
-              {item.montaje.rolloPapel.facturaPapel.numeroFactura}-{item.montaje.rolloPapel.facturaPapel.totalRollos}-
-              {item.montaje.rolloPapel.secuencia}
+              {codigoRollo(item.montaje.rolloPapel)}
             </div>
             <div className="text-ink-muted">{item.montaje.rolloPapel.tipoPapel.nombre}</div>
             {/* Quién montó queda a la vista al cerrar: normalmente es el mismo

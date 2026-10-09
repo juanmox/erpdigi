@@ -422,28 +422,41 @@ export class CosteoRollosService {
       throw new NotFoundException('Impresora no encontrada o inactiva');
     }
 
+    // La impresora tiene que estar libre: hay que desmontar explícitamente.
+    //
+    // Hasta el 2026-10-09 esto cerraba SOLO el montaje anterior
+    // (PROMPT_CLAUDE_CODE.md §6.0). El usuario encontró que eso ocurría en
+    // silencio, y los datos le dieron la razón: 2 de 12 montajes quedaron
+    // cerrados con `desmontado_por` y `yardas_finales` en NULL, o sea sin que
+    // nadie dijera si el rollo se agotó, se descartó o le quedaba papel — que
+    // es justamente lo que el desmontaje registra.
+    //
+    // El auto-cierre no estaba ahí por una regla de negocio: existía para no
+    // chocar contra el EXCLUDE USING gist de `montaje_rollo`, que ya impedía
+    // dos montajes solapados en la misma impresora. Rechazar es más simple y
+    // deja el registro completo.
+    const ocupada = await this.prisma.montajeRollo.findFirst({
+      where: { idImpresora: dto.idImpresora, desmontadoEn: null },
+      include: { rolloPapel: { include: { facturaPapel: true } } },
+    });
+    if (ocupada) {
+      const r = ocupada.rolloPapel;
+      const codigo = `${r.facturaPapel.numeroFactura}-${r.facturaPapel.totalRollos}-${r.secuencia}`;
+      throw new ConflictException({
+        message: `${impresora.codigo} ya tiene montado el rollo ${codigo}. Desmontalo primero desde el Panel de estado, diciendo en qué estado queda.`,
+        // Estructurado y no por el texto del mensaje: comparar el texto en el
+        // frontend se rompe en cuanto alguien lo reescribe (mismo criterio que
+        // SIN_ROLLO_MONTADO y OP_EN_OTRA_EMPRESA).
+        motivo: 'IMPRESORA_CON_ROLLO',
+        idImpresora: dto.idImpresora,
+        impresora: impresora.codigo,
+        rollo: codigo,
+        idMontajeRollo: ocupada.idMontajeRollo,
+      });
+    }
+
     const montaje = await this.prisma.$transaction(async (tx) => {
       const ahora = new Date();
-
-      // Cierra automáticamente el montaje anterior de esa impresora, si lo
-      // había (PROMPT_CLAUDE_CODE.md §6.0) — sin esto, el EXCLUDE USING gist
-      // de montaje_rollo rechazaría este INSERT. yardas_finales queda NULL
-      // (no se inventa una lectura) y el rollo anterior vuelve a EN_BODEGA,
-      // no AGOTADO — no hay evidencia de que se haya terminado, solo de que
-      // se cambió sin pasar por el flujo formal de desmontaje.
-      const montajeActivo = await tx.montajeRollo.findFirst({
-        where: { idImpresora: dto.idImpresora, desmontadoEn: null },
-      });
-      if (montajeActivo) {
-        await tx.montajeRollo.update({
-          where: { idMontajeRollo: montajeActivo.idMontajeRollo },
-          data: { desmontadoEn: ahora },
-        });
-        await tx.rolloPapel.update({
-          where: { idRolloPapel: montajeActivo.idRolloPapel },
-          data: { estado: 'EN_BODEGA' },
-        });
-      }
 
       const nuevo = await tx.montajeRollo.create({
         data: {

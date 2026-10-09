@@ -2442,6 +2442,52 @@ sin i18n (todo en español).
       rotación del refresh token borra cualquier rastro del original. Es trabajo aparte, no un
       ajuste del límite de arriba.
 
+  - **Montar ya no cierra el montaje anterior en silencio: hay que desmontar primero
+    (2026-10-09)**. Lo encontró el usuario al revisar el manual del operador.
+    - **El agujero no estaba donde parecía**, y la distinción importa porque cambia el arreglo.
+      Reproducidos los dos escenarios:
+      | Escenario | Antes |
+      |---|---|
+      | El **mismo rollo** en otra impresora | **Ya se bloqueaba**: `409 — El rollo está en estado MONTADO` |
+      | **Otro rollo** en la **misma** impresora | **Pasaba en silencio** |
+    - En el segundo caso el montaje anterior se cerraba solo, dejando `desmontado_por` y
+      `yardas_finales` en NULL y el rollo en `EN_BODEGA` — o sea **sin que nadie dijera si se
+      agotó, si se descartó o si le quedaba papel**, que es justamente lo que el desmontaje
+      registra. El estado del rollo quedaba inventado por el sistema.
+    - ⚠️ **El auto-cierre no era una regla de negocio.** Venía de `PROMPT_CLAUDE_CODE.md §6.0`,
+      pero existía para no chocar contra el `EXCLUDE USING gist` de `montaje_rollo`, que **ya**
+      impedía dos montajes solapados en la misma impresora. Rechazar es más simple y deja el
+      registro completo.
+    - `montar()` ahora tira **409 con respuesta estructurada** (`motivo: 'IMPRESORA_CON_ROLLO'`
+      más `impresora`, `rollo` e `idMontajeRollo`), nombrando el rollo que hay que desmontar.
+      Estructurado y no por el texto, mismo criterio que `SIN_ROLLO_MONTADO` y
+      `OP_EN_OTRA_EMPRESA`.
+    - **Frontend**: el paso 1 de Montaje mostraba "Con rollo"/"Libre" **pero dejaba elegir
+      cualquiera**, y recién fallaba al confirmar. Ahora la ocupada queda **deshabilitada** y
+      muestra el código del rollo que la bloquea. El aviso del paso 2, que decía *"al confirmar se
+      cierra automáticamente ese montaje"*, decía justo lo contrario de lo que ahora pasa.
+    - De paso, `codigo-rollo.ts` nuevo: el formato `<factura>-<total>-<secuencia>` estaba repetido
+      **en 5 lugares** del frontend y tiene que coincidir con la vista `costeo.v_rollo_codigo`, que
+      es lo que viaja a los Google Sheets como NRollo. Ahora vive en un solo lado.
+    - ⚠️ **Consecuencia en planta, no solo en el código**: si un rollo se acabó y alguien ya lo
+      sacó de la máquina, quien monte el siguiente tiene que ir primero a desmontar el viejo y
+      decir en qué estado quedó. Es un clic más, y es exactamente el registro que se perdía.
+    - **Los montajes ya cerrados en silencio se quedan como están** — no hay forma de reconstruir
+      en qué estado quedó cada rollo e inventarlo sería peor. Quedan identificables por
+      `desmontado_en IS NOT NULL AND desmontado_por IS NULL`.
+    - ⚠️ **Corrección de una medición propia**: primero reporté que esto "ya había pasado 2 veces"
+      en los datos. Es **1** (montaje id 28). El segundo lo había creado **mi propia prueba** unos
+      segundos antes de contar, dentro del mismo script. *Lección*: un script que modifica datos y
+      después mide el histórico se cuenta a sí mismo; hay que tomar la medición **antes** de tocar
+      nada, o excluir lo propio explícitamente.
+    - **Verificado**: antes del cambio, montar otro rollo en la misma impresora daba 201 y dejaba
+      el montaje anterior cerrado sin autor ni yardas. Después: **409** con el código del rollo que
+      bloquea, el montaje anterior **sigue abierto** y el rollo en `MONTADO`; desmontando como
+      corresponde (`AGOTADO`) y montando el otro, 200 y 201, con el montaje viejo **sí** con autor.
+      En navegador, de 14 impresoras las 4 ocupadas quedaron deshabilitadas mostrando su rollo
+      (`MS 1 · CON ROLLO · 777-10-3`) y **ninguna ocupada quedó clickeable**. Cero desborde a
+      1500/820/390 px y consola limpia. Datos y usuarios de prueba borrados.
+
   - **La línea de producto pasa a ser un catálogo GLOBAL (2026-10-09)**. El usuario preguntó por
     qué el modal pedía cliente **y** línea, en vez de solo la línea para cualquier cliente. Al
     revisarlo, **tenía razón y el motivo original era más débil de lo que parecía**.

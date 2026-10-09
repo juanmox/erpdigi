@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/lib/api'
 import { costeoRollosApi } from '../api'
+import { codigoRollo } from '../codigo-rollo'
 import type { Impresora, RolloPapel } from '../types'
 
 // Pantalla táctil grande (PROMPT_CLAUDE_CODE.md §6.0): impresora → rollo →
@@ -32,7 +33,11 @@ export function TabMontaje() {
   const [error, setError] = useState<string | null>(null)
   const [exito, setExito] = useState<string | null>(null)
 
-  const impresoraMontada = (idImpresora: number) => panel?.some((p) => p.impresora.idImpresora === idImpresora && p.montaje)
+  // Devuelve el montaje y no un booleano: hace falta nombrar el rollo que
+  // bloquea, para que el operario sepa cuál tiene que desmontar.
+  const montajeDe = (idImpresora: number) =>
+    panel?.find((p) => p.impresora.idImpresora === idImpresora)?.montaje ?? null
+  const impresoraMontada = (idImpresora: number) => montajeDe(idImpresora) != null
 
   function elegirImpresora(i: Impresora) {
     setImpresora(i)
@@ -81,24 +86,47 @@ export function TabMontaje() {
       <div className="space-y-3">
         <h2 className="text-sm font-medium text-ink-muted">1. Elegí la impresora</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {impresoras?.map((i) => (
-            <button
-              key={i.idImpresora}
-              type="button"
-              onClick={() => elegirImpresora(i)}
-              className="flex flex-col items-center gap-1.5 rounded-xl border border-border bg-card p-5 text-center transition-colors hover:border-accent-brand hover:bg-accent-brand-soft active:scale-[0.98]"
-            >
-              <span className="font-mono text-lg font-bold text-ink">{i.codigo}</span>
-              <span
+          {impresoras?.map((i) => {
+            // Desde el 2026-10-09 el servidor RECHAZA montar sobre una
+            // impresora ocupada: hay que desmontar primero, diciendo en qué
+            // estado queda el rollo. Deshabilitarla acá evita llevar al
+            // operario hasta el paso 2 para recién ahí fallar.
+            const ocupada = montajeDe(i.idImpresora)
+            return (
+              <button
+                key={i.idImpresora}
+                type="button"
+                disabled={ocupada != null}
+                onClick={() => elegirImpresora(i)}
                 className={cn(
-                  'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase',
-                  impresoraMontada(i.idImpresora) ? 'bg-amber-500/15 text-amber-700' : 'bg-emerald-500/15 text-emerald-700',
+                  'flex flex-col items-center gap-1.5 rounded-xl border p-5 text-center transition-colors',
+                  ocupada
+                    ? 'cursor-not-allowed border-border bg-black/[0.03] opacity-70 dark:bg-white/[0.04]'
+                    : 'border-border bg-card hover:border-accent-brand hover:bg-accent-brand-soft active:scale-[0.98]',
                 )}
+                title={
+                  ocupada
+                    ? `Tiene montado el rollo ${codigoRollo(ocupada.rolloPapel)}. Desmontalo desde el Panel de estado.`
+                    : undefined
+                }
               >
-                {impresoraMontada(i.idImpresora) ? 'Con rollo' : 'Libre'}
-              </span>
-            </button>
-          ))}
+                <span className="font-mono text-lg font-bold text-ink">{i.codigo}</span>
+                <span
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase',
+                    ocupada ? 'bg-amber-500/15 text-amber-700' : 'bg-emerald-500/15 text-emerald-700',
+                  )}
+                >
+                  {ocupada ? 'Con rollo' : 'Libre'}
+                </span>
+                {ocupada && (
+                  <span className="text-ink-faint font-mono text-[10px] break-all">
+                    {codigoRollo(ocupada.rolloPapel)}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
     )
@@ -116,9 +144,12 @@ export function TabMontaje() {
           </Button>
         </div>
         {impresoraMontada(impresora.idImpresora) && (
-          <Alert>
+          <Alert variant="destructive">
             <AlertDescription>
-              Esta impresora ya tiene un rollo montado — al confirmar se cierra automáticamente ese montaje.
+              Esta impresora ya tiene montado el rollo{' '}
+              <strong>{codigoRollo(montajeDe(impresora.idImpresora)!.rolloPapel)}</strong>. Desmontalo
+              primero desde el <strong>Panel de estado</strong>, diciendo en qué estado queda; recién
+              después se puede montar otro.
             </AlertDescription>
           </Alert>
         )}
@@ -132,7 +163,7 @@ export function TabMontaje() {
                 className="flex flex-col items-start gap-1 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-accent-brand hover:bg-accent-brand-soft active:scale-[0.98]"
               >
                 <span className="font-mono text-base font-bold text-ink">
-                  {r.facturaPapel.numeroFactura}-{r.facturaPapel.totalRollos}-{r.secuencia}
+                  {codigoRollo(r)}
                 </span>
                 <span className="text-sm text-ink-muted">{r.tipoPapel.nombre}</span>
                 {r.yardasIniciales && <span className="text-xs text-ink-faint">{r.yardasIniciales} yd</span>}
@@ -154,7 +185,7 @@ export function TabMontaje() {
         <div className="mb-3 font-mono text-xl font-bold text-ink">{impresora.codigo}</div>
         <div className="text-sm text-ink-muted">Rollo</div>
         <div className="font-mono text-xl font-bold text-ink">
-          {rollo.facturaPapel.numeroFactura}-{rollo.facturaPapel.totalRollos}-{rollo.secuencia}
+          {codigoRollo(rollo)}
         </div>
         <div className="text-sm text-ink-muted">{rollo.tipoPapel.nombre}</div>
       </div>

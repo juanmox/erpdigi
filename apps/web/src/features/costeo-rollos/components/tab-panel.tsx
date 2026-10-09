@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { costeoRollosApi } from '../api'
 import type { PanelItem } from '../types'
 import { ModalDesmontaje } from './modal-desmontaje'
+import { codigoRollo } from '../codigo-rollo'
 
 // Orden fijo a pedido del usuario (sesión F3): MS 1-6 + MP 7-8 primero, luego
 // RG NEXT/ONE + Mimaki — nunca alfabético. El backend ya devuelve `panel` en
@@ -62,8 +63,7 @@ export function TabPanel() {
                     <div className="space-y-2.5">
                       <div>
                         <div className="font-mono text-sm text-ink">
-                          {item.montaje.rolloPapel.facturaPapel.numeroFactura}-{item.montaje.rolloPapel.facturaPapel.totalRollos}-
-                          {item.montaje.rolloPapel.secuencia}
+                          {codigoRollo(item.montaje.rolloPapel)}
                         </div>
                         <div className="text-xs text-ink-muted">{item.montaje.rolloPapel.tipoPapel.nombre}</div>
                       </div>
