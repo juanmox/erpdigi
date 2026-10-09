@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ApiError } from '@/lib/api'
 import { costeoOrdenesApi } from '../api'
@@ -15,30 +14,24 @@ interface ModalLineasProductoProps {
   onOpenChange: (open: boolean) => void
 }
 
-// Pantalla mínima de alta de la línea de producto. Cliente + línea vienen
-// colapsados en un solo campo de texto libre en el sistema legacy
-// (ANEXO_A_Hallazgos.md §2.3, ej. "BSN Basketball", "BSN Jersey"); acá quedan
-// separados en un catálogo con FK. A diferencia de Producto (alta en /catalogo,
-// con receta y costos asociados), la línea es liviana — se da de alta directo,
-// sin flujo de pendientes/aprobación.
+// Alta de la línea de producto: un catálogo GLOBAL de tipos de prenda.
 //
-// ⚠️ NO es el deporte, aunque algunos valores lo parezcan: este catálogo es por
-// CLIENTE y mezcla deportes con prendas (Jersey, Short). El deporte real vive
-// en recetas.productos.deporte, validado contra el catálogo recetas.deportes;
-// mantenerlos separados es lo que evita que una estadística por deporte tenga
-// dos fuentes que se contradigan.
+// Fue por CLIENTE hasta el 2026-10-09, heredado del legacy donde el campo
+// CLIENTE traía los dos pegados (ANEXO_A §2.3, "BSN Jersey"). Se hizo global
+// porque `Jersey` y `Short` son tipos de prenda y no algo de un cliente: por
+// cliente, con 100 clientes habría 100 "Jersey" y una estadística por línea
+// tendría que agrupar por texto. Mismo criterio que el `deporte`.
+//
+// ⚠️ Sigue sin ser el deporte, aunque algunos valores lo parezcan. El deporte
+// real vive en recetas.productos.deporte, validado contra recetas.deportes;
+// mantenerlos separados evita que una estadística tenga dos fuentes que se
+// contradigan.
 export function ModalLineasProducto({ open, onOpenChange }: ModalLineasProductoProps) {
   const queryClient = useQueryClient()
-  const [idCliente, setIdCliente] = useState('')
   const [nombre, setNombre] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const { data: clientes } = useQuery({
-    queryKey: ['costeo-ordenes', 'clientes'],
-    queryFn: () => costeoOrdenesApi.clientes(),
-    enabled: open,
-  })
   const { data: lineas } = useQuery({
     queryKey: ['costeo-ordenes', 'lineas-producto'],
     queryFn: () => costeoOrdenesApi.lineasProducto(),
@@ -46,14 +39,14 @@ export function ModalLineasProducto({ open, onOpenChange }: ModalLineasProductoP
   })
 
   async function agregar() {
-    if (!idCliente || !nombre.trim()) {
-      setError('Elegí un cliente y escribí el nombre de la línea')
+    if (!nombre.trim()) {
+      setError('Escribí el nombre de la línea')
       return
     }
     setGuardando(true)
     setError(null)
     try {
-      await costeoOrdenesApi.crearLineaProducto({ idCliente: Number(idCliente), nombre: nombre.trim() })
+      await costeoOrdenesApi.crearLineaProducto({ nombre: nombre.trim() })
       setNombre('')
       queryClient.invalidateQueries({ queryKey: ['costeo-ordenes', 'lineas-producto'] })
     } catch (err) {
@@ -70,6 +63,11 @@ export function ModalLineasProducto({ open, onOpenChange }: ModalLineasProductoP
           <DialogTitle>Líneas de producto</DialogTitle>
         </DialogHeader>
 
+        <p className="text-ink-faint text-xs">
+          Son tipos de prenda y sirven para cualquier cliente: alcanza con crear{' '}
+          <strong>Jersey</strong> una vez.
+        </p>
+
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -78,25 +76,17 @@ export function ModalLineasProducto({ open, onOpenChange }: ModalLineasProductoP
 
         <div className="flex items-end gap-2">
           <div className="flex-1">
-            <Label className="mb-1 block text-xs">Cliente</Label>
-            <Select value={idCliente} onValueChange={setIdCliente}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Seleccionar…" />
-              </SelectTrigger>
-              <SelectContent>
-                {clientes?.map((c) => (
-                  <SelectItem key={c.idCliente} value={String(c.idCliente)}>
-                    {c.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex-1">
             <Label className="mb-1 block text-xs">Nombre de la línea</Label>
-            <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej: Basketball" />
+            <Input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="Ej: Jersey"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !guardando) void agregar()
+              }}
+            />
           </div>
-          <Button disabled={guardando} onClick={agregar}>
+          <Button disabled={guardando || !nombre.trim()} onClick={() => void agregar()}>
             {guardando ? 'Agregando…' : 'Agregar'}
           </Button>
         </div>
@@ -105,20 +95,18 @@ export function ModalLineasProducto({ open, onOpenChange }: ModalLineasProductoP
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Cliente</TableHead>
                 <TableHead>Línea de producto</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {lineas?.map((l) => (
                 <TableRow key={l.idLineaProducto}>
-                  <TableCell>{l.cliente.nombre}</TableCell>
                   <TableCell>{l.nombre}</TableCell>
                 </TableRow>
               ))}
               {lineas?.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={2} className="text-center text-ink-faint">
+                  <TableCell className="text-ink-faint text-center">
                     Todavía no hay líneas de producto registradas.
                   </TableCell>
                 </TableRow>

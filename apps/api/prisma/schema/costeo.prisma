@@ -20,17 +20,24 @@
 // ============================================================
 
 // ── Catálogo nuevo: línea de producto por cliente ──────────────────────
+/// Catálogo GLOBAL de líneas de producto (tipos de prenda: Jersey, Short…).
+///
+/// Fue por cliente hasta el 2026-10-09, heredado del legacy donde el campo
+/// CLIENTE traía cliente y línea pegados ("BSN Jersey" — ANEXO_A §2.3). Se hizo
+/// global porque son tipos de prenda, no algo de un cliente: por cliente, con
+/// 100 clientes habría 100 "Jersey" y una estadística por línea tendría que
+/// agrupar por texto. Mismo criterio que el `deporte`, que vive en el producto.
+///
+/// Si en F5 un mismo tipo de prenda llevara insumos distintos según el cliente,
+/// el cliente va en `PlantillaInsumo`, donde ocurre la variación — no acá.
 model LineaProducto {
   idLineaProducto Int     @id @default(autoincrement()) @map("id_linea_producto")
-  idCliente       Int     @map("id_cliente")
-  nombre          String  @db.VarChar(80)
+  nombre          String  @unique @db.VarChar(80)
   activo          Boolean @default(true)
 
-  cliente           Cliente             @relation(fields: [idCliente], references: [idCliente])
   ordenesProduccion OrdenProduccion[]
   plantillasInsumo  PlantillaInsumo[]
 
-  @@unique([idCliente, nombre])
   @@map("linea_producto")
   @@schema("costeo")
 }

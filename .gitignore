@@ -24,3 +24,6 @@ apps/web/src/assets/OLD-*.png
 
 # Mensaje de commit en preparación, para revisarlo antes de commitear
 /COMMIT_MSG.txt
+
+# Archivos de bloqueo temporales de Word/Excel (se crean al abrir un .docx/.xlsx)
+~$*

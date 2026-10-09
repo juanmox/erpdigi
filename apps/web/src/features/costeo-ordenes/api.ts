@@ -26,7 +26,8 @@ export const costeoOrdenesApi = {
   plantillaImportar: () => descargarArchivo('/costeo/ordenes/plantilla-importar', 'plantilla_ordenes_items.xlsx'),
   clientes: () => apiFetch<ClienteRef[]>('/costeo/ordenes/clientes'),
   lineasProducto: () => apiFetch<LineaProductoDetalle[]>('/costeo/ordenes/lineas-producto'),
-  crearLineaProducto: (dto: { idCliente: number; nombre: string }) =>
+  // Catálogo global desde el 2026-10-09: sin cliente.
+  crearLineaProducto: (dto: { nombre: string }) =>
     apiFetch<LineaProductoDetalle>('/costeo/ordenes/lineas-producto', {
       method: 'POST',
       body: JSON.stringify(dto),

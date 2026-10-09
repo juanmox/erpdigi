@@ -51,11 +51,11 @@ export interface ClienteRef {
   nombre: string
 }
 
+/** Catálogo global de tipos de prenda. Sin cliente desde el 2026-10-09. */
 export interface LineaProductoDetalle {
   idLineaProducto: number
   nombre: string
   activo: boolean
-  cliente: ClienteRef
 }
 
 export interface OrdenProduccionDetalle {

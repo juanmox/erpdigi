@@ -2442,6 +2442,54 @@ sin i18n (todo en español).
       rotación del refresh token borra cualquier rastro del original. Es trabajo aparte, no un
       ajuste del límite de arriba.
 
+  - **La línea de producto pasa a ser un catálogo GLOBAL (2026-10-09)**. El usuario preguntó por
+    qué el modal pedía cliente **y** línea, en vez de solo la línea para cualquier cliente. Al
+    revisarlo, **tenía razón y el motivo original era más débil de lo que parecía**.
+    - **Por qué estaba por cliente**: en el legacy el campo `CLIENTE` traía los dos pegados
+      (`BSN Jersey`, `BSN Short` — ANEXO_A §2.3). Al separarlos, la línea quedó colgando del
+      cliente **porque así venía en el origen**, no porque se hubiera verificado que lo necesitara.
+    - **Lo que mostraron los datos antes de decidir**: `plantilla_insumo` —la tabla de F5 que iba a
+      atar insumos a cada línea, y que era *la* justificación del desglose por cliente— tiene
+      **0 filas**; y solo **1 de 68 OP** usaba el campo. En producción, **0 líneas y 0 OP**. O sea
+      que el desglose no compraba nada concreto y migrar salía casi gratis.
+    - **El argumento que decidió**: `Jersey` y `Short` son **tipos de prenda**, no algo de BSN. Por
+      cliente, con 100 clientes habría 100 "Jersey" y una estadística por línea tendría que agrupar
+      por texto entre clientes. Es **el mismo problema del `deporte`**, que ya se había resuelto
+      dejándolo en el PRODUCTO para que `Volleyball` y `Voleibol` no fueran dos cosas distintas.
+      El usuario confirmó que la quiere justamente para estadísticas por línea.
+    - Migración `20261009140000_linea_producto_global` (+ rollback): quita `id_cliente` y su FK, y
+      cambia `UNIQUE (id_cliente, nombre)` por `UNIQUE (nombre)`. Lleva una **guarda que aborta** si
+      hubiera nombres repetidos entre clientes — en ese caso habría que fusionarlos y repuntar
+      `orden_produccion.id_linea_producto` antes, y dejarlo a medias sería peor.
+      - ⚠️ **El rollback NO puede reconstruir a qué cliente pertenecía cada línea**: devuelve la
+        columna vacía y nullable. Ese dato se saca del respaldo previo al despliegue o no se saca.
+    - **`plantilla_insumo.id_linea_producto` NO se tocó.** Si en F5 resulta que un mismo tipo de
+      prenda lleva insumos distintos según el cliente, **el cliente va ahí** —donde ocurre la
+      variación— y no en el catálogo de líneas, que se mantiene único.
+    - **Propiedad que hizo segura la migración de código**: quitar el campo del modelo rompió la
+      compilación en **11 puntos**, todos en `costeo-ordenes.service.ts`, así que el compilador
+      obligó a visitar cada uno (mismo efecto que el `@@unique` en la separación por empresa). El
+      mapa del import pasó de `${idCliente}::${nombre}` a solo el nombre, y el mensaje de error de
+      la fila dejó de hablar del cliente.
+    - La hoja de referencia "Líneas de producto" de la plantilla pasó de 3 columnas (código de
+      cliente, cliente, línea) a **una sola**. El modal perdió el `<Select>` de cliente y la columna
+      Cliente de su tabla, y gana una línea que lo explica: *"Son tipos de prenda y sirven para
+      cualquier cliente"*.
+    - `GET /costeo/ordenes/clientes` **queda sin consumidor en el frontend** (lo usaba solo ese
+      modal). Se dejó el endpoint: es una lectura de catálogo gateada y probablemente sirva para
+      filtros más adelante.
+    - **Verificado con curl y en navegador**: el listado ya no trae `cliente` ni `idCliente`; alta
+      sin cliente 201, duplicada 409, nombre en blanco 400, y mandar `idCliente` igual lo descarta
+      el `whitelist` y crea bien; **el import resuelve `Jersey` —creada cuando era de BSN— usando
+      cualquier cliente**, que es justo lo que antes fallaba; la hoja de la plantilla trae una sola
+      columna. En navegador: **0 comboboxes** en el modal, única etiqueta "Nombre de la línea", el
+      alta funciona, y **ya no pide el catálogo de clientes** (medido interceptando la petición).
+      Cero desborde a 1500/820/390 px y consola limpia. Datos y usuario de prueba borrados.
+    - *Nota de método*: una aserción de la prueba en navegador dio "queda el selector de Cliente:
+      SÍ" — era un **falso positivo de mi selector**: `text=Cliente` busca por subcadena sin
+      distinguir mayúsculas y matcheó mi propia frase explicativa. Se verificó bien buscando el
+      control (`[role="combobox"]`), no el texto.
+
   - **Rollos que ya se gastaron FUERA del ERP: estado `CONSUMIDO_FUERA` (2026-10-09)**. Escenario
     real del usuario: una factura de 40 rollos cuyos **primeros 20 se consumieron en el WebApp
     legacy de Google Sheets**, antes de que existiera Costeo. Si se registran los 40, esos 20

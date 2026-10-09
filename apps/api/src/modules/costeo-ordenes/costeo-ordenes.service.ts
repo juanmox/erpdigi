@@ -485,45 +485,34 @@ export class CosteoOrdenesService {
   }
 
   listarLineasProducto() {
-    return this.prisma.lineaProducto.findMany({
-      include: { cliente: true },
-      orderBy: [{ cliente: { nombre: 'asc' } }, { nombre: 'asc' }],
-    });
+    return this.prisma.lineaProducto.findMany({ orderBy: { nombre: 'asc' } });
   }
 
-  // Cliente + Línea de producto vienen colapsados en un solo campo de texto
-  // libre en el sistema legacy (ANEXO_A_Hallazgos.md §2.3) — acá quedan
-  // separados en catálogos con FK. A diferencia de Producto (que tiene alta
-  // en /catalogo con receta/costos asociados), Línea de producto es un
-  // catálogo liviano sin relaciones adicionales, así que se da de alta
-  // directo, sin flujo de aprobación.
+  // Catálogo GLOBAL desde el 2026-10-09: son tipos de prenda (Jersey, Short),
+  // no algo de un cliente. Estuvo por cliente heredado del legacy, donde el
+  // campo CLIENTE traía los dos pegados (ANEXO_A §2.3).
+  //
+  // A diferencia de Producto (que tiene alta en /catalogo con receta y costos),
+  // esto es un catálogo liviano, así que se da de alta directo, sin flujo de
+  // aprobación.
   async crearLineaProducto(dto: CrearLineaProductoDto, idUsuarioActor: number) {
-    const cliente = await this.prisma.cliente.findUnique({
-      where: { idCliente: dto.idCliente },
-    });
-    if (!cliente) throw new NotFoundException('Cliente no encontrado');
+    const nombre = dto.nombre.trim();
+    if (!nombre) throw new BadRequestException('El nombre no puede ir vacío');
 
     const existente = await this.prisma.lineaProducto.findUnique({
-      where: {
-        idCliente_nombre: { idCliente: dto.idCliente, nombre: dto.nombre },
-      },
+      where: { nombre },
     });
     if (existente)
-      throw new ConflictException(
-        `Ya existe la línea "${dto.nombre}" para este cliente`,
-      );
+      throw new ConflictException(`Ya existe la línea "${nombre}"`);
 
-    const linea = await this.prisma.lineaProducto.create({
-      data: { idCliente: dto.idCliente, nombre: dto.nombre },
-      include: { cliente: true },
-    });
+    const linea = await this.prisma.lineaProducto.create({ data: { nombre } });
 
     await this.auditoria.registrar({
       idUsuario: idUsuarioActor,
       entidad: 'costeo.linea_producto',
       idEntidad: String(linea.idLineaProducto),
       accion: 'CREATE',
-      datosNuevos: { idCliente: dto.idCliente, nombre: dto.nombre },
+      datosNuevos: { nombre },
     });
 
     return linea;
@@ -615,7 +604,7 @@ export class CosteoOrdenesService {
           select: { idCliente: true, codigo: true },
         }),
         this.prisma.lineaProducto.findMany({
-          select: { idLineaProducto: true, idCliente: true, nombre: true },
+          select: { idLineaProducto: true, nombre: true },
         }),
         this.prisma.producto.findMany({
           select: { idProducto: true, codigo: true, desarrollo: true },
@@ -635,11 +624,10 @@ export class CosteoOrdenesService {
     const clientePorCodigo = new Map(
       clientes.map((c) => [c.codigo.toLowerCase(), c.idCliente]),
     );
-    const lineaProductoPorClienteYNombre = new Map(
-      lineasProducto.map((l) => [
-        `${l.idCliente}::${l.nombre.toLowerCase()}`,
-        l.idLineaProducto,
-      ]),
+    // Catálogo global desde el 2026-10-09: la línea ya no depende del cliente,
+    // así que alcanza con el nombre.
+    const lineaProductoPorNombre = new Map(
+      lineasProducto.map((l) => [l.nombre.toLowerCase(), l.idLineaProducto]),
     );
     const productoPorCodigo = new Map(
       productos.map((p) => [p.codigo.toLowerCase(), p.idProducto]),
@@ -669,12 +657,9 @@ export class CosteoOrdenesService {
       const idCliente = r.cliente
         ? (clientePorCodigo.get(r.cliente.toLowerCase()) ?? null)
         : null;
-      const idLineaProducto =
-        r.lineaProducto && idCliente != null
-          ? (lineaProductoPorClienteYNombre.get(
-              `${idCliente}::${r.lineaProducto.toLowerCase()}`,
-            ) ?? null)
-          : null;
+      const idLineaProducto = r.lineaProducto
+        ? (lineaProductoPorNombre.get(r.lineaProducto.toLowerCase()) ?? null)
+        : null;
       const idProducto = r.producto
         ? (productoPorCodigo.get(r.producto.toLowerCase()) ?? null)
         : null;
@@ -695,7 +680,7 @@ export class CosteoOrdenesService {
       else if (idCliente === null)
         error = `Cliente "${r.cliente}" no reconocido`;
       else if (r.lineaProducto && idLineaProducto === null)
-        error = `Línea de producto "${r.lineaProducto}" no existe para el cliente "${r.cliente}" — dar de alta primero desde Órdenes de Producción → "Líneas de producto"`;
+        error = `Línea de producto "${r.lineaProducto}" no existe — dar de alta primero desde Órdenes de Producción → "Líneas de producto"`;
       else if (!r.producto) error = 'Producto vacío';
       else if (idProducto === null)
         error = `Producto "${r.producto}" no existe en recetas — dar de alta primero`;
@@ -936,11 +921,8 @@ export class CosteoOrdenesService {
         orderBy: { nombre: 'asc' },
       }),
       this.prisma.lineaProducto.findMany({
-        select: {
-          nombre: true,
-          cliente: { select: { codigo: true, nombre: true } },
-        },
-        orderBy: [{ cliente: { nombre: 'asc' } }, { nombre: 'asc' }],
+        select: { nombre: true },
+        orderBy: { nombre: 'asc' },
       }),
     ]);
 
@@ -1035,12 +1017,12 @@ export class CosteoOrdenesService {
     // haría elegir una que no existe para ese cliente.
     const wsLineas = wb.addWorksheet('Líneas de producto');
     const encLineas = wsLineas.getRow(1);
-    encLineas.values = ['Cliente (código)', 'Cliente', 'Línea de producto'];
+    // Sin columna de cliente: el catálogo es global, cualquier línea sirve para
+    // cualquier cliente.
+    encLineas.values = ['Línea de producto'];
     encLineas.eachCell(estiloEncabezado);
-    [18, 40, 28].forEach((w, i) => (wsLineas.getColumn(i + 1).width = w));
-    lineas.forEach((l) =>
-      wsLineas.addRow([l.cliente.codigo, l.cliente.nombre, l.nombre]),
-    );
+    wsLineas.getColumn(1).width = 34;
+    lineas.forEach((l) => wsLineas.addRow([l.nombre]));
     if (lineas.length === 0)
       wsLineas.addRow([
         '',

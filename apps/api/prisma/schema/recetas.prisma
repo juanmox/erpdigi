@@ -26,7 +26,6 @@ model Cliente {
 
   /// Relaciones inversas del módulo Costeo Real (costeo.prisma) — costeo
   /// referencia este catálogo por FK, no lo duplica (ver docs/02).
-  lineasProductoCosteo    LineaProducto[]
   ordenesProduccionCosteo OrdenProduccion[]
   ordenesFacturacionCosteo OrdenFacturacion[]
 
