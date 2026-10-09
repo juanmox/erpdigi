@@ -1,5 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Building2Icon, CheckIcon, LogOutIcon, ShieldCheckIcon, UsersIcon } from 'lucide-react'
+import {
+  Building2Icon,
+  CheckIcon,
+  LogOutIcon,
+  ScrollTextIcon,
+  ShieldCheckIcon,
+  UsersIcon,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link, Outlet } from 'react-router-dom'
 import {
@@ -27,6 +34,7 @@ export function Shell() {
     useAuth()
   const puedeAdministrarUsuarios = tienePermiso('plataforma.usuarios.administrar')
   const puedeAdministrarRoles = tienePermiso('plataforma.roles.administrar')
+  const puedeVerBitacora = tienePermiso('plataforma.auditoria.ver')
   const empresaActual = empresasDisponibles.find((e) => e.idEmpresa === idEmpresa)
   const colorEmpresa = empresaActual?.colorMarca ?? undefined
   const queryClient = useQueryClient()
@@ -137,7 +145,7 @@ export function Shell() {
                   ))}
                 </>
               )}
-              {(puedeAdministrarUsuarios || puedeAdministrarRoles) && (
+              {(puedeAdministrarUsuarios || puedeAdministrarRoles || puedeVerBitacora) && (
                 <>
                   <DropdownMenuSeparator />
                   {puedeAdministrarUsuarios && (
@@ -153,6 +161,14 @@ export function Shell() {
                       <Link to="/roles">
                         <ShieldCheckIcon />
                         Roles y permisos
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
+                  {puedeVerBitacora && (
+                    <DropdownMenuItem asChild>
+                      <Link to="/bitacora">
+                        <ScrollTextIcon />
+                        Bitácora
                       </Link>
                     </DropdownMenuItem>
                   )}

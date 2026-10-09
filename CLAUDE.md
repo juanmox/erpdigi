@@ -2245,63 +2245,76 @@ sin i18n (todo en español).
       desperdicio — el riesgo estaba en el sentido contrario. El usuario decidió **no** separar el
       papel descartado por daño de la merma inexplicada por ahora.
 
-  - **Bitácora de usuarios — analizado y decidido, NO construido (2026-10-07)**. El usuario preguntó
-    cómo ver qué hace cada usuario. **Pidió explícitamente no construirlo todavía**; queda esto
-    anotado para no repetir el análisis cuando lo retome.
-    - **Lo que YA existe**: `core.auditoria` con 365 registros desde el 2026-07-24 (usuario,
-      empresa, entidad, id de entidad, acción, `datos_anteriores`, `datos_nuevos`, IP, user agent,
-      fecha), y un `GET /erp/api/auditoria` gateado con `plataforma.auditoria.ver` — permiso que hoy
-      solo tiene ADMIN. Cubre consumos, montajes, reposiciones, órdenes, usuarios, productos y
-      desarrollos. Es lo que se usó en esta misma sesión para reconstruir las pruebas del usuario y
-      encontrar el bug de los diez PATCH del campo de cantidad.
-    - **Por qué ese endpoint no alcanza**: devuelve `idUsuario` y no el nombre; solo filtra por
-      empresa y entidad —no por usuario ni por fecha, que es justo lo que se pregunta—; y tiene un
-      tope fijo de 50 sin paginación. No lo consume ninguna pantalla.
-    - ⚠️ **El problema de fondo: 112 de los 365 registros (31%) no tienen autor.**
-      `auditoria.id_usuario` es `ON DELETE SET NULL`, así que **borrar un usuario le borra el nombre
-      a todo su histórico**. Buena parte de esos 112 son usuarios de prueba desechables de sesiones
-      anteriores, pero el mecanismo es idéntico para un empleado que se va. Choca de frente con el
-      propósito de una bitácora — es la misma razón por la que `montaje_rollo.desmontado_por` se
-      hizo con FK `RESTRICT`, que la auditoría no tiene.
-    - **Decisión del usuario: guardar el username como TEXTO** en cada registro, no cambiar la FK a
-      RESTRICT. Su criterio, textual: *"si el usuario se retira de la empresa, ya no me interesa,
-      pero sí me interesa saber qué hizo"*. O sea el usuario debe poder borrarse y el rastro
-      sobrevivirle — lo contrario de lo que se eligió para `desmontado_por`, y acá es lo correcto
-      porque la auditoría no protege ninguna integridad referencial, solo narra.
-      - Al implementarlo: el backfill recupera el nombre de **253 de los 365** registros (los que
-        todavía tienen `id_usuario`). **Los 112 ya perdidos no vuelven** — ese dato se fue con los
-        usuarios borrados.
-    - **Alcance: no requiere nada nuevo.** `plataforma.auditoria.ver` ya existe y la pantalla de
-      Roles permite asignarlo a cualquier rol sin tocar código ni desplegar. El usuario pidió
-      poder dárselo a Gerencia y dejar abierto habilitarlo a otros: eso ya es exactamente cómo
-      funciona hoy.
-    - **Lo que faltaría construir**, por orden: (1) la columna de texto y su backfill; (2) extender
-      `listar()` para devolver el nombre y aceptar filtros por usuario, rango de fechas, entidad y
-      acción, con paginación; (3) la pantalla en el desplegable del avatar junto a Usuarios y Roles
-      —donde ya estaba anticipado que iría—, mostrando el antes/después de cada cambio, que es el
-      dato más útil y ya está guardado.
-    - ⚠️ **La pantalla debe narrar en lenguaje natural, no volcar la tabla** (pedido del usuario
-      2026-10-07, tras correr la consulta SQL de abajo: *"solo las personas técnicas lo
-      entenderían"*). La forma que pidió, textual: *"el usuario kevin editó una orden en la fecha
-      dd/mm/yyyy HH:mm desde la pc con IP xx.xx.xx.xx"*, y así para cada tipo de actividad según
-      los campos disponibles.
-      - O sea hace falta un **traductor de entidad+acción a frase**: `costeo.orden_produccion` +
-        `UPDATE` → "editó una orden". Son ~15 combinaciones de entidad×acción en los datos
-        actuales, así que es una tabla de textos, no lógica.
-      - El `id_entidad` debería resolverse al código legible cuando exista (la orden #56 es
-        `26OP013582`), no mostrarse como número — el número no le dice nada a quien lee.
-      - `datos_anteriores`/`datos_nuevos` ya están guardados: el "de X a Y" es lo más útil del
-        registro y conviene mostrarlo, pero traducido ("cambió el papel en blanco de 4 a 7 yd"),
-        no como JSON crudo.
-    - **Consulta que sirve mientras tanto**, sin construir nada:
-      ```sql
-      SELECT a.creado_en, COALESCE(u.username, '(usuario borrado)') AS usuario,
-             a.entidad, a.accion, a.id_entidad, a.datos_anteriores, a.datos_nuevos
-      FROM core.auditoria a
-      LEFT JOIN core.usuarios u ON u.id_usuario = a.id_usuario
-      WHERE a.creado_en >= now() - interval '7 days'
-      ORDER BY a.creado_en DESC;
-      ```
+  - **Bitácora de usuarios — CONSTRUIDA (2026-10-09)**. Analizada y decidida el 2026-10-07, hecha
+    hoy. Lo que pidió el usuario, en tres puntos, y cómo quedó cada uno.
+    - **1. El username como TEXTO**, no como referencia. Su criterio textual: *"si el usuario se
+      retira de la empresa, ya no me interesa, pero sí me interesa saber qué hizo"*. Es lo
+      **contrario** de `montaje_rollo.desmontado_por` (FK `RESTRICT`), y acá es correcto porque la
+      auditoría no protege integridad: solo narra. Migración
+      `20261009160000_auditoria_usuario_texto` (+ rollback): columna `usuario_nombre` + backfill.
+      La FK se conserva —sirve mientras el usuario exista—; el texto es lo que sobrevive.
+      - **Verificado con la prueba que importa**: se creó un registro, se borró el usuario, y
+        `id_usuario` quedó en NULL mientras `usuario_nombre` siguió diciendo `qa_bitacora`.
+      - Backfill en local: **273 recuperados, 0 pendientes**, 145 irrecuperables (usuarios de
+        prueba ya borrados). En producción solo 3 registros habían perdido su autor.
+    - **2. Asignable por rol**: `plataforma.auditoria.ver` ya existía y la pantalla de Roles permite
+      dárselo a quien sea sin tocar código. No hizo falta nada nuevo.
+    - **3. Lenguaje natural, no un volcado de tabla.** `narrador.ts` traduce entidad+acción+datos a
+      una frase. Resultado real sobre los datos: *"admin montó un rollo en la MS 1 · rollo
+      777-10-3"*, *"admin sacó de circulación los rollos 2 al 3 de la factura Prue01"*.
+    - ⚠️ **La IP no se estaba capturando: 0 de 418 registros.** Las columnas `ip_origen` y
+      `user_agent` existían desde F1 y **nadie las llenaba**. El usuario las pidió explícitamente
+      ("la ip o algo que identifique la computadora"), así que se agregó:
+      - `common/contexto-peticion.ts` — `AsyncLocalStorage` con IP, user agent, username y empresa.
+        **Por qué y no un parámetro más**: hay **45 llamadas** a `registrar()` en 12 servicios y
+        ninguna tiene acceso al request; agregarlo como parámetro obligaba a tocar los 45 y
+        bastaba olvidar uno para que ese registro quedara sin IP en silencio.
+      - `ContextoUsuarioInterceptor` copia el username y la empresa **del JWT**. Va en un
+        interceptor y no en el middleware porque los middlewares corren ANTES de los guards: ahí
+        todavía no hay usuario. Y no se resuelve con una consulta porque `capturarLote` registra
+        una entrada **por línea**: un envío de 300 haría 300 consultas para el mismo nombre.
+      - ⚠️ **`trust proxy` a `'loopback'`, no a `true`.** Nginx manda `X-Real-IP` pero la app no le
+        creía, así que `req.ip` habría sido la del proxy. Con `true`, cualquiera que llegue directo
+        al puerto de la API desde la red podría mandar un `X-Forwarded-For` inventado y **falsear
+        quién hizo la acción**. Con `loopback` solo se honra si viene de Nginx, que corre en el
+        mismo host.
+      - Los **418 registros históricos nunca van a tener IP**: ese dato no existía.
+    - ⚠️ **Segundo hallazgo: solo 29 de 418 registros tenían empresa.** Nada más
+      `usuario_empresa_rol` la pasaba. Al hacer que el controlador filtrara por la empresa del
+      token —lo correcto para multi-tenant— **la bitácora pasó a mostrar 22 registros en vez de
+      411**. Corregido en dos frentes: los nuevos la llevan (sale del mismo contexto), y el filtro
+      incluye los `NULL` históricos con un comentario que dice por qué. Con el tiempo esa rama deja
+      de hacer falta.
+    - ⚠️ **`id_entidad` NO es uniformemente la clave de `entidad`**, medido sobre las 45 llamadas:
+      `costeo.rollo_papel` guarda el id de la FACTURA; `costeo.consumo_papel` a veces el consumo y
+      a veces la línea; `consumo_estandar` y `linea_produccion` a veces el literal `'import'`;
+      `insumos`/`productos`/`desarrollos` a veces una lista de CÓDIGOS; `usuario_empresa_rol` a
+      veces `idUsuario-idEmpresa-idRol`; y `roles`/`core.roles` son la misma tabla con dos nombres.
+      Por eso el narrador **nunca asume que el id resuelva**: si no resuelve, muestra lo que hay.
+      Inventar un código sería peor que un número.
+    - **"A parcial", como se acordó**: se resuelven a código legible las 13 entidades cuyo id es
+      una clave confiable, **en lote por tipo** (una consulta por tipo presente en la página, no
+      una por fila). Además se resuelven ids que viven DENTRO del JSON (`idRolloPapel`,
+      `idImpresora` de un montaje), sin lo cual la entrada más frecuente diría "montó un rollo" sin
+      decir cuál ni dónde.
+    - **El "de X a Y" solo existe en 17 de 221 UPDATE**: el resto guarda el JSON `null` como estado
+      anterior. Cuando no hay "antes", se muestra el valor nuevo a secas, que es lo único que de
+      verdad se sabe.
+    - `listar()` reemplaza al anterior (devolvía el id y no el nombre, filtraba solo por empresa y
+      entidad, tope fijo de 50 sin paginación, ninguna pantalla lo usaba): ahora filtra por
+      **usuario, rango de fechas, entidad y acción**, con paginación. Las fechas se anclan a
+      **UTC-6**, mismo criterio que el reporte de consumo, con límite superior exclusivo sobre el
+      día siguiente.
+    - **Pantalla** `/bitacora`, en el desplegable del avatar junto a Usuarios y Roles — donde la
+      nota de esa sesión ya anticipaba que iría. Abre con los **últimos 7 días**. Del user agent se
+      muestra sistema y navegador ("Windows · Chrome"), con la cadena completa en el `title`.
+    - **Verificado**: narración sobre los 411 registros reales, **0 sin traducir** de 25 revisados;
+      filtros medidos (usuario=admin 263 · accion=UPDATE 221 · entidad=montaje 45 · un día 22) y
+      fecha mal formada → 400. En navegador: el ítem aparece en el menú, 121 acciones en 7 días,
+      filtrar por usuario baja a 63, cero desborde a 1500/820/390 px y consola limpia. Datos y
+      usuarios de prueba borrados.
+    - **Lo que queda abierto**: normalizar los nombres de entidad (que todos lleven schema) — hoy
+      el narrador acepta las dos formas, que era la opción que no toca datos históricos.
 
   - **Plantilla de Órdenes: fuera Enguiamiento e Imagen, y el parser deja de leer por posición
     (2026-10-07)**. Tres dudas del usuario probando la carga

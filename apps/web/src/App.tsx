@@ -12,6 +12,7 @@ import { RollosPage } from '@/features/costeo-rollos/rollos-page'
 import { InicioPage } from '@/features/inicio/inicio-page'
 import { CotizacionPage } from '@/features/recetas/cotizacion-page'
 import { ReportesPage } from '@/features/costeo-reportes/reportes-page'
+import { BitacoraPage } from '@/features/auditoria/bitacora-page'
 import { RolesPage } from '@/features/roles/roles-page'
 import { UsuariosPage } from '@/features/usuarios/usuarios-page'
 
@@ -157,6 +158,14 @@ function App() {
               element={
                 <RutaConPermiso permisos={['plataforma.roles.administrar']}>
                   <RolesPage />
+                </RutaConPermiso>
+              }
+            />
+            <Route
+              path="bitacora"
+              element={
+                <RutaConPermiso permisos={['plataforma.auditoria.ver']}>
+                  <BitacoraPage />
                 </RutaConPermiso>
               }
             />

@@ -153,6 +153,11 @@ model Auditoria {
   idAuditoria     Int      @id @default(autoincrement()) @map("id_auditoria")
   idEmpresa       Int?     @map("id_empresa")
   idUsuario       Int?     @map("id_usuario")
+  /// El username COMO TEXTO. La FK de arriba es ON DELETE SET NULL, así que
+  /// borrar un usuario le borraba el nombre a todo su histórico; esto es lo
+  /// que sobrevive. Decisión del usuario (2026-10-07): "si el usuario se
+  /// retira, ya no me interesa, pero sí me interesa saber qué hizo".
+  usuarioNombre   String?  @map("usuario_nombre") @db.VarChar(60)
   entidad         String
   idEntidad       String   @map("id_entidad")
   accion          String
@@ -164,6 +169,8 @@ model Auditoria {
   empresa         Empresa? @relation(fields: [idEmpresa], references: [idEmpresa])
   usuario         Usuario? @relation(fields: [idUsuario], references: [idUsuario])
 
+  @@index([usuarioNombre])
+  @@index([creadoEn(sort: Desc)])
   @@map("auditoria")
   @@schema("core")
 }

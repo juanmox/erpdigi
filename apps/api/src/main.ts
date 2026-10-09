@@ -1,5 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { contextoPeticion } from './common/contexto-peticion';
+import { ContextoUsuarioInterceptor } from './common/contexto-usuario.interceptor';
 import cookieParser from 'cookie-parser';
 import express from 'express';
 import { AppModule } from './app.module';
@@ -28,6 +30,35 @@ async function bootstrap() {
   // productos, simplemente no se había topado el límite hasta ahora.
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.setGlobalPrefix('erp/api');
+
+  // `loopback` y no `true`: la IP reenviada se honra SOLO si la conexión viene
+  // de Nginx, que corre en el mismo host (proxy_pass desde 127.0.0.1). Con
+  // `true`, cualquiera que llegue directo al puerto de la API desde la red
+  // podría mandar un X-Forwarded-For inventado y falsear quién hizo la acción
+  // en la bitácora.
+  const expressApp = app.getHttpAdapter().getInstance() as express.Express;
+  expressApp.set('trust proxy', 'loopback');
+
+  // Deja la IP y el user agent al alcance de AuditoriaService sin que los 45
+  // puntos que la llaman tengan que recibirlos y pasarlos — ver
+  // common/contexto-peticion.ts. Va ANTES que todo lo demás para cubrir la
+  // petición entera.
+  app.use(
+    (
+      req: express.Request,
+      _res: express.Response,
+      next: express.NextFunction,
+    ) => {
+      contextoPeticion.run(
+        {
+          ip: req.ip ?? null,
+          userAgent: req.get('user-agent') ?? null,
+        },
+        next,
+      );
+    },
+  );
+
   app.use(cookieParser());
   // Las rutas de Excel se registran ANTES del parser JSON global a
   // propósito: Express aplica middleware en orden de registro, así que
@@ -41,6 +72,8 @@ async function bootstrap() {
   app.use(express.json({ limit: '20mb' }));
   app.use(express.urlencoded({ limit: '20mb', extended: true }));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // Después de los guards: ahí ya hay usuario autenticado para la bitácora.
+  app.useGlobalInterceptors(new ContextoUsuarioInterceptor());
   // Antes de escuchar: si alguna ruta no declara su acceso, no se arranca.
   // Con el guard fail-closed devolvería 403 en producción; mejor un error
   // ruidoso acá, con el nombre de la ruta.
