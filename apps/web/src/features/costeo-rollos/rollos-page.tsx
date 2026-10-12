@@ -4,6 +4,7 @@ import { useAuth } from '@/features/auth/auth-context'
 import { TabCorregirIngreso } from './components/tab-corregir-ingreso'
 import { TabHistorial } from './components/tab-historial'
 import { TabIngreso } from './components/tab-ingreso'
+import { TabInventario } from './components/tab-inventario'
 import { TabMontaje } from './components/tab-montaje'
 import { TabPanel } from './components/tab-panel'
 
@@ -14,6 +15,10 @@ export function RollosPage() {
   // Permiso propio, no `costeo.rollo.ver`: el historial dice quién montó y
   // quién desmontó cada rollo, y por ahora es solo para administradores.
   const puedeVerHistorial = tienePermiso('costeo.rollo.historial')
+  // El inventario va con `costeo.rollo.ver`, el mismo del Panel de estado:
+  // quien hace el conteo físico es BODEGUERO, que no tiene el de tableros.
+  // La valorización en dinero sí es aparte, resuelta en el servidor.
+  const puedeVerInventario = tienePermiso('costeo.rollo.ver')
 
   // La pestaña viaja en la URL para poder enlazar directo a Montaje desde el
   // error de "sin rollo montado" de Impresión de OPs. Se valida contra los
@@ -24,6 +29,7 @@ export function RollosPage() {
     'panel',
     ...(puedeMontar ? ['montaje'] : []),
     ...(puedeIngresar ? ['ingreso', 'corregir'] : []),
+    ...(puedeVerInventario ? ['inventario'] : []),
     ...(puedeVerHistorial ? ['historial'] : []),
   ]
   const tab = pedida && disponibles.includes(pedida) ? pedida : 'panel'
@@ -41,6 +47,7 @@ export function RollosPage() {
           {puedeMontar && <TabsTrigger value="montaje">Montaje</TabsTrigger>}
           {puedeIngresar && <TabsTrigger value="ingreso">Ingreso a bodega</TabsTrigger>}
           {puedeIngresar && <TabsTrigger value="corregir">Corregir ingreso</TabsTrigger>}
+          {puedeVerInventario && <TabsTrigger value="inventario">Inventario</TabsTrigger>}
           {puedeVerHistorial && <TabsTrigger value="historial">Historial</TabsTrigger>}
         </TabsList>
         <TabsContent value="panel">
@@ -59,6 +66,11 @@ export function RollosPage() {
         {puedeIngresar && (
           <TabsContent value="corregir">
             <TabCorregirIngreso />
+          </TabsContent>
+        )}
+        {puedeVerInventario && (
+          <TabsContent value="inventario">
+            <TabInventario />
           </TabsContent>
         )}
         {puedeVerHistorial && (

@@ -2,6 +2,8 @@ import { apiFetch, descargarArchivo } from '@/lib/api'
 import type {
   EstadoRollo,
   FacturaConRollos,
+  HistorialIngresos,
+  Inventario,
   FilaPreviewIngresoRollo,
   Impresora,
   MontajeDetalle,
@@ -15,6 +17,14 @@ export const costeoRollosApi = {
   listarImpresoras: () => apiFetch<Impresora[]>('/costeo/rollos/impresoras'),
   listarTiposPapel: () => apiFetch<TipoPapel[]>('/costeo/rollos/tipos-papel'),
   panel: () => apiFetch<PanelItem[]>('/costeo/rollos/panel'),
+  /** Lo cargado a bodega, agrupado por número de factura. */
+  historialIngresos: (q: { texto?: string; desde?: string; hasta?: string } = {}) => {
+    const p = new URLSearchParams()
+    for (const [k, v] of Object.entries(q)) if (v) p.set(k, v)
+    const qs = p.toString()
+    return apiFetch<HistorialIngresos>(`/costeo/rollos/ingresos${qs ? `?${qs}` : ''}`)
+  },
+  inventario: () => apiFetch<Inventario>('/costeo/rollos/inventario'),
   disponibles: (idImpresora?: number) =>
     apiFetch<RolloPapel[]>(`/costeo/rollos/disponibles${idImpresora ? `?idImpresora=${idImpresora}` : ''}`),
   obtener: (idRolloPapel: number) => apiFetch<RolloPapel & { montajes: MontajeDetalle[] }>(`/costeo/rollos/${idRolloPapel}`),

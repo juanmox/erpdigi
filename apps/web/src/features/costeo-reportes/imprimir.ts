@@ -1,40 +1,6 @@
 import { encabezadoMarcaHTML, type MarcaEmpresa } from '@/app/marca-empresa'
+import { imprimirHTML } from '@/lib/imprimir'
 import type { ReporteConsumo } from './types'
-
-/**
- * Imprime usando un iframe oculto en la misma página — nunca `window.open`
- * (convención #9 del proyecto, igual que Cotizaciones y Reposiciones). El "PDF"
- * sale del propio diálogo de impresión del navegador ("Guardar como PDF"), que
- * es como ya se generan los otros documentos del ERP: no hace falta una
- * librería de PDF del lado del servidor.
- */
-function imprimirHTML(html: string) {
-  const iframe = document.createElement('iframe')
-  iframe.style.position = 'fixed'
-  iframe.style.right = '0'
-  iframe.style.bottom = '0'
-  iframe.style.width = '0'
-  iframe.style.height = '0'
-  iframe.style.border = '0'
-  document.body.appendChild(iframe)
-
-  const doc = iframe.contentWindow?.document
-  doc?.open()
-  doc?.write(html)
-  doc?.close()
-
-  const lanzar = () => {
-    try {
-      iframe.contentWindow?.focus()
-      iframe.contentWindow?.print()
-    } catch (e) {
-      console.error('Error al imprimir:', e)
-    }
-    setTimeout(() => iframe.remove(), 1000)
-  }
-  if (iframe.contentWindow?.document.readyState === 'complete') setTimeout(lanzar, 300)
-  else iframe.onload = () => setTimeout(lanzar, 300)
-}
 
 const yd = (n: number) =>
   n.toLocaleString('es-GT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })

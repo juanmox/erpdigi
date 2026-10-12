@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { contextoActual } from '../../common/contexto-peticion';
+import { rangoDeDiasGT } from '../../common/dia-guatemala';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CodigosResueltos, ENTIDADES_RESOLUBLES, narrar } from './narrador';
 
@@ -20,28 +21,6 @@ function aJson(
   valor: Record<string, unknown> | null | undefined,
 ): Prisma.InputJsonValue | typeof Prisma.JsonNull {
   return valor == null ? Prisma.JsonNull : (valor as Prisma.InputJsonValue);
-}
-
-/**
- * Un día calendario de Guatemala, anclado a UTC-6.
- *
- * Mismo criterio que el reporte de consumo: `new Date('2026-10-09')` es
- * medianoche UTC, o sea las 18:00 del día anterior acá, y un límite superior
- * inclusivo se come casi todo el último día. Guatemala no tiene horario de
- * verano, así que el desfase es constante y el día se puede anclar exacto.
- */
-function rangoDeDias(desde?: string, hasta?: string) {
-  if (!desde && !hasta) return undefined;
-  const dia = (s: string, sumarUno = false) => {
-    const [a, m, d] = s.split('-').map(Number);
-    return new Date(Date.UTC(a, m - 1, d + (sumarUno ? 1 : 0), 6, 0, 0));
-  };
-  return {
-    ...(desde ? { gte: dia(desde) } : {}),
-    // Exclusivo sobre el día siguiente: abarca el día pedido entero sin
-    // depender de la precisión del timestamp.
-    ...(hasta ? { lt: dia(hasta, true) } : {}),
-  };
 }
 
 /** Nombre legible de la entidad, para el selector de filtros. */
@@ -134,7 +113,7 @@ export class AuditoriaService {
       usuarioNombre: params.usuario
         ? { contains: params.usuario, mode: 'insensitive' }
         : undefined,
-      creadoEn: rangoDeDias(params.desde, params.hasta),
+      creadoEn: rangoDeDiasGT(params.desde, params.hasta),
     };
 
     const [total, filas] = await this.prisma.$transaction([

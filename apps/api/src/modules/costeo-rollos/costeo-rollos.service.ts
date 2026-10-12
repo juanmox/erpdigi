@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import ExcelJS from 'exceljs';
+import { rangoDeDiasGT } from '../../common/dia-guatemala';
 import { fechaCelda, textoCelda } from '../../common/excel-celda';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
@@ -13,6 +14,7 @@ import { FilaAplicarIngresoRolloDto } from './dto/aplicar-importar-ingresos.dto'
 import { DesmontarMontajeDto } from './dto/desmontar-montaje.dto';
 import { EditarIngresoDto } from './dto/editar-ingreso.dto';
 import { IngresoFacturaPapelDto } from './dto/ingreso-factura-papel.dto';
+import { ListarIngresosDto } from './dto/listar-ingresos.dto';
 import { ListarRollosDto } from './dto/listar-rollos.dto';
 import { MarcarConsumidoFueraDto } from './dto/marcar-consumido-fuera.dto';
 import { MontarRolloDto } from './dto/montar-rollo.dto';
@@ -26,6 +28,22 @@ const AZUL_DIGITEXSA = 'FF203080';
 // como si fueran una fila — bug real que ya apareció en los otros imports del
 // proyecto y por eso todos comparten esta constante.
 const FILA_INICIO_DATOS = 5;
+
+/**
+ * Un montaje abierto más de esto es una señal para revisar, no un error: o el
+ * rollo se terminó y nadie lo desmontó, o el registro quedó colgado. Lo segundo
+ * es lo que importa, porque un montaje abierto sigue recibiendo consumo.
+ */
+const DIAS_MONTAJE_LARGO = 15;
+
+/** Cortes de antigüedad del stock, en días desde la fecha de la factura. */
+const CORTES_ANTIGUEDAD = [30, 60, 90] as const;
+
+/**
+ * Las yardas son `Decimal(12,4)`, así que un saldo de milésimas es ruido de
+ * redondeo y no un hallazgo. Por debajo de esto no se reporta nada.
+ */
+const TOLERANCIA_YD = 0.01;
 
 function estiloEncabezado(cell: ExcelJS.Cell) {
   cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -973,14 +991,406 @@ export class CosteoRollosService {
     });
   }
 
+  /**
+   * Lo que se ha cargado a bodega, agrupado por NÚMERO de factura.
+   *
+   * El agrupado no es decorativo: desde que una fila de `factura_papel` es el
+   * artículo (número + tipo de papel), una misma factura del proveedor puede
+   * tener varios, y verlos juntos es lo que permite contrastarla contra el
+   * papel físico que llegó con ella.
+   *
+   * Cada artículo trae el desglose de estados de SUS rollos, que es la otra
+   * mitad de la pregunta: no solo "qué cargué" sino "qué queda de lo que
+   * cargué".
+   */
+  async historialIngresos(filtro: ListarIngresosDto) {
+    const limite = filtro.limite ?? 100;
+    const texto = filtro.texto?.trim();
+    const rango = rangoDeDiasGT(filtro.desde, filtro.hasta);
+
+    const where = {
+      ...(texto
+        ? { numeroFactura: { contains: texto, mode: 'insensitive' as const } }
+        : {}),
+      // Por `creadoEn` y no por `fecha`: la pregunta es "qué cargué", no "qué
+      // fecha tiene la factura". Una factura de hace un mes cargada hoy tiene
+      // que aparecer hoy.
+      ...(rango ? { creadoEn: rango } : {}),
+    };
+
+    // limite + 1 para saber si quedó algo afuera sin tener que contar aparte.
+    const articulos = await this.prisma.facturaPapel.findMany({
+      where,
+      include: {
+        tipoPapel: true,
+        rollos: {
+          select: {
+            idRolloPapel: true,
+            estado: true,
+            yardasIniciales: true,
+            costoUnitario: true,
+          },
+        },
+      },
+      orderBy: [{ creadoEn: 'desc' }, { idFacturaPapel: 'desc' }],
+      take: limite + 1,
+    });
+    const truncado = articulos.length > limite;
+    const pagina = truncado ? articulos.slice(0, limite) : articulos;
+
+    const nombres = await this.nombresDeUsuarios(
+      pagina.map((a) => a.creadoPor),
+    );
+
+    // Un solo conteo de montajes para TODOS los rollos de la página: saber si
+    // cada factura es editable, de a una, serían N consultas.
+    const idsRollo = pagina.flatMap((a) => a.rollos.map((r) => r.idRolloPapel));
+    const conMontaje = new Set(
+      (
+        await this.prisma.montajeRollo.findMany({
+          where: { idRolloPapel: { in: idsRollo } },
+          select: { idRolloPapel: true },
+          distinct: ['idRolloPapel'],
+        })
+      ).map((m) => m.idRolloPapel),
+    );
+
+    const grupos = new Map<
+      string,
+      {
+        numeroFactura: string;
+        fecha: Date;
+        totalRollos: number;
+        articulos: unknown[];
+      }
+    >();
+
+    for (const a of pagina) {
+      const estados: Record<string, number> = {};
+      for (const r of a.rollos)
+        estados[r.estado] = (estados[r.estado] ?? 0) + 1;
+
+      // Las yardas y el costo se capturan por rollo y `editarIngreso` los deja
+      // distintos entre sí, así que un valor único solo se muestra cuando de
+      // verdad todos coinciden; si no, null y queda el total.
+      const yardas = [
+        ...new Set(
+          a.rollos.map((r) =>
+            r.yardasIniciales == null ? null : Number(r.yardasIniciales),
+          ),
+        ),
+      ];
+      const costos = [
+        ...new Set(
+          a.rollos.map((r) =>
+            r.costoUnitario == null ? null : Number(r.costoUnitario),
+          ),
+        ),
+      ];
+
+      const articulo = {
+        idFacturaPapel: a.idFacturaPapel,
+        tipoPapel: { codigo: a.tipoPapel.codigo, nombre: a.tipoPapel.nombre },
+        totalRollos: a.totalRollos,
+        yardasPorRollo: yardas.length === 1 ? yardas[0] : null,
+        yardasTotales: a.rollos.reduce(
+          (t, r) =>
+            t + (r.yardasIniciales == null ? 0 : Number(r.yardasIniciales)),
+          0,
+        ),
+        costoUnitario: costos.length === 1 ? costos[0] : null,
+        creadoEn: a.creadoEn,
+        creadoPor: nombres.get(a.creadoPor) ?? null,
+        estados,
+        // Misma regla que "Corregir ingreso": en cuanto un rollo se montó
+        // alguna vez, la factura queda congelada. Se expone acá para que la
+        // pantalla ofrezca corregir solo lo que de verdad se puede.
+        editable: a.rollos.every((r) => !conMontaje.has(r.idRolloPapel)),
+      };
+
+      const grupo = grupos.get(a.numeroFactura);
+      if (grupo) {
+        grupo.totalRollos += a.totalRollos;
+        grupo.articulos.push(articulo);
+      } else {
+        grupos.set(a.numeroFactura, {
+          numeroFactura: a.numeroFactura,
+          fecha: a.fecha,
+          totalRollos: a.totalRollos,
+          articulos: [articulo],
+        });
+      }
+    }
+
+    return {
+      facturas: [...grupos.values()],
+      articulos: pagina.length,
+      truncado,
+      limite,
+    };
+  }
+
+  /**
+   * Inventario de rollos: el estado de TODO el papel, con lo necesario para
+   * hacer el conteo físico y para auditar que lo registrado cuadre con lo real.
+   *
+   * ⚠️ `incluyeCostos` NO es cosmético: la valorización es una divulgación
+   * nueva para los roles de planta, que hoy no ven dinero en ninguna pantalla.
+   * Se resuelve en el controlador desde `costeo.dashboard.ver_financiero` —
+   * permiso OPCIONAL, así que no puede ir en `@RequirePermissions`, que exige
+   * TODOS los que lista.
+   */
+  async inventario(incluyeCostos: boolean) {
+    const [rollos, montajes] = await Promise.all([
+      this.prisma.rolloPapel.findMany({
+        include: { tipoPapel: true, facturaPapel: true },
+        orderBy: [{ idFacturaPapel: 'asc' }, { secuencia: 'asc' }],
+      }),
+      this.prisma.montajeRollo.findMany({
+        include: { impresora: { select: { codigo: true } } },
+        orderBy: { montadoEn: 'asc' },
+      }),
+    ]);
+
+    // Misma fuente que el panel, el historial y el estimado de Impresión de
+    // OPs: `consumoPorMontajeIds`. Recalcular el consumo acá con otra consulta
+    // sería una segunda fuente de verdad, y la primera divergencia aparecería
+    // justo en el reporte que se usa para auditar.
+    const consumoPorMontaje = await this.consumoPorMontajeIds(
+      montajes.map((m) => m.idMontajeRollo),
+    );
+    const consumoPorRollo = new Map<number, number>();
+    for (const m of montajes) {
+      consumoPorRollo.set(
+        m.idRolloPapel,
+        (consumoPorRollo.get(m.idRolloPapel) ?? 0) +
+          (consumoPorMontaje.get(m.idMontajeRollo) ?? 0),
+      );
+    }
+
+    const ahora = Date.now();
+    const dias = (d: Date) => Math.floor((ahora - d.getTime()) / 86_400_000);
+
+    const detalle = rollos.map((r) => {
+      const yardasIniciales =
+        r.yardasIniciales == null ? null : Number(r.yardasIniciales);
+      const consumidas = consumoPorRollo.get(r.idRolloPapel) ?? 0;
+      const costoUnitario =
+        r.costoUnitario == null ? null : Number(r.costoUnitario);
+      const restante =
+        yardasIniciales == null ? null : yardasIniciales - consumidas;
+      return {
+        idRolloPapel: r.idRolloPapel,
+        // Mismo formato que la vista `v_rollo_codigo`, que es lo que viaja a
+        // los Google Sheets como NRollo y lo que dice la etiqueta física.
+        codigo: `${r.facturaPapel.numeroFactura}-${r.facturaPapel.totalRollos}-${r.secuencia}`,
+        numeroFactura: r.facturaPapel.numeroFactura,
+        secuencia: r.secuencia,
+        tipoPapel: r.tipoPapel.nombre,
+        tipoPapelCodigo: r.tipoPapel.codigo,
+        estado: r.estado,
+        yardasIniciales,
+        consumidas,
+        restante,
+        costoUnitario: incluyeCostos ? costoUnitario : null,
+        valor:
+          incluyeCostos && restante != null && costoUnitario != null
+            ? restante * costoUnitario
+            : null,
+        // Desde la FECHA DE LA FACTURA y no desde `creadoEn`: lo que interesa
+        // es hace cuánto llegó el papel, no hace cuánto se tecleó. Una carga
+        // histórica tecleada hoy tiene que mostrar su antigüedad real.
+        diasDesdeFactura: dias(r.facturaPapel.fecha),
+        consumidoFueraMotivo: r.consumidoFueraMotivo,
+      };
+    });
+
+    const deEstado = (estado: string) =>
+      detalle.filter((d) => d.estado === estado);
+    const sumar = (xs: { restante: number | null }[]) =>
+      xs.reduce((t, x) => t + (x.restante ?? 0), 0);
+
+    const porEstado = [
+      'EN_BODEGA',
+      'MONTADO',
+      'AGOTADO',
+      'DESCARTADO',
+      'CONSUMIDO_FUERA',
+    ].map((estado) => {
+      const xs = deEstado(estado);
+      return { estado, rollos: xs.length, yardasRestantes: sumar(xs) };
+    });
+
+    const enBodega = deEstado('EN_BODEGA');
+    const montados = deEstado('MONTADO');
+
+    // Por tipo de papel: es la respuesta a "¿de qué papel me estoy quedando?",
+    // que es para lo que sirve un inventario antes de comprar.
+    const tipos = new Map<
+      string,
+      {
+        codigo: string;
+        nombre: string;
+        rollosEnBodega: number;
+        yardasEnBodega: number;
+        rollosMontados: number;
+        yardasMontadas: number;
+        valorEnBodega: number | null;
+      }
+    >();
+    for (const d of [...enBodega, ...montados]) {
+      const t = tipos.get(d.tipoPapelCodigo) ?? {
+        codigo: d.tipoPapelCodigo,
+        nombre: d.tipoPapel,
+        rollosEnBodega: 0,
+        yardasEnBodega: 0,
+        rollosMontados: 0,
+        yardasMontadas: 0,
+        valorEnBodega: incluyeCostos ? 0 : null,
+      };
+      if (d.estado === 'EN_BODEGA') {
+        t.rollosEnBodega += 1;
+        t.yardasEnBodega += d.restante ?? 0;
+        if (t.valorEnBodega != null) t.valorEnBodega += d.valor ?? 0;
+      } else {
+        t.rollosMontados += 1;
+        t.yardasMontadas += d.restante ?? 0;
+      }
+      tipos.set(d.tipoPapelCodigo, t);
+    }
+
+    // Antigüedad del stock en bodega: papel parado es dinero parado, y el papel
+    // se maltrata con el tiempo.
+    const ultimo = CORTES_ANTIGUEDAD[CORTES_ANTIGUEDAD.length - 1];
+    const antiguedad = [
+      ...CORTES_ANTIGUEDAD.map((corte, i) => ({
+        etiqueta:
+          i === 0
+            ? `Hasta ${corte} días`
+            : `${CORTES_ANTIGUEDAD[i - 1] + 1} a ${corte} días`,
+        rollos: enBodega.filter(
+          (d) =>
+            d.diasDesdeFactura <= corte &&
+            (i === 0 || d.diasDesdeFactura > CORTES_ANTIGUEDAD[i - 1]),
+        ).length,
+      })),
+      {
+        etiqueta: `Más de ${ultimo} días`,
+        rollos: enBodega.filter((d) => d.diasDesdeFactura > ultimo).length,
+      },
+    ];
+
+    const montajesAbiertos = montajes.filter((m) => m.desmontadoEn == null);
+    const nombres = await this.nombresDeUsuarios(
+      montajesAbiertos.map((m) => m.creadoPor),
+    );
+    const porRollo = new Map(detalle.map((d) => [d.idRolloPapel, d]));
+    const enImpresoras = montajesAbiertos.map((m) => {
+      const d = porRollo.get(m.idRolloPapel);
+      return {
+        impresora: m.impresora.codigo,
+        codigo: d?.codigo ?? String(m.idRolloPapel),
+        tipoPapel: d?.tipoPapel ?? null,
+        montadoEn: m.montadoEn,
+        diasMontado: dias(m.montadoEn),
+        montadoPor: nombres.get(m.creadoPor) ?? null,
+        consumidoEsteMontaje: consumoPorMontaje.get(m.idMontajeRollo) ?? 0,
+        restante: d?.restante ?? null,
+      };
+    });
+
+    return {
+      generadoEn: new Date(),
+      incluyeCostos,
+      resumen: {
+        rollosTotales: detalle.length,
+        porEstado,
+        // "Comprado" sale de las yardas declaradas al ingresar, así que los
+        // rollos sin yardas NO suman: por eso se informa cuántos son, para que
+        // nadie lea el total como si estuviera completo.
+        yardasCompradas: detalle.reduce(
+          (t, d) => t + (d.yardasIniciales ?? 0),
+          0,
+        ),
+        yardasConsumidas: detalle.reduce((t, d) => t + d.consumidas, 0),
+        yardasEnBodega: sumar(enBodega),
+        yardasEnImpresoras: sumar(montados),
+        rollosSinYardas: detalle.filter((d) => d.yardasIniciales == null)
+          .length,
+        valorEnBodega: incluyeCostos
+          ? enBodega.reduce((t, d) => t + (d.valor ?? 0), 0)
+          : null,
+        rollosSinCosto: incluyeCostos
+          ? enBodega.filter((d) => d.costoUnitario == null).length
+          : null,
+      },
+      porTipoPapel: [...tipos.values()].sort((a, b) =>
+        a.nombre.localeCompare(b.nombre, 'es'),
+      ),
+      enBodega,
+      enImpresoras,
+      senales: {
+        antiguedad,
+        // Rollos en bodega que ya se usaron en parte. Son los que hay que
+        // gastar primero y los más fáciles de perder de vista en el conteo,
+        // porque físicamente no parecen un rollo nuevo.
+        parciales: enBodega.filter((d) => d.consumidas > TOLERANCIA_YD),
+        // Montajes abiertos hace demasiado: ver `DIAS_MONTAJE_LARGO`.
+        montajesLargos: enImpresoras.filter(
+          (m) => m.diasMontado >= DIAS_MONTAJE_LARGO,
+        ),
+        // Declarados AGOTADO pero con yardas todavía en libros. NO es merma
+        // —esa medición se retiró el 2026-10-06, cuando las yardas finales
+        // pasaron a derivarse del propio cálculo—: es consumo que nadie
+        // registró, casi siempre órdenes impresas que no se enviaron desde
+        // Impresión de OPs.
+        agotadosConSaldo: deEstado('AGOTADO').filter(
+          (d) => d.restante != null && d.restante > TOLERANCIA_YD,
+        ),
+        // Papel que se gastó FUERA del ERP. Va aparte de todo lo demás a
+        // propósito: su consumo no está registrado acá, así que mezclarlo con
+        // los agotados lo haría ver como papel perdido.
+        consumidoFuera: {
+          rollos: deEstado('CONSUMIDO_FUERA').length,
+          yardas: deEstado('CONSUMIDO_FUERA').reduce(
+            (t, d) => t + (d.yardasIniciales ?? 0),
+            0,
+          ),
+        },
+      },
+    };
+  }
+
+  /**
+   * Nombres de usuario en UN lote.
+   *
+   * `creadoPor` es un `Int` plano sin `@relation` desde F1 —para no ensuciar
+   * `core.Usuario` con ~12 arrays inversos—, así que Prisma no lo resuelve con
+   * un `include` y hay que traerlos aparte. En lote y no por fila: el
+   * inventario y el historial listan cientos de registros.
+   */
+  private async nombresDeUsuarios(ids: number[]): Promise<Map<number, string>> {
+    const unicos = [...new Set(ids)];
+    if (unicos.length === 0) return new Map();
+    const usuarios = await this.prisma.usuario.findMany({
+      where: { idUsuario: { in: unicos } },
+      select: { idUsuario: true, username: true, nombreCompleto: true },
+    });
+    return new Map(
+      usuarios.map((u) => [u.idUsuario, u.nombreCompleto || u.username]),
+    );
+  }
+
   // ---------------------------------------------------------------------
   // Carga masiva de ingresos a bodega
   //
-  // Una fila = una factura + un tipo de papel + una cantidad de rollos. Se
-  // permite repetir la misma factura en varias filas porque una factura real
-  // del proveedor puede traer más de un tipo de papel; al aplicar, las filas
-  // de una misma factura se agrupan en un solo `factura_papel` y sus rollos
-  // se numeran corridos.
+  // Una fila = una factura + un tipo de papel + una cantidad de rollos, o sea
+  // un ARTÍCULO. Se permite repetir la misma factura en varias filas porque una
+  // factura real del proveedor puede traer más de un tipo de papel, y cada una
+  // crea su propia fila de `factura_papel` con sus rollos numerados DESDE 1 —
+  // así el código del rollo coincide con la etiqueta física. (Hasta el
+  // 2026-10-11 se agrupaban en una sola factura con las secuencias corridas
+  // entre tipos, que es justamente el defecto que eso corrigió.)
   // ---------------------------------------------------------------------
 
   async plantillaImportarIngresos(): Promise<ExcelJS.Buffer> {

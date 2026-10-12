@@ -3084,6 +3084,97 @@ del apaño **antes** de cambiar el UNIQUE por el compuesto.
   Los 187 rollos siguen todos `EN_BODEGA` con **0 montajes y 0 consumos**, así que
   el renombre no arrastra nada.
 
+  - **Bodega se puede revisar sola: historial de ingresos, montaje buscable e inventario
+    imprimible (2026-10-12)**. Tres pedidos del usuario en un mensaje, con un hilo común: el
+    bodeguero cargaba rollos y después **no tenía dónde ver lo que había cargado**.
+    1. **Historial de ingresos, en la misma pestaña que el formulario**
+       (`components/historial-ingresos.tsx` + `GET /costeo/rollos/ingresos`). Agrupado por
+       **número de factura**, con los artículos adentro: desde que una fila de `factura_papel`
+       es el artículo (número + tipo de papel), una factura del proveedor puede tener varios, y
+       verlos juntos es lo que permite contrastarla contra el papel que llegó. Cada artículo
+       trae el **desglose de estados de sus rollos** (`{EN_BODEGA: 5, MONTADO: 1}`), que es la
+       otra mitad de la pregunta: no solo "qué cargué" sino "qué queda de lo que cargué".
+       - Gateado con `costeo.rollo.ingresar` y **no** con `.ver`: es para quien carga, y es el
+         mismo permiso que ya le deja crearlo. Verificado: OPERADOR_IMPRESION recibe **403**.
+       - Va en la misma pestaña a propósito. La pregunta "¿ya cargué esta factura?" aparece justo
+         después de cargarla; mandar a otra pantalla para responderla es lo que hacía que nadie
+         la respondiera.
+       - El `editable` se resuelve con **una** consulta de montajes para todos los rollos de la
+         página. De a una factura serían N consultas.
+    2. **Montaje buscable y agrupado por tipo de papel.** El usuario: *"cuando montan un rollo se
+       despliega todos los rollos y es un poco difícil estar buscando entre tantos"*. Con 74
+       rollos en bodega en local (187 en producción) la grilla plana obliga a barrer la pantalla.
+       Ahora hay buscador (código, factura o tipo) y secciones colapsables, con el **papel
+       recomendado para esa impresora primero y abierto** — el backend ya lo ordenaba así desde
+       F2, lo que faltaba era agrupar. **Sin cambios de backend.**
+       - La búsqueda se limpia al cambiar de impresora: un filtro olvidado haría parecer que la
+         máquina nueva no tiene rollos.
+    3. **Inventario de rollos, con informe imprimible** (`components/tab-inventario.tsx`,
+       `features/costeo-rollos/imprimir.ts`, `GET /costeo/rollos/inventario`). Pestaña nueva en
+       Gestión de Rollos.
+       - **Gateado con `costeo.rollo.ver`, no con `costeo.dashboard.ver`**: quien hace el conteo
+         es BODEGUERO, que no tiene el de tableros. Misma lección que el estado del rollo en
+         Impresión de OPs — pedirlo del endpoint equivocado le habría dado 403 justo al rol que
+         lo necesita.
+       - ⚠️ **La valorización en dinero va aparte, detrás de `costeo.dashboard.ver_financiero`**,
+         resuelto en el controlador como permiso **opcional** (`@RequirePermissions` exige TODOS
+         los que lista). Contar papel no necesita saber cuánto costó, y mostrárselo a los
+         operarios de planta sería una divulgación que hoy no tienen en ninguna pantalla. Sin el
+         permiso, `incluyeCostos:false` y **todo** el dinero viene `null`, incluido el
+         `costoUnitario` por rollo — verificado en navegador con un BODEGUERO real: cero "Q" en
+         la página y en el impreso, que además se subtitula "sin valorización". Dárselo a
+         bodegueros es un checkbox en `/roles`, sin tocar código.
+       - **El consumo NO se recalcula**: sale de `consumoPorMontajeIds()`, la misma fuente del
+         panel, del historial y del estimado de Impresión de OPs. Una segunda fuente de verdad
+         habría divergido justo en el informe que se usa para auditar.
+       - **El balance es el invariante que lo vuelve auditable**: comprado − consumido = lo que
+         todavía existe, repartido entre bodega e impresoras. Medido sobre los datos reales:
+         91,033.40 − (80,690.01 + 4,399.09 + 1,208 + 2,131.79 + 2,416) = **188.51 = consumidas**,
+         exacto.
+       - **Los NULL no se tratan como 0.** Los rollos sin yardas declaradas no suman en ningún
+         total y se informa cuántos son; la valorización cubre solo los que traen costo y lo dice
+         (en local **72 de 74** rollos en bodega no tienen costo, así que el total es un piso, no
+         el valor del inventario). Un 0 inventado ahí sería un número creíble y falso.
+       - **El impreso es una hoja de conteo de verdad**, no un volcado: agrupada por tipo de
+         papel para recorrer la bodega, con casilla ✓, columnas en blanco para anotar lo contado
+         y las observaciones, y firmas de "Contado por / Revisado por / Fecha" al pie (mismo
+         espíritu que la Requisición de Bodega). `soloConteo` imprime **solo** esa hoja: es lo que
+         se lleva a caminar la bodega, el resto ahí sería papel de más.
+       - **Métricas de auditoría, elegidas por lo que de verdad se puede medir**: rollos
+         **empezados** que siguen en bodega (hay que gastarlos primero y son los que el conteo
+         pasa por alto, porque no parecen un rollo nuevo), **antigüedad** del papel por tramos
+         desde la fecha de la factura (no desde que se tecleó: una carga histórica debe mostrar su
+         edad real), **montajes abiertos** hace más de 15 días, y **papel usado que nadie
+         registró** = rollos declarados AGOTADO con yardas todavía en libros.
+         - ⚠️ Esa última **no es merma** —esa medición se retiró el 2026-10-06, cuando las yardas
+           finales pasaron a derivarse del propio cálculo y la merma quedó en cero por
+           construcción—: es consumo sin registrar, casi siempre órdenes impresas que no se
+           enviaron desde Impresión de OPs. Con los datos reales encontró 1 rollo con 1,208 yd.
+         - El papel **consumido fuera del ERP** va en su propio apartado, separado de todo lo
+           demás: su consumo no está acá, así que mezclarlo con los agotados lo haría ver como
+           papel perdido.
+    - **Dos duplicaciones cerradas de paso, porque esto habría sido la cuarta copia de cada una**:
+      `imprimirHTML()` estaba idéntica en Cotizaciones, Reposiciones y el Reporte de consumo → ahora
+      en `apps/web/src/lib/imprimir.ts`; y el anclaje de días a UTC-6 estaba en la bitácora y en el
+      reporte de consumo → ahora en `apps/api/src/common/dia-guatemala.ts`. Lo segundo importa más
+      que el ahorro de líneas: son interpretaciones del "mismo día" que **no pueden divergir**, o
+      dos pantallas dan números distintos para la misma pregunta.
+    - **Comentario obsoleto corregido**: el bloque del import de rollos seguía diciendo que las
+      filas de una misma factura "se agrupan en un solo `factura_papel` con los rollos numerados
+      corridos" — justo el defecto que se corrigió el 2026-10-11.
+    - **Verificado**: los dos endpoints con curl (historial agrupando la factura `123` que el
+      usuario había cargado con dos papeles, 403 para un rol sin `ingresar`, inventario con y sin
+      permiso financiero); y en navegador a **1500/820/390 px** con dos roles distintos — cero
+      desborde horizontal, consola limpia (los dos 401 son el `auth/refresh` previo al login, ya
+      documentado), 4 grupos de papel en Montaje con el recomendado abierto y el resto colapsado,
+      la búsqueda filtrando a 1 rollo por código y a 11 por tipo, y el impreso con sus 74 casillas
+      de conteo y las 3 firmas. Datos de prueba borrados — la base volvió a 83 rollos / 6 facturas
+      / 15 montajes.
+      - *Nota de método*: una primera medición dio "0 grupos de papel" y resultó ser **una carrera
+        de mi propia prueba** —conté los grupos antes de que llegara la consulta de rollos
+        disponibles—, no un fallo del agrupado. Se repitió esperando el encabezado del grupo. Con
+        react-query hay que esperar un elemento que **dependa de los datos**, no el contenedor.
+
 ### Despliegue del 2026-09-30 (`920cf14`) — ejecutado por SSH
 
 `920cf14` (reporte de consumo por OP, listado de órdenes, marca por empresa y corte del espejo a

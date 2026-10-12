@@ -19,6 +19,7 @@ import { AplicarImportarIngresosDto } from './dto/aplicar-importar-ingresos.dto'
 import { DesmontarMontajeDto } from './dto/desmontar-montaje.dto';
 import { EditarIngresoDto } from './dto/editar-ingreso.dto';
 import { IngresoFacturaPapelDto } from './dto/ingreso-factura-papel.dto';
+import { ListarIngresosDto } from './dto/listar-ingresos.dto';
 import { ListarRollosDto } from './dto/listar-rollos.dto';
 import { MarcarConsumidoFueraDto } from './dto/marcar-consumido-fuera.dto';
 import { MontarRolloDto } from './dto/montar-rollo.dto';
@@ -89,6 +90,42 @@ export class CosteoRollosController {
       soloAbiertos: soloAbiertos === 'true',
       limite: limite ? Number(limite) : undefined,
     });
+  }
+
+  /**
+   * Historial de lo cargado a bodega. Gateado con `costeo.rollo.ingresar` y no
+   * con `.ver`: es para que quien carga vea lo que cargó, y es el mismo permiso
+   * que ya le deja crearlo — BODEGUERO lo tiene.
+   *
+   * Va antes de `@Get(':id')`, como el resto: si no, 'ingresos' entraría por
+   * esa ruta y fallaría al parsear el id.
+   */
+  @RequirePermissions('costeo.rollo.ingresar')
+  @Get('ingresos')
+  historialIngresos(@Query() filtro: ListarIngresosDto) {
+    return this.service.historialIngresos(filtro);
+  }
+
+  /**
+   * Inventario de rollos, para el conteo físico y la auditoría.
+   *
+   * `costeo.rollo.ver` —no `costeo.dashboard.ver`— porque quien hace el
+   * inventario es BODEGUERO, que no tiene el de tableros. Misma lección que el
+   * estado del rollo en Impresión de OPs: pedirlo del endpoint equivocado le
+   * habría dado 403 justo al rol que lo necesita.
+   *
+   * La VALORIZACIÓN es aparte: `costeo.dashboard.ver_financiero` resuelto acá
+   * como permiso **opcional**, porque `@RequirePermissions` exige TODOS los que
+   * lista. Sin él el informe sale completo pero sin dinero — contar papel no
+   * necesita saber cuánto costó, y mostrárselo a los operarios de planta sería
+   * una divulgación nueva que hoy no tienen en ninguna pantalla.
+   */
+  @RequirePermissions('costeo.rollo.ver')
+  @Get('inventario')
+  inventario(@CurrentUser() usuario: JwtPayload) {
+    return this.service.inventario(
+      usuario.permisos.includes('costeo.dashboard.ver_financiero'),
+    );
   }
 
   @RequirePermissions('costeo.rollo.ver')

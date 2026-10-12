@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiError } from '@/lib/api'
 import { costeoRollosApi } from '../api'
+import { HistorialIngresos } from './historial-ingresos'
 import { codigoRollo } from '../codigo-rollo'
 import type { FacturaConRollos, FilaPreviewIngresoRollo } from '../types'
 
@@ -79,7 +80,8 @@ export function TabIngreso() {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
           <CardTitle className="text-base">Ingreso a bodega</CardTitle>
@@ -225,7 +227,12 @@ export function TabIngreso() {
           // misma factura con dos papeles son dos ingresos.
           return `${r.facturas} ingreso(s) y ${r.rollos} rollo(s) cargados`
         }}
-      />
+        />
+      </div>
+
+      {/* A lo ancho y debajo del formulario: es lo que se mira después de
+          cargar, no mientras se carga. */}
+      <HistorialIngresos />
     </div>
   )
 }

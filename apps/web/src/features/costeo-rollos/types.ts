@@ -144,3 +144,107 @@ export interface MontajeHistorial {
   /** Lo cerró alguien distinto de quien lo montó. */
   cambioDeTurno: boolean
 }
+
+// ── Historial de ingresos a bodega ───────────────────────────────────
+/** Un ARTÍCULO cargado: una fila de `factura_papel` (número + tipo de papel). */
+export interface ArticuloIngresado {
+  idFacturaPapel: number
+  tipoPapel: { codigo: string; nombre: string }
+  totalRollos: number
+  /** null cuando los rollos no comparten el mismo valor (se pueden editar uno por uno). */
+  yardasPorRollo: number | null
+  yardasTotales: number
+  costoUnitario: number | null
+  creadoEn: string
+  creadoPor: string | null
+  /** Cuántos rollos hay en cada estado: `{ EN_BODEGA: 5, MONTADO: 1 }`. */
+  estados: Record<string, number>
+  /** false si algún rollo ya se montó alguna vez — ya no se puede corregir. */
+  editable: boolean
+}
+
+/** Los artículos de un mismo número de factura, agrupados. */
+export interface FacturaIngresada {
+  numeroFactura: string
+  fecha: string
+  totalRollos: number
+  articulos: ArticuloIngresado[]
+}
+
+export interface HistorialIngresos {
+  facturas: FacturaIngresada[]
+  articulos: number
+  truncado: boolean
+  limite: number
+}
+
+// ── Inventario de rollos ─────────────────────────────────────────────
+export interface RolloInventario {
+  idRolloPapel: number
+  /** Mismo formato que la etiqueta física y que el NRollo de los Sheets. */
+  codigo: string
+  numeroFactura: string
+  secuencia: number
+  tipoPapel: string
+  tipoPapelCodigo: string
+  estado: EstadoRollo
+  yardasIniciales: number | null
+  consumidas: number
+  restante: number | null
+  /** null sin `costeo.dashboard.ver_financiero`, o si el rollo no trae costo. */
+  costoUnitario: number | null
+  valor: number | null
+  /** Días desde la FECHA DE LA FACTURA, no desde que se tecleó. */
+  diasDesdeFactura: number
+  consumidoFueraMotivo: string | null
+}
+
+export interface MontajeInventario {
+  impresora: string
+  codigo: string
+  tipoPapel: string | null
+  montadoEn: string
+  diasMontado: number
+  montadoPor: string | null
+  consumidoEsteMontaje: number
+  restante: number | null
+}
+
+export interface Inventario {
+  generadoEn: string
+  /** false = el usuario no tiene el permiso financiero; todo el dinero viene null. */
+  incluyeCostos: boolean
+  resumen: {
+    rollosTotales: number
+    porEstado: { estado: EstadoRollo; rollos: number; yardasRestantes: number }[]
+    yardasCompradas: number
+    yardasConsumidas: number
+    yardasEnBodega: number
+    yardasEnImpresoras: number
+    /** Rollos sin yardas declaradas: NO suman en los totales de arriba. */
+    rollosSinYardas: number
+    valorEnBodega: number | null
+    /** Rollos en bodega sin costo declarado: quedan fuera de la valorización. */
+    rollosSinCosto: number | null
+  }
+  porTipoPapel: {
+    codigo: string
+    nombre: string
+    rollosEnBodega: number
+    yardasEnBodega: number
+    rollosMontados: number
+    yardasMontadas: number
+    valorEnBodega: number | null
+  }[]
+  enBodega: RolloInventario[]
+  enImpresoras: MontajeInventario[]
+  senales: {
+    antiguedad: { etiqueta: string; rollos: number }[]
+    /** En bodega pero ya usados en parte: hay que gastarlos primero. */
+    parciales: RolloInventario[]
+    montajesLargos: MontajeInventario[]
+    /** Declarados agotados con yardas en libros = consumo que nadie registró. */
+    agotadosConSaldo: RolloInventario[]
+    consumidoFuera: { rollos: number; yardas: number }
+  }
+}

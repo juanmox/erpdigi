@@ -6,6 +6,7 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { inicioDelDiaGT } from '../../common/dia-guatemala';
 import { EmpresaActual } from '../auth/decorators/empresa-actual.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import {
@@ -15,18 +16,9 @@ import {
 
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 
-/**
- * Guatemala es UTC-6 fijo y **sin horario de verano** (se abolió), así que el
- * desfase es constante y un día calendario se puede anclar exactamente. Si
- * alguna vez volviera el DST, esto habría que rehacerlo con una librería de
- * zonas horarias.
- */
-const OFFSET_GT = '-06:00';
-
-/** Instante en que empieza ese día calendario en Guatemala. */
-function inicioDelDiaGT(dia: string): Date {
-  return new Date(`${dia}T00:00:00${OFFSET_GT}`);
-}
+// `inicioDelDiaGT` vive en `common/dia-guatemala.ts`, compartido con la
+// bitácora y el inventario de rollos: son interpretaciones del "mismo día"
+// que no pueden divergir. El detalle de por qué está allá.
 
 /**
  * Los cuatro filtros se resuelven acá y no en el servicio, para que las dos
