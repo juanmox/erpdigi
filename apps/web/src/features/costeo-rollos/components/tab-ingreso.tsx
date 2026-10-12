@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiError } from '@/lib/api'
 import { costeoRollosApi } from '../api'
+import { codigoRollo } from '../codigo-rollo'
 import type { FacturaConRollos, FilaPreviewIngresoRollo } from '../types'
 
 const HOY = new Date().toISOString().slice(0, 10)
@@ -98,6 +99,14 @@ export function TabIngreso() {
           <div>
             <Label className="mb-1 block text-xs">Número de factura</Label>
             <Input value={numeroFactura} onChange={(e) => setNumeroFactura(e.target.value)} placeholder="958745125" />
+            {/* Es la duda que trajo el cambio: una factura puede traer varios
+                artículos, así que el mismo número se carga una vez por cada
+                tipo de papel y no hay que inventarle sufijos. */}
+            <p className="text-ink-faint mt-1 text-xs">
+              Si la factura trae más de un tipo de papel, cargá un ingreso por cada uno con el{' '}
+              <strong>mismo número</strong>. Los rollos de cada tipo se numeran desde el 1, igual que
+              la etiqueta.
+            </p>
           </div>
           <div>
             <Label className="mb-1 block text-xs">Fecha</Label>
@@ -166,7 +175,7 @@ export function TabIngreso() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              Factura {resultado.numeroFactura} — {resultado.rollos.length} rollos creados
+              Factura {resultado.numeroFactura} · {resultado.tipoPapel.nombre} — {resultado.rollos.length} rollos creados
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -174,7 +183,7 @@ export function TabIngreso() {
               {resultado.rollos.map((r) => (
                 <li key={r.idRolloPapel} className="flex items-center justify-between rounded-md bg-black/[0.03] px-3 py-2 dark:bg-white/[0.04]">
                   <span className="font-mono">
-                    {resultado.numeroFactura}-{resultado.rollos.length}-{r.secuencia}
+                    {codigoRollo({ secuencia: r.secuencia, facturaPapel: resultado })}
                   </span>
                   <span className="text-ink-muted">
                     {r.tipoPapel.nombre}
@@ -212,7 +221,9 @@ export function TabIngreso() {
         onAplicar={async (filasValidas) => {
           const r = await costeoRollosApi.aplicarImportar(filasValidas)
           queryClient.invalidateQueries({ queryKey: ['costeo-rollos'] })
-          return `${r.facturas} factura(s) y ${r.rollos} rollo(s) cargados`
+          // "ingresos" y no "facturas": cada fila es un artículo, así que una
+          // misma factura con dos papeles son dos ingresos.
+          return `${r.facturas} ingreso(s) y ${r.rollos} rollo(s) cargados`
         }}
       />
     </div>

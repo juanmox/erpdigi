@@ -88,6 +88,7 @@ model TipoPapel {
   activo         Boolean  @default(true)
 
   impresorasDefault Impresora[]
+  facturas          FacturaPapel[]
   rollos            RolloPapel[]
   lineasProduccion  LineaProduccion[]
   consumosPapel     ConsumoPapel[]
@@ -275,16 +276,31 @@ model OfOp {
 }
 
 // ── Rollos de papel ──────────────────────────────────────────────────
+/// Una fila es la factura POR TIPO DE PAPEL, o sea el ARTÍCULO, no la factura
+/// entera: una factura del proveedor puede traer varios artículos y cada uno
+/// llega con sus rollos etiquetados desde el 1. Por eso `totalRollos` y las
+/// secuencias son del artículo, y el código del rollo
+/// (`<numeroFactura>-<totalRollos>-<secuencia>`, vista `v_rollo_codigo`)
+/// coincide con la etiqueta física.
 model FacturaPapel {
   idFacturaPapel Int      @id @default(autoincrement()) @map("id_factura_papel")
-  numeroFactura  String   @unique @map("numero_factura") @db.VarChar(30)
+  numeroFactura  String   @map("numero_factura") @db.VarChar(30)
+  idTipoPapel    Int      @map("id_tipo_papel")
   fecha          DateTime @db.Date
   totalRollos    Int      @map("total_rollos")
   creadoEn       DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
   creadoPor      Int      @map("creado_por")
 
-  rollos RolloPapel[]
+  tipoPapel TipoPapel    @relation(fields: [idTipoPapel], references: [idTipoPapel])
+  rollos    RolloPapel[]
 
+  // El UNIQUE pasó a ser por (número, tipo de papel): el mismo número se puede
+  // volver a cargar con otro artículo, nunca dos veces con el mismo papel.
+  @@unique([numeroFactura, idTipoPapel])
+  // + SQL: UNIQUE (id_factura_papel, id_tipo_papel) — redundante como
+  //   restricción (`id_factura_papel` ya es la PK) pero Postgres lo exige como
+  //   destino de la FK compuesta de `rollo_papel` (ver allá). Prisma no lo
+  //   necesita para nada, así que no se declara acá.
   @@map("factura_papel")
   @@schema("costeo")
 }
@@ -317,6 +333,14 @@ model RolloPapel {
   tipoPapel    TipoPapel      @relation(fields: [idTipoPapel], references: [idTipoPapel])
   montajes     MontajeRollo[]
 
+  // + SQL: FOREIGN KEY (id_factura_papel, id_tipo_papel) REFERENCES
+  //   factura_papel(id_factura_papel, id_tipo_papel) ON UPDATE CASCADE — es lo
+  //   que garantiza en la base que el tipo de papel de un rollo sea siempre el
+  //   de su artículo. El CASCADE es deliberado: cambiar el tipo del artículo
+  //   re-tipa sus rollos en el mismo UPDATE, que es justo lo que necesita la
+  //   corrección de un ingreso mal capturado. Prisma no expresa FKs compuestas
+  //   sobre campos que ya tienen su propia @relation, mismo criterio que
+  //   `(id_orden_produccion, id_empresa)` en LineaProduccion.
   @@unique([idFacturaPapel, secuencia])
   @@map("rollo_papel")
   @@schema("costeo")

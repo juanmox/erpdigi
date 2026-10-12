@@ -264,6 +264,7 @@ function humanizarCampo(k: string): string {
     codigoLine: 'ítem',
     totalRollos: 'total de rollos',
     numeroFactura: 'número de factura',
+    tipoPapel: 'tipo de papel',
   };
   if (especiales[k]) return especiales[k];
   return k

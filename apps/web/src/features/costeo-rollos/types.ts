@@ -20,9 +20,14 @@ export interface Impresora {
   grupo: string | null
 }
 
+/**
+ * Es la factura POR TIPO DE PAPEL, o sea el ARTÍCULO: una factura del
+ * proveedor puede traer varios, y cada uno tiene sus rollos numerados desde 1.
+ */
 export interface FacturaPapel {
   idFacturaPapel: number
   numeroFactura: string
+  idTipoPapel: number
   fecha: string
   totalRollos: number
   creadoEn: string
@@ -85,6 +90,7 @@ export interface RolloDeFactura {
 }
 
 export interface FacturaConRollos extends FacturaPapel {
+  tipoPapel: TipoPapel
   rollos: RolloDeFactura[]
   /** false si algún rollo de esta factura ya se montó alguna vez — ver corrección de F3. */
   editable: boolean

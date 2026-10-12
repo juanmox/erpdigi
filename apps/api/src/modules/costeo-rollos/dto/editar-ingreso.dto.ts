@@ -16,10 +16,6 @@ export class EditarRolloIngresoDto {
   @IsInt()
   idRolloPapel!: number;
 
-  @Type(() => Number)
-  @IsInt()
-  idTipoPapel!: number;
-
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -38,6 +34,16 @@ export class EditarIngresoDto {
   @IsString()
   @MinLength(1)
   numeroFactura?: string;
+
+  /**
+   * El tipo de papel es del ARTÍCULO (la fila de `factura_papel`), no de cada
+   * rollo: todos los rollos de un artículo son del mismo papel. Cambiarlo
+   * re-tipa a todos.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  idTipoPapel?: number;
 
   @IsOptional()
   @IsDateString()

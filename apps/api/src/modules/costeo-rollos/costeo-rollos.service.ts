@@ -121,12 +121,21 @@ export class CosteoRollosService {
     });
     if (!tipoPapel) throw new NotFoundException('Tipo de papel no encontrado');
 
+    // El mismo número de factura SÍ se puede volver a cargar, siempre que sea
+    // con otro tipo de papel: una factura del proveedor trae varios artículos
+    // y cada uno llega con sus rollos etiquetados desde el 1. Lo que no se
+    // puede es cargar dos veces el mismo artículo.
     const existente = await this.prisma.facturaPapel.findUnique({
-      where: { numeroFactura: dto.numeroFactura },
+      where: {
+        numeroFactura_idTipoPapel: {
+          numeroFactura: dto.numeroFactura,
+          idTipoPapel: dto.idTipoPapel,
+        },
+      },
     });
     if (existente) {
       throw new ConflictException(
-        'Ya existe una factura de papel con ese número',
+        `La factura ${dto.numeroFactura} ya está cargada con ${tipoPapel.nombre} (${existente.totalRollos} rollo(s)). Si la factura trae otro artículo, cargalo eligiendo su propio tipo de papel; si lo que hay que arreglar es este, usá "Corregir ingreso".`,
       );
     }
 
@@ -134,6 +143,7 @@ export class CosteoRollosService {
       const factura = await tx.facturaPapel.create({
         data: {
           numeroFactura: dto.numeroFactura,
+          idTipoPapel: dto.idTipoPapel,
           fecha: new Date(dto.fecha),
           totalRollos: dto.totalRollos,
           creadoPor: idUsuarioActor,
@@ -161,7 +171,9 @@ export class CosteoRollosService {
       datosNuevos: {
         numeroFactura: factura.numeroFactura,
         totalRollos: dto.totalRollos,
-        idTipoPapel: dto.idTipoPapel,
+        // El NOMBRE y no el id: la bitácora narra para quien lee, y además un
+        // nombre es una foto del momento que sobrevive a que lo renombren.
+        tipoPapel: tipoPapel.nombre,
       },
     });
 
@@ -172,6 +184,7 @@ export class CosteoRollosService {
     const factura = await this.prisma.facturaPapel.findUnique({
       where: { idFacturaPapel },
       include: {
+        tipoPapel: true,
         rollos: { include: { tipoPapel: true }, orderBy: { secuencia: 'asc' } },
       },
     });
@@ -184,15 +197,27 @@ export class CosteoRollosService {
     };
   }
 
-  async buscarFacturaPorNumero(numeroFactura: string) {
-    const factura = await this.prisma.facturaPapel.findUnique({
+  /**
+   * Un mismo número de factura puede tener VARIOS artículos (uno por tipo de
+   * papel), así que devuelve todos los que coincidan y es la pantalla la que
+   * hace elegir cuál corregir. Devolver solo el primero sería peor que pedir
+   * que se elija: se editaría un artículo creyendo estar editando el otro.
+   */
+  async buscarFacturasPorNumero(numeroFactura: string) {
+    const encontradas = await this.prisma.facturaPapel.findMany({
       where: { numeroFactura },
+      select: { idFacturaPapel: true },
+      orderBy: { idFacturaPapel: 'asc' },
     });
-    if (!factura)
+    if (encontradas.length === 0)
       throw new NotFoundException(
         'No existe ninguna factura de papel con ese número',
       );
-    return this.obtenerFactura(factura.idFacturaPapel);
+    return {
+      facturas: await Promise.all(
+        encontradas.map((f) => this.obtenerFactura(f.idFacturaPapel)),
+      ),
+    };
   }
 
   // Corrección de un ingreso mal capturado (número de factura, fecha, tipo de
@@ -236,22 +261,54 @@ export class CosteoRollosService {
       }
     }
 
-    const idsTipoPapel = [...new Set(dto.rollos.map((r) => r.idTipoPapel))];
-    const tiposPapelValidos = await this.prisma.tipoPapel.count({
-      where: { idTipoPapel: { in: idsTipoPapel } },
-    });
-    if (tiposPapelValidos !== idsTipoPapel.length) {
-      throw new BadRequestException(
-        'Uno de los tipos de papel indicados no existe',
-      );
+    // El tipo de papel es del ARTÍCULO, no de cada rollo: una fila de
+    // `factura_papel` es "este papel de esta factura", así que todos sus
+    // rollos lo comparten por definición (lo garantiza la FK compuesta de la
+    // base). Cambiarlo acá los re-tipa a todos en el mismo UPDATE, por el
+    // ON UPDATE CASCADE.
+    let tipoPapelNombre: string | undefined;
+    if (dto.idTipoPapel != null) {
+      const tipoPapel = await this.prisma.tipoPapel.findUnique({
+        where: { idTipoPapel: dto.idTipoPapel },
+      });
+      if (!tipoPapel)
+        throw new BadRequestException('El tipo de papel indicado no existe');
+      tipoPapelNombre = tipoPapel.nombre;
+    }
+
+    const numeroFinal = dto.numeroFactura ?? factura.numeroFactura;
+    const tipoFinal = dto.idTipoPapel ?? factura.idTipoPapel;
+    if (
+      numeroFinal !== factura.numeroFactura ||
+      tipoFinal !== factura.idTipoPapel
+    ) {
+      const choque = await this.prisma.facturaPapel.findUnique({
+        where: {
+          numeroFactura_idTipoPapel: {
+            numeroFactura: numeroFinal,
+            idTipoPapel: tipoFinal,
+          },
+        },
+        include: { tipoPapel: true },
+      });
+      if (choque && choque.idFacturaPapel !== idFacturaPapel) {
+        throw new ConflictException(
+          `Ya hay otro ingreso de la factura ${numeroFinal} con ${choque.tipoPapel.nombre} (${choque.totalRollos} rollo(s)). Dos artículos de la misma factura no pueden compartir el tipo de papel.`,
+        );
+      }
     }
 
     await this.prisma.$transaction(async (tx) => {
-      if (dto.numeroFactura != null || dto.fecha != null) {
+      if (
+        dto.numeroFactura != null ||
+        dto.fecha != null ||
+        dto.idTipoPapel != null
+      ) {
         await tx.facturaPapel.update({
           where: { idFacturaPapel },
           data: {
             numeroFactura: dto.numeroFactura,
+            idTipoPapel: dto.idTipoPapel,
             fecha: dto.fecha ? new Date(dto.fecha) : undefined,
           },
         });
@@ -260,7 +317,6 @@ export class CosteoRollosService {
         await tx.rolloPapel.update({
           where: { idRolloPapel: r.idRolloPapel },
           data: {
-            idTipoPapel: r.idTipoPapel,
             yardasIniciales: r.yardasIniciales ?? null,
             costoUnitario: r.costoUnitario ?? null,
           },
@@ -275,6 +331,7 @@ export class CosteoRollosService {
       accion: 'UPDATE',
       datosNuevos: {
         numeroFactura: dto.numeroFactura,
+        tipoPapel: tipoPapelNombre,
         fecha: dto.fecha,
         rollos: dto.rollos,
       },
@@ -1030,21 +1087,30 @@ export class CosteoRollosService {
         where: { activo: true },
         select: { idTipoPapel: true, codigo: true, nombre: true },
       }),
-      this.prisma.facturaPapel.findMany({ select: { numeroFactura: true } }),
+      this.prisma.facturaPapel.findMany({
+        select: { numeroFactura: true, idTipoPapel: true },
+      }),
     ]);
     const tipoPorCodigo = new Map(
       tipos.map((t) => [t.codigo.toLowerCase(), t]),
     );
+    // La clave es (número, tipo de papel), no el número solo: el mismo número
+    // puede estar cargado con otro artículo y eso no lo convierte en duplicado.
     const facturasEnBase = new Set(
-      facturasExistentes.map((f) => f.numeroFactura.toLowerCase()),
+      facturasExistentes.map(
+        (f) => `${f.numeroFactura.toLowerCase()}|${f.idTipoPapel}`,
+      ),
     );
 
     // Fecha por factura dentro del archivo: dos filas de la misma factura con
     // fechas distintas son un error de tecleo, no dos facturas.
     const fechaPorFactura = new Map<string, string>();
-    // Fila completa repetida: casi siempre es una fila pegada dos veces, que
-    // duplicaría los rollos en silencio. Repetir la factura con OTRO tipo de
-    // papel (o con otra cantidad) sí es válido y no se marca.
+    // El mismo (factura, tipo de papel) dos veces en el archivo: cada par es
+    // UN artículo, así que dos filas son el mismo artículo cargado dos veces
+    // —aunque traigan cantidades distintas—. Antes se agrupaban y los rollos
+    // salían numerados de corrido entre los dos, con códigos que no coincidían
+    // con la etiqueta física. Repetir la factura con OTRO tipo de papel sí es
+    // válido y no se marca: es justamente el caso que esto viene a permitir.
     const vistas = new Set<string>();
 
     const filas: FilaPreviewIngresoRollo[] = crudo.map((c) => {
@@ -1068,8 +1134,8 @@ export class CosteoRollosService {
         error = 'Las yardas por rollo deben ser un número mayor que cero';
       else if (c.costo !== null && (Number.isNaN(c.costo) || c.costo < 0))
         error = 'El costo unitario no puede ser negativo';
-      else if (facturasEnBase.has(claveFactura))
-        error = `La factura "${c.numeroFactura}" ya está cargada — corregila desde "Corregir ingreso"`;
+      else if (facturasEnBase.has(`${claveFactura}|${tipo.idTipoPapel}`))
+        error = `La factura "${c.numeroFactura}" ya está cargada con ${tipo.nombre} — corregila desde "Corregir ingreso"`;
 
       const fechaIso = c.fecha ? c.fecha.toISOString().slice(0, 10) : '';
 
@@ -1081,14 +1147,9 @@ export class CosteoRollosService {
       }
 
       if (!error) {
-        const huella = [
-          claveFactura,
-          c.tipoPapelCodigo.toLowerCase(),
-          c.cantidad,
-          c.yardas,
-          c.costo,
-        ].join('|');
-        if (vistas.has(huella)) error = 'Fila repetida dentro del archivo';
+        const huella = `${claveFactura}|${c.tipoPapelCodigo.toLowerCase()}`;
+        if (vistas.has(huella))
+          error = `La factura "${c.numeroFactura}" aparece dos veces con el mismo tipo de papel — juntá las cantidades en una sola fila`;
         else vistas.add(huella);
       }
 
@@ -1121,24 +1182,34 @@ export class CosteoRollosService {
     // la factura pueden darse por buenos.
     const tipos = await this.prisma.tipoPapel.findMany({
       where: { activo: true },
-      select: { idTipoPapel: true, codigo: true },
+      select: { idTipoPapel: true, codigo: true, nombre: true },
     });
     const tipoPorCodigo = new Map(
-      tipos.map((t) => [t.codigo.toLowerCase(), t.idTipoPapel]),
+      tipos.map((t) => [t.codigo.toLowerCase(), t]),
     );
+    const tipoPorId = new Map(tipos.map((t) => [t.idTipoPapel, t]));
 
-    const porFactura = new Map<
+    // Una fila del archivo = un ARTÍCULO = una fila de `factura_papel`, con sus
+    // rollos numerados desde 1. Antes se agrupaba por número de factura y los
+    // dos tipos de papel caían en una sola factura con las secuencias corridas
+    // entre ambos (1..68 para 48 + 20), así que el código del rollo no
+    // coincidía con la etiqueta física del segundo artículo.
+    const porArticulo = new Map<
       string,
       {
         numeroFactura: string;
+        idTipoPapel: number;
         fecha: Date;
-        grupos: { idTipoPapel: number; fila: FilaAplicarIngresoRolloDto }[];
+        fila: FilaAplicarIngresoRolloDto;
       }
     >();
+    // La fecha sí es de la FACTURA, no del artículo: dos artículos del mismo
+    // número con fechas distintas son un error de tecleo.
+    const fechaPorNumero = new Map<string, Date>();
 
     for (const f of filas) {
-      const idTipoPapel = tipoPorCodigo.get(f.tipoPapelCodigo.toLowerCase());
-      if (!idTipoPapel)
+      const tipo = tipoPorCodigo.get(f.tipoPapelCodigo.toLowerCase());
+      if (!tipo)
         throw new BadRequestException(
           `El tipo de papel "${f.tipoPapelCodigo}" no existe o está inactivo`,
         );
@@ -1147,65 +1218,77 @@ export class CosteoRollosService {
         throw new BadRequestException(
           `Fecha inválida en la factura "${f.numeroFactura}"`,
         );
-      const clave = f.numeroFactura.toLowerCase();
-      const actual = porFactura.get(clave);
-      if (!actual) {
-        porFactura.set(clave, {
-          numeroFactura: f.numeroFactura,
-          fecha,
-          grupos: [{ idTipoPapel, fila: f }],
-        });
-      } else {
-        if (actual.fecha.getTime() !== fecha.getTime())
-          throw new BadRequestException(
-            `La factura "${f.numeroFactura}" viene con dos fechas distintas`,
-          );
-        actual.grupos.push({ idTipoPapel, fila: f });
-      }
+      const numero = f.numeroFactura.toLowerCase();
+      const fechaPrevia = fechaPorNumero.get(numero);
+      if (fechaPrevia && fechaPrevia.getTime() !== fecha.getTime())
+        throw new BadRequestException(
+          `La factura "${f.numeroFactura}" viene con dos fechas distintas`,
+        );
+      fechaPorNumero.set(numero, fecha);
+
+      const clave = `${numero}|${tipo.idTipoPapel}`;
+      if (porArticulo.has(clave))
+        throw new BadRequestException(
+          `La factura "${f.numeroFactura}" viene dos veces con el mismo tipo de papel (${tipo.nombre}): juntá las cantidades en una sola fila`,
+        );
+      porArticulo.set(clave, {
+        numeroFactura: f.numeroFactura,
+        idTipoPapel: tipo.idTipoPapel,
+        fecha,
+        fila: f,
+      });
     }
+
+    const articulos = [...porArticulo.values()];
 
     const yaExisten = await this.prisma.facturaPapel.findMany({
       where: {
-        numeroFactura: {
-          in: [...porFactura.values()].map((v) => v.numeroFactura),
-        },
+        OR: articulos.map((a) => ({
+          numeroFactura: a.numeroFactura,
+          idTipoPapel: a.idTipoPapel,
+        })),
       },
-      select: { numeroFactura: true },
+      select: { numeroFactura: true, idTipoPapel: true },
     });
     if (yaExisten.length > 0)
       throw new ConflictException(
-        `Ya existen estas facturas: ${yaExisten.map((f) => f.numeroFactura).join(', ')}`,
+        `Ya están cargados estos ingresos: ${yaExisten
+          .map(
+            (f) =>
+              `${f.numeroFactura} con ${tipoPorId.get(f.idTipoPapel)?.nombre ?? `tipo ${f.idTipoPapel}`}`,
+          )
+          .join(', ')}`,
       );
 
     const creadas = await this.prisma.$transaction(async (tx) => {
-      const ids: { idFacturaPapel: number; numeroFactura: string }[] = [];
-      for (const v of porFactura.values()) {
-        const totalRollos = v.grupos.reduce(
-          (a, g) => a + g.fila.cantidadRollos,
-          0,
-        );
+      const ids: {
+        idFacturaPapel: number;
+        numeroFactura: string;
+        idTipoPapel: number;
+      }[] = [];
+      for (const a of articulos) {
         const factura = await tx.facturaPapel.create({
           data: {
-            numeroFactura: v.numeroFactura,
-            fecha: v.fecha,
-            totalRollos,
+            numeroFactura: a.numeroFactura,
+            idTipoPapel: a.idTipoPapel,
+            fecha: a.fecha,
+            totalRollos: a.fila.cantidadRollos,
             creadoPor: idUsuarioActor,
           },
         });
-        let secuencia = 0;
-        const rollos = v.grupos.flatMap((g) =>
-          Array.from({ length: g.fila.cantidadRollos }, () => ({
+        await tx.rolloPapel.createMany({
+          data: Array.from({ length: a.fila.cantidadRollos }, (_, i) => ({
             idFacturaPapel: factura.idFacturaPapel,
-            secuencia: ++secuencia,
-            idTipoPapel: g.idTipoPapel,
-            yardasIniciales: g.fila.yardasPorRollo ?? null,
-            costoUnitario: g.fila.costoUnitario ?? null,
+            secuencia: i + 1,
+            idTipoPapel: a.idTipoPapel,
+            yardasIniciales: a.fila.yardasPorRollo ?? null,
+            costoUnitario: a.fila.costoUnitario ?? null,
           })),
-        );
-        await tx.rolloPapel.createMany({ data: rollos });
+        });
         ids.push({
           idFacturaPapel: factura.idFacturaPapel,
           numeroFactura: factura.numeroFactura,
+          idTipoPapel: factura.idTipoPapel,
         });
       }
       return ids;
@@ -1217,7 +1300,11 @@ export class CosteoRollosService {
         entidad: 'costeo.factura_papel',
         idEntidad: String(c.idFacturaPapel),
         accion: 'CREATE',
-        datosNuevos: { numeroFactura: c.numeroFactura, origen: 'import' },
+        datosNuevos: {
+          numeroFactura: c.numeroFactura,
+          tipoPapel: tipoPorId.get(c.idTipoPapel)?.nombre,
+          origen: 'import',
+        },
       });
     }
 

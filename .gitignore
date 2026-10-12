@@ -27,3 +27,6 @@ apps/web/src/assets/OLD-*.png
 
 # Archivos de bloqueo temporales de Word/Excel (se crean al abrir un .docx/.xlsx)
 ~$*
+
+# El manual del operador se entrega aparte, no se versiona (decisión del usuario 2026-10-10)
+docs/*.docx

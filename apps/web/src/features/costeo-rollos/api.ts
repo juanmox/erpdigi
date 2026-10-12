@@ -30,14 +30,22 @@ export const costeoRollosApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  buscarFactura: (numeroFactura: string) =>
-    apiFetch<FacturaConRollos>(`/costeo/rollos/facturas/${encodeURIComponent(numeroFactura)}`),
+  /**
+   * Devuelve TODOS los artículos cargados con ese número: el mismo número de
+   * factura puede estar cargado con varios tipos de papel.
+   */
+  buscarFacturas: (numeroFactura: string) =>
+    apiFetch<{ facturas: FacturaConRollos[] }>(
+      `/costeo/rollos/facturas/${encodeURIComponent(numeroFactura)}`,
+    ),
   editarIngreso: (
     idFacturaPapel: number,
     body: {
       numeroFactura?: string
+      /** Del artículo entero: cambiarlo re-tipa todos sus rollos. */
+      idTipoPapel?: number
       fecha?: string
-      rollos: { idRolloPapel: number; idTipoPapel: number; yardasIniciales?: number; costoUnitario?: number }[]
+      rollos: { idRolloPapel: number; yardasIniciales?: number; costoUnitario?: number }[]
     },
   ) =>
     apiFetch<FacturaConRollos>(`/costeo/rollos/facturas/${idFacturaPapel}`, {

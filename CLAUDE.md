@@ -2967,6 +2967,81 @@ sin i18n (todo en español).
       dejar de usar la Forma 2 para las OP que se manejen en el ERP. Pendiente de confirmar con el
       usuario.
 
+  - **Una factura puede traer varios artículos: la factura de papel pasa a ser POR TIPO DE PAPEL
+    (2026-10-11)**. Luis cargó una factura con una cantidad de rollos de un papel y, al querer
+    cargar **la misma factura con otro papel**, el sistema no lo dejó — el `UNIQUE` estaba sobre
+    `numero_factura` sola. El apaño con el que siguieron trabajando fue agregarle `-2` al número.
+    - ⚠️ **El apaño no era cosmético: rompía la correspondencia con la etiqueta física.** El código
+      del rollo es `<numero_factura>-<total_rollos>-<secuencia>` (vista `costeo.v_rollo_codigo`, y
+      es lo que viaja a los Google Sheets como NRollo), así que esos rollos quedaron como
+      `140525599-2-20-1` cuando la etiqueta dice factura `140525599`, rollo 1 de 20.
+    - **Lo que cambió es el modelo, no una restricción**: una fila de `costeo.factura_papel` ya no
+      es la factura entera sino el **ARTÍCULO** — lleva su `id_tipo_papel`, su propio `total_rollos`
+      y sus secuencias **desde 1**. El usuario lo confirmó así: *"cada artículo inicia en 1"*, y los
+      rollos ya están etiquetados.
+    - Migración `20261011120000_factura_por_tipo_papel` (+ `rollback.sql`): columna
+      `id_tipo_papel` en `factura_papel` (backfill desde sus rollos, con dos **guards que abortan**
+      si alguna factura tuviera más de un tipo o ninguno), `UNIQUE (numero_factura)` →
+      `UNIQUE (numero_factura, id_tipo_papel)` —más permisivo, no puede invalidar nada ya
+      cargado— y el deshago del apaño: `140525599-2` y `427445698-2` recuperan su número real.
+      **No hizo falta renumerar ningún rollo**: sus secuencias ya eran 1..20, así que el código
+      pasó a coincidir con la etiqueta solo.
+    - **El invariante "el papel del rollo es el de su artículo" lo garantiza la base**, con una
+      **FK compuesta** `(id_factura_papel, id_tipo_papel)` → `factura_papel` — mismo recurso que
+      `(id_orden_produccion, id_empresa)` en la separación por empresa, y como ahí, el UNIQUE
+      redundante del destino existe solo porque Postgres lo exige para apuntarle una FK.
+      - **El `ON UPDATE CASCADE` es deliberado y corrigió mi propia expectativa**: probando las
+        restricciones esperaba que cambiarle el tipo a la factura sin tocar sus rollos fuera
+        rechazado, y fue **aceptado** — el cascade re-tipó los 10 rollos en el mismo UPDATE. Está
+        bien que así sea: es justo lo que necesita corregir un ingreso mal capturado. Verificado
+        que quedan consistentes y que chocar con otro artículo de la misma factura sí se rechaza.
+    - **Defecto latente que esto destapó, en el import** (código ya committeado desde el
+      2026-09-02): agrupaba **solo por número de factura**, así que una plantilla con 48 rollos de
+      un papel y 20 de otro creaba UNA factura con `total_rollos = 68` y secuencias corridas 1..68
+      — los 20 del segundo artículo quedaban como `-68-49`..`-68-68`, sin ninguna relación con su
+      etiqueta. Nunca se había notado porque hasta ahora el UNIQUE impedía llegar a ese caso por
+      la pantalla. Ahora agrupa por `(número, tipo)`.
+    - **Qué cambió en cada punto de entrada**:
+      - `POST /ingreso` acepta el número repetido si el tipo difiere y rechaza con 409 el mismo
+        par, con un mensaje que **dice qué hacer** ("cargalo eligiendo su propio tipo de papel").
+        La pantalla de Ingreso lo explica antes de que pase.
+      - `GET /costeo/rollos/facturas/:numero` devuelve **todos** los artículos (`{facturas: [...]}`),
+        no el primero: devolver uno solo haría editar un artículo creyendo editar el otro. "Corregir
+        ingreso" muestra un selector cuando hay más de uno y **no abre ningún formulario** hasta
+        elegir.
+      - El tipo de papel de "Corregir ingreso" subió de **cada rollo** a la factura: con el modelo
+        nuevo todos los rollos del artículo son del mismo papel, así que N selectores idénticos
+        solo invitaban a dejarlos inconsistentes. Las yardas y el costo siguen siendo por rollo.
+      - El preview del import distingue "ya está cargada **con ese papel**" de "ya está cargada", y
+        marca como error el mismo `(factura, tipo)` repetido dentro del archivo **aunque las
+        cantidades difieran** (son el mismo artículo cargado dos veces). La fecha sigue validándose
+        por **número**, no por artículo: la factura tiene una sola fecha.
+    - **La bitácora habría quedado ambigua y se corrigió de paso**: tres artículos de la misma
+      factura se narraban los tres como "factura de papel QA-F-901". Ahora la etiqueta lleva el
+      papel (`QA-F-901 · DIGITAL PROTECT 100`), y la auditoría guarda el **nombre** del tipo y no su
+      id — además de ser legible, un nombre es la foto del momento y sobrevive a que lo renombren.
+    - ⚠️ **Queda una ambigüedad posible, por fidelidad a la realidad y no por descuido**: dos
+      artículos de la misma factura con **la misma cantidad** de rollos dan códigos idénticos
+      (`X-20-1` dos veces). Hoy no pasa (48/20 y 54/20), y si pasara, las etiquetas físicas
+      también serían ambiguas — inventarle un desambiguador al ERP lo separaría de lo que dice la
+      etiqueta, que es lo que este cambio vino a arreglar. El usuario descartó el otro caso:
+      *"hasta el momento ha sido siempre un tipo de papel distinto"*.
+    - **Verificado** con usuario desechable ADMIN (creado y borrado en la misma sesión): mismo
+      número + mismo tipo → 409; mismo número + otro tipo → 201 con secuencias desde 1; búsqueda
+      devolviendo los 3 artículos de un número; edición cambiando el tipo del artículo (los 2
+      rollos re-tipados) y chocando con un hermano (409); tipo inexistente 400; número inexistente
+      404. Import real contra la plantilla descargada: las 7 reglas del preview una por una
+      —incluidas **dos filas de la misma factura con papeles distintos, ambas OK**—, y los rechazos
+      server-side del `aplicar` (par repetido 400, par ya cargado 409, dos fechas 400, sin escribir
+      nada). En la base, los 7 artículos de prueba numerados 1..n cada uno y **cero rollos con un
+      tipo distinto al de su artículo**. En navegador a 1500/820/390 px: el selector con los 3
+      artículos, un solo selector de papel para 2 bloques de rollo, cero desborde y consola limpia
+      (los dos 401 son el `auth/refresh` previo al login, ya documentado). Datos y usuario de
+      prueba borrados — la base volvió a sus 4 facturas y 73 rollos.
+    - *Pendiente del usuario*: quedan en local 2 usuarios de prueba de una sesión del 2026-08-31
+      (`qa_admin`, `qa_cotiz`, sin registros de auditoría). No se tocaron porque no son de esta
+      sesión.
+
 ### Despliegue del 2026-09-30 (`920cf14`) — ejecutado por SSH
 
 `920cf14` (reporte de consumo por OP, listado de órdenes, marca por empresa y corte del espejo a

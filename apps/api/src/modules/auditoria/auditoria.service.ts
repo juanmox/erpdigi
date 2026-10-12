@@ -287,9 +287,22 @@ export class AuditoriaService {
         case 'costeo.rollo_papel': {
           const r = await this.prisma.facturaPapel.findMany({
             where: { idFacturaPapel: { in: ids } },
-            select: { idFacturaPapel: true, numeroFactura: true },
+            select: {
+              idFacturaPapel: true,
+              numeroFactura: true,
+              // El tipo de papel es parte de la identidad: una factura puede
+              // tener varios artículos y sin esto los tres se narrarían con la
+              // misma etiqueta, sin forma de saber a cuál se le tocó qué.
+              tipoPapel: { select: { nombre: true } },
+            },
           });
-          r.forEach((x) => guardar(entidad, x.idFacturaPapel, x.numeroFactura));
+          r.forEach((x) =>
+            guardar(
+              entidad,
+              x.idFacturaPapel,
+              `${x.numeroFactura} · ${x.tipoPapel.nombre}`,
+            ),
+          );
           break;
         }
         case 'costeo.montaje_rollo': {

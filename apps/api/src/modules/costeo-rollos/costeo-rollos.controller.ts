@@ -130,10 +130,11 @@ export class CosteoRollosController {
     return this.service.ingreso(dto, usuario.sub);
   }
 
+  /** Devuelve TODOS los artículos cargados con ese número: ver el servicio. */
   @RequirePermissions('costeo.rollo.ver')
   @Get('facturas/:numeroFactura')
-  buscarFactura(@Param('numeroFactura') numeroFactura: string) {
-    return this.service.buscarFacturaPorNumero(numeroFactura);
+  buscarFacturas(@Param('numeroFactura') numeroFactura: string) {
+    return this.service.buscarFacturasPorNumero(numeroFactura);
   }
 
   /**

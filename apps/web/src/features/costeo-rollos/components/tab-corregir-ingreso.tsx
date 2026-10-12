@@ -10,9 +10,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
 import { costeoRollosApi } from '../api'
-import type { RolloDeFactura } from '../types'
+import type { FacturaConRollos, RolloDeFactura } from '../types'
 
-type FilaEdicion = { idTipoPapel: string; yardasIniciales: string; costoUnitario: string }
+// El tipo de papel no está acá: es del ARTÍCULO entero (ver abajo), no de cada
+// rollo. Lo que sí varía rollo por rollo son las yardas y el costo.
+type FilaEdicion = { yardasIniciales: string; costoUnitario: string }
 
 export function TabCorregirIngreso() {
   const queryClient = useQueryClient()
@@ -33,9 +35,14 @@ export function TabCorregirIngreso() {
   const [numeroBuscar, setNumeroBuscar] = useState('')
   const [buscando, setBuscando] = useState(false)
   const [errorBusqueda, setErrorBusqueda] = useState<string | null>(null)
-  const [factura, setFactura] = useState<Awaited<ReturnType<typeof costeoRollosApi.buscarFactura>> | null>(null)
+  // Un número de factura puede tener varios artículos (uno por tipo de papel),
+  // así que la búsqueda devuelve una lista y hay que elegir cuál corregir.
+  // Quedarse con el primero sin preguntar sería editar uno creyendo editar otro.
+  const [candidatas, setCandidatas] = useState<FacturaConRollos[]>([])
+  const [factura, setFactura] = useState<FacturaConRollos | null>(null)
 
   const [numeroFactura, setNumeroFactura] = useState('')
+  const [idTipoPapel, setIdTipoPapel] = useState('')
   const [fecha, setFecha] = useState('')
   const [filas, setFilas] = useState<Record<number, FilaEdicion>>({})
   const [guardando, setGuardando] = useState(false)
@@ -45,11 +52,11 @@ export function TabCorregirIngreso() {
   useEffect(() => {
     if (!factura) return
     setNumeroFactura(factura.numeroFactura)
+    setIdTipoPapel(String(factura.idTipoPapel))
     setFecha(factura.fecha.slice(0, 10))
     const nuevasFilas: Record<number, FilaEdicion> = {}
     for (const r of factura.rollos) {
       nuevasFilas[r.idRolloPapel] = {
-        idTipoPapel: String(r.idTipoPapel),
         yardasIniciales: r.yardasIniciales ?? '',
         costoUnitario: r.costoUnitario ?? '',
       }
@@ -58,6 +65,17 @@ export function TabCorregirIngreso() {
     setExito(null)
     setError(null)
   }, [factura])
+
+  /**
+   * Vuelve a traer los artículos de ese número y se queda en el mismo que
+   * estaba abierto. Hace falta porque la búsqueda devuelve varios y después de
+   * guardar o de marcar rollos hay que refrescar sin perder de vista cuál era.
+   */
+  async function recargar(numero: string, idFacturaPapel: number) {
+    const { facturas } = await costeoRollosApi.buscarFacturas(numero)
+    setCandidatas(facturas)
+    setFactura(facturas.find((f) => f.idFacturaPapel === idFacturaPapel) ?? facturas[0] ?? null)
+  }
 
   async function marcarFuera(marcar: boolean) {
     if (!factura) return
@@ -80,7 +98,7 @@ export function TabCorregirIngreso() {
       })
       // El panel y la lista de disponibles cambian: un rollo menos para montar.
       await queryClient.invalidateQueries({ queryKey: ['rollos'] })
-      setFactura(await costeoRollosApi.buscarFactura(factura.numeroFactura))
+      await recargar(factura.numeroFactura, factura.idFacturaPapel)
       if (marcar) setMotivoFuera('')
     } catch (e) {
       setMsgFuera({
@@ -97,9 +115,12 @@ export function TabCorregirIngreso() {
     setBuscando(true)
     setErrorBusqueda(null)
     setFactura(null)
+    setCandidatas([])
     try {
-      const resultado = await costeoRollosApi.buscarFactura(numeroBuscar.trim())
-      setFactura(resultado)
+      const { facturas } = await costeoRollosApi.buscarFacturas(numeroBuscar.trim())
+      setCandidatas(facturas)
+      // Con un solo artículo no hay nada que elegir: se abre directo.
+      setFactura(facturas.length === 1 ? facturas[0] : null)
     } catch (err) {
       setErrorBusqueda(err instanceof ApiError ? err.message : 'Error al buscar la factura')
     } finally {
@@ -118,15 +139,16 @@ export function TabCorregirIngreso() {
     try {
       const actualizado = await costeoRollosApi.editarIngreso(factura.idFacturaPapel, {
         numeroFactura: numeroFactura !== factura.numeroFactura ? numeroFactura : undefined,
+        idTipoPapel: Number(idTipoPapel) !== factura.idTipoPapel ? Number(idTipoPapel) : undefined,
         fecha: fecha ? new Date(fecha).toISOString() : undefined,
         rollos: factura.rollos.map((r: RolloDeFactura) => ({
           idRolloPapel: r.idRolloPapel,
-          idTipoPapel: Number(filas[r.idRolloPapel].idTipoPapel),
           yardasIniciales: filas[r.idRolloPapel].yardasIniciales ? Number(filas[r.idRolloPapel].yardasIniciales) : undefined,
           costoUnitario: filas[r.idRolloPapel].costoUnitario ? Number(filas[r.idRolloPapel].costoUnitario) : undefined,
         })),
       })
-      setFactura(actualizado)
+      // El número pudo haber cambiado: la lista se rearma con el nuevo.
+      await recargar(actualizado.numeroFactura, actualizado.idFacturaPapel)
       setExito('Ingreso corregido correctamente.')
       queryClient.invalidateQueries({ queryKey: ['costeo-rollos'] })
     } catch (err) {
@@ -162,6 +184,34 @@ export function TabCorregirIngreso() {
           )}
         </CardContent>
       </Card>
+
+      {candidatas.length > 1 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Esta factura trae {candidatas.length} artículos — elegí cuál corregir
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-ink-faint text-xs">
+              Una misma factura puede traer varios tipos de papel. Cada uno se cargó aparte, con sus
+              rollos numerados desde el 1.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {candidatas.map((c) => (
+                <Button
+                  key={c.idFacturaPapel}
+                  size="sm"
+                  variant={factura?.idFacturaPapel === c.idFacturaPapel ? 'default' : 'outline'}
+                  onClick={() => setFactura(c)}
+                >
+                  {c.tipoPapel.nombre} · {c.totalRollos} rollo(s)
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {factura && !factura.editable && (
         <Alert variant="destructive">
@@ -263,7 +313,9 @@ export function TabCorregirIngreso() {
       {factura && factura.editable && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Corregir ingreso — {factura.rollos.length} rollos</CardTitle>
+            <CardTitle className="text-base">
+              Corregir ingreso — {factura.tipoPapel.nombre}, {factura.rollos.length} rollos
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {exito && (
@@ -277,7 +329,7 @@ export function TabCorregirIngreso() {
               </Alert>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <Label className="mb-1 block text-xs">Número de factura</Label>
                 <Input value={numeroFactura} onChange={(e) => setNumeroFactura(e.target.value)} />
@@ -286,31 +338,31 @@ export function TabCorregirIngreso() {
                 <Label className="mb-1 block text-xs">Fecha</Label>
                 <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
               </div>
+              {/* Uno solo para todo el artículo, no uno por rollo: todos los
+                  rollos de este ingreso son del mismo papel —lo garantiza la
+                  base— así que cambiarlo acá los cambia a todos. */}
+              <div className="sm:col-span-2">
+                <Label className="mb-1 block text-xs">Tipo de papel (de los {factura.rollos.length} rollos)</Label>
+                <Select value={idTipoPapel} onValueChange={setIdTipoPapel}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tiposPapel?.map((t) => (
+                      <SelectItem key={t.idTipoPapel} value={String(t.idTipoPapel)}>
+                        {t.nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="space-y-2">
               {factura.rollos.map((r) => (
                 <div key={r.idRolloPapel} className="rounded-md border border-border p-3">
                   <p className="mb-2 text-xs font-medium text-ink-muted">Rollo #{r.secuencia}</p>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <Label className="mb-1 block text-xs">Tipo de papel</Label>
-                      <Select
-                        value={filas[r.idRolloPapel]?.idTipoPapel ?? ''}
-                        onValueChange={(v) => setFila(r.idRolloPapel, 'idTipoPapel', v)}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {tiposPapel?.map((t) => (
-                            <SelectItem key={t.idTipoPapel} value={String(t.idTipoPapel)}>
-                              {t.nombre}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label className="mb-1 block text-xs">Yardas iniciales</Label>
                       <Input
