@@ -55,20 +55,6 @@ ALTER TABLE costeo.factura_papel
   FOREIGN KEY (id_tipo_papel) REFERENCES costeo.tipo_papel(id_tipo_papel)
   ON UPDATE CASCADE ON DELETE RESTRICT;
 
--- Deshace el apaño del "-2". Los rollos de esas facturas ya están numerados
--- desde 1, así que no hay que renumerar nada: el código pasa de
--- `140525599-2-20-1` a `140525599-20-1`, que es lo que dice la etiqueta.
--- El NOT EXISTS lo deja sin efecto si el par (número real, tipo) ya existiera
--- —no se puede dar hoy, pero así la migración no falla si alguien lo arregló a
--- mano antes.
-UPDATE costeo.factura_papel f
-   SET numero_factura = left(f.numero_factura, length(f.numero_factura) - 2)
- WHERE f.numero_factura IN ('140525599-2', '427445698-2')
-   AND NOT EXISTS (
-     SELECT 1 FROM costeo.factura_papel o
-      WHERE o.numero_factura = left(f.numero_factura, length(f.numero_factura) - 2)
-        AND o.id_tipo_papel = f.id_tipo_papel);
-
 -- El UNIQUE deja de ser por número y pasa a ser por (número, tipo de papel).
 -- Es MÁS permisivo que el anterior, así que no puede invalidar datos que ya
 -- estén cargados.
@@ -76,6 +62,25 @@ DROP INDEX costeo.factura_papel_numero_factura_key;
 
 CREATE UNIQUE INDEX factura_papel_numero_factura_id_tipo_papel_key
   ON costeo.factura_papel (numero_factura, id_tipo_papel);
+
+-- Deshace el apaño del "-2", y va DESPUÉS del swap de arriba a propósito:
+-- con el UNIQUE viejo todavía puesto, renombrar `427445698-2` a `427445698`
+-- choca contra la factura que ya tiene ese número (error 23505). Con el UNIQUE
+-- nuevo ya en su lugar, las dos conviven porque su tipo de papel difiere.
+--
+-- Los rollos de esas facturas ya están numerados desde 1, así que no hay que
+-- renumerar nada: el código pasa de `140525599-2-20-1` a `140525599-20-1`, que
+-- es lo que dice la etiqueta.
+--
+-- El NOT EXISTS lo deja sin efecto si el par (número real, tipo) ya existiera,
+-- por ejemplo si alguien lo arregló a mano antes.
+UPDATE costeo.factura_papel f
+   SET numero_factura = left(f.numero_factura, length(f.numero_factura) - 2)
+ WHERE f.numero_factura IN ('140525599-2', '427445698-2')
+   AND NOT EXISTS (
+     SELECT 1 FROM costeo.factura_papel o
+      WHERE o.numero_factura = left(f.numero_factura, length(f.numero_factura) - 2)
+        AND o.id_tipo_papel = f.id_tipo_papel);
 
 -- Lo que sigue es lo que garantiza EN LA BASE que el tipo de papel de un rollo
 -- sea siempre el de su artículo: una FK compuesta hacia el par de la factura.

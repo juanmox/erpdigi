@@ -3042,6 +3042,48 @@ sin i18n (todo en español).
       (`qa_admin`, `qa_cotiz`, sin registros de auditoría). No se tocaron porque no son de esta
       sesión.
 
+### Despliegue del 2026-10-11 (`b327756`) — FALLÓ en la migración, corregido
+
+El deploy de "una factura puede traer varios artículos" se detuvo en
+`migrate deploy` con **23505**: `427445698-2 → 427445698` chocaba contra
+`factura_papel_numero_factura_key`, porque la migración renombraba las facturas
+del apaño **antes** de cambiar el UNIQUE por el compuesto.
+
+- ⚠️ **En local nunca se disparó porque ahí no hay facturas con "-2"**: ese UPDATE
+  era un no-op, así que los tres guards y las pruebas de restricciones corrieron
+  sobre datos que no ejercían el caso. **La lección es sobre la forma de los
+  datos, no sobre el SQL**: una migración que además corrige datos hay que
+  probarla contra la forma del ambiente donde va a correr. Se probó después en
+  una **base desechable** con el esqueleto viejo y las 4 facturas reales — ahí el
+  arreglo se ve funcionar, y es la prueba que faltaba.
+- **El fallo fue ATÓMICO**: no quedó ni la columna, ni los constraints, ni el
+  renombre a medias — Prisma envolvió la migración en una transacción
+  (verificado objeto por objeto antes de tocar nada). La nota del `42P10` de
+  septiembre, donde el DDL **sí** había quedado aplicado, describe un caso real,
+  así que **no se puede generalizar en ninguno de los dos sentidos**: hay que
+  mirar qué quedó antes de reintentar.
+- **Producción no quedó rota en ningún momento.** El script se detuvo antes del
+  build y del `pm2 restart`, así que `dist/` y PM2 siguieron con el build
+  anterior y el ingreso de facturas nunca dejó de funcionar. Es el "estado
+  seguro" que ya describía la nota del `prisma generate`, esta vez con la
+  migración revertida en lugar de aplicada.
+- Recuperación: `prisma migrate resolve --rolled-back` (sin SQL de limpieza,
+  porque no había nada aplicado), arreglo del orden, y reintento. Respaldo previo
+  en `~/backups/costeo-antes-factura-por-tipo-20261011-225635.sql`.
+- ⚠️ **En local la migración ya estaba aplicada, así que editarla desalineó su
+  checksum — y NO se revirtió.** El guard del propio `rollback.sql` lo frenó con
+  el motivo correcto: el usuario ya había probado la funcionalidad ahí (cargó la
+  factura `123` con dos tipos de papel), y volver al schema viejo exigía destruir
+  esa prueba. Se verificó objeto por objeto que el schema de local es **idéntico
+  al estado final del archivo corregido** —la corrección cambia el orden, no el
+  resultado— y se realineó el checksum en `_prisma_migrations`. Es la excepción a
+  "nunca se edita una migración ya aplicada", y vale solo porque el estado final
+  es demostrablemente el mismo y la migración **no había aplicado en producción**.
+- **Producción ya tenía 7 facturas, no las 4 medidas al diseñar**: Luis cargó tres
+  más (`17714844`, `255107`, `3154397594`), cada una con un solo tipo de papel.
+  Los 187 rollos siguen todos `EN_BODEGA` con **0 montajes y 0 consumos**, así que
+  el renombre no arrastra nada.
+
 ### Despliegue del 2026-09-30 (`920cf14`) — ejecutado por SSH
 
 `920cf14` (reporte de consumo por OP, listado de órdenes, marca por empresa y corte del espejo a
