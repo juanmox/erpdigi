@@ -3175,6 +3175,70 @@ del apaño **antes** de cambiar el UNIQUE por el compuesto.
         disponibles—, no un fallo del agrupado. Se repitió esperando el encabezado del grupo. Con
         react-query hay que esperar un elemento que **dependa de los datos**, no el contenedor.
 
+  - **Re-subir la misma plantilla de Órdenes ya no duplica la orden (2026-10-13)**. Kevin subió
+    una plantilla de 16 filas **tres veces** por descuido y entró entera las tres veces: 48 líneas
+    y **382 piezas fantasma esperando en la cola de impresión**, 230 de ellas en una sola OP.
+    - ⚠️ **Por qué se permitió, y es una regresión mía del 2026-10-08.** Hasta ese día el Item
+      venía **tecleado en la plantilla**, así que `UNIQUE (id_empresa, codigo_line)` rechazaba la
+      segunda carga: la protección contra re-subir el archivo era un **efecto secundario** de que
+      el Item lo pusiera el cliente. Al pasarlo a generarse en el servidor
+      (`<orden de compra>-<n>`, continuando desde el último) para eliminar los huecos del 9% de
+      las OC, una re-subida pasó a generar `-4 -5 -6` y ya no choca con nada. El comentario de ese
+      cambio incluso **dice** que los Item existentes se usan "para saber por dónde sigue la
+      numeración, no para marcar duplicados" — pero no se reemplazó la protección por ninguna
+      otra. El usuario lo notó solo porque **los correlativos de la columna D seguían subiendo**.
+    - **Fue el único import con ese hueco**, verificado uno por uno: rollos rechaza
+      `(factura, tipo de papel)` ya cargada, consumo estándar **reemplaza** en vez de duplicar,
+      desarrollos marca `yaCargada` por línea, e insumos/productos van por unicidad de `codigo`.
+      Lo que distinguía a Órdenes es que su protección dependía de una llave **que venía del
+      cliente** y después se quitó.
+    - ⚠️ **El discriminador NO puede ser "hay dos líneas iguales", y medirlo evitó romper la
+      operación.** El usuario planteó que lo que distingue dos filas parecidas es el `Producto
+      (código)` — y **es cierto en general**: la firma incluye el producto, y es lo que separa dos
+      líneas con las mismas tallas pero producto distinto. Pero en las filas **6/7 y 15/16 de
+      Excel** de la plantilla de Kevin (la 2ª/3ª y la 11ª/12ª de datos — la plantilla tiene 4 filas
+      de preámbulo, y confundir las dos numeraciones ya causó un malentendido en la sesión) el
+      producto es **el mismo**: verificadas las 33 columnas una por una, son idénticas en todas.
+      Un tercer caso muestra por qué las tallas también van en la firma: las filas 9 y 11 de Excel
+      son el mismo producto en la misma OP pero con cantidades distintas, así que son dos líneas
+      legítimas y distintas. Y eso no es un error de quien armó el archivo sino **la norma**, medido
+      sobre producción: **197 grupos de líneas idénticas en 89 OP, 499 líneas, 275 ya impresas** —
+      incluido un grupo de **10 idénticas, las 10 impresas**. Nadie imprime 10 veces lo mismo por
+      accidente: cada línea es un renglón del pedido del cliente, así que la misma prenda pedida 3
+      veces entra como 3 líneas y no como una con cantidad 3.
+      - **Consecuencia concreta**: la regla estricta —marcar como duplicada cualquier fila
+        repetida *dentro del archivo*— habría **rechazado 302 líneas legítimas en 89 órdenes**.
+      - Por eso se compara contra **lo que ya está en la base**, y por **multiplicidad**: si el
+        archivo trae 2 iguales y la base ya tiene 2, las 2 son duplicadas; si la base tiene 1,
+        solo 1 lo es. Así **se sigue pudiendo agregar ítems nuevos a una OP ya cargada**, que es un
+        caso legítimo y frecuente.
+      - La firma es `(OP, producto, conjunto exacto de talla→cantidad)`, con las tallas por
+        **nombre** (es lo que trae el archivo) y ordenadas, para que el orden de las columnas no
+        la cambie.
+    - **La guarda va en el preview Y dentro de la transacción del `aplicar`**, no solo en el
+      preview: su salida pasa por el navegador y vuelve. Eso es lo que de verdad cierra el caso,
+      porque cubre el camino por el que más fácil se repite el accidente — **un segundo clic en
+      "Aplicar" sobre el diálogo ya abierto**, cuyo preview se corrió cuando todavía no estaba
+      cargada y por lo tanto venía sin error.
+    - **Distinguir el accidente de las gemelas legítimas exigió medir por TANDA, no por firma.**
+      La auditoría sobre toda la base mostró firmas repetidas también en las cargas del 11/38 y
+      12:53 — pero ahí `primera = ultima`, o sea se crearon en el **mismo instante**: son gemelas
+      dentro de un archivo. Las del accidente abarcan **tres instantes** separados por 40 s.
+      Agrupando por firma **y contando instantes distintos**, el resultado fue tajante: **solo
+      esas 6 OP estaban afectadas**, nada más en producción.
+    - **Limpieza**: las 32 líneas sobrantes tenían **0 consumos** —los 23 que ya había capturado
+      `santiago` cayeron todos sobre las 16 de la primera tanda— así que el borrado fue limpio.
+      Hecho por ids explícitos (2099-2130) y no por agregación, en una transacción con guardas que
+      abortaban si alguna tenía consumo, era de otra OP, o no eran exactamente 32. `piezas` volvió
+      de 573 a **191**, que es lo que suma el archivo. Respaldo previo en
+      `~/backups/costeo-antes-quitar-duplicados-20261013-152153.sql`.
+    - **Verificado**: subiendo el mismo archivo contra una base que ya lo tiene, el preview marca
+      las **16 de 16** con su motivo y el diálogo deja el botón en **"Aplicar (0)" deshabilitado**;
+      el `aplicar` con las 16 "limpiadas" a mano (simulando el doble clic y el POST armado) da
+      **400** nombrando las OP; una mezcla de 15 repetidas + 1 nueva también da 400; y **un ítem
+      genuinamente nuevo sobre una OP ya cargada entra normal (201)**, tomando el Item `-4`. Cero
+      desborde a 1500 y 390 px, consola limpia. Datos y usuario de prueba borrados.
+
 ### Despliegue del 2026-09-30 (`920cf14`) — ejecutado por SSH
 
 `920cf14` (reporte de consumo por OP, listado de órdenes, marca por empresa y corte del espejo a

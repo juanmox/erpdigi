@@ -754,9 +754,118 @@ export class CosteoOrdenesService {
         f.error = `La OP ${f.opTexto} tiene filas con "${ENCABEZADO_EN_BLANCO}" distinto. El papel en blanco es por orden, no por línea: poné el mismo valor en todas las filas de la OP.`;
     }
 
+    for (const f of await this.filasYaCargadas(filas, idEmpresa))
+      f.error =
+        `Este ítem ya está cargado en la OP ${f.opTexto} (mismo producto y mismas cantidades por talla). ` +
+        'Si esta plantilla ya se subió antes, no hace falta volver a subirla; si de verdad es un ítem nuevo, ' +
+        'cargalo aparte.';
+
     asignarItems(filas, codigosExistentes);
 
     return { filas };
+  }
+
+  /**
+   * Marca con error las filas que YA están cargadas, para que volver a subir la
+   * misma plantilla no duplique la orden.
+   *
+   * ⚠️ Esta guarda hace falta **desde el 2026-10-08**. Antes el Item venía
+   * TECLEADO en la plantilla, así que `UNIQUE (id_empresa, codigo_line)`
+   * rechazaba la segunda carga: la protección contra re-subir el archivo era un
+   * *efecto secundario* de que el Item lo pusiera el cliente. Al pasar a
+   * generarlo el servidor (`<orden de compra>-<n>`, continuando desde el
+   * último), una re-subida genera `-4 -5 -6` y no choca con nada, así que
+   * entraba en silencio — y la nota de ese cambio decía explícitamente que los
+   * Item existentes ya no servían "para marcar duplicados", sin reemplazar la
+   * protección por otra. Pasó de verdad el 2026-10-13: 16 filas cargadas 3
+   * veces, 382 piezas fantasma esperando en la cola de impresión.
+   *
+   * ⚠️ El discriminador **no** es "hay dos líneas iguales": una plantilla puede
+   * traer legítimamente dos filas idénticas (dos prendas iguales del mismo
+   * pedido) y en los datos reales las trae. Es "esta fila ya existe en la base",
+   * comparada por **multiplicidad**: si el archivo trae 2 filas iguales y la
+   * base ya tiene 2, las 2 son duplicadas; si la base tiene 1, solo 1 lo es.
+   * Así se sigue pudiendo agregar ítems nuevos a una OP ya cargada, que es un
+   * caso legítimo y frecuente.
+   */
+  private async filasYaCargadas(
+    filas: FilaPreviewLinea[],
+    idEmpresa: number,
+    // Recibe el cliente para poder correr DENTRO de la transacción del
+    // `aplicar` — si leyera por fuera podría ver un estado distinto del que
+    // está a punto de escribir. Mismo criterio que `resolverReemplazo()` en
+    // costeo-estandar.
+    cli: Pick<PrismaService, 'lineaProduccion'> = this.prisma,
+  ): Promise<FilaPreviewLinea[]> {
+    const candidatas = filas.filter(
+      (f) => !f.error && f.opAnio !== null && f.opCorrelativo !== null,
+    );
+    if (candidatas.length === 0) return [];
+
+    const lineasExistentes = await cli.lineaProduccion.findMany({
+      where: {
+        idEmpresa,
+        ordenProduccion: {
+          OR: [
+            ...new Set(candidatas.map((f) => `${f.opAnio}|${f.opCorrelativo}`)),
+          ].map((k) => {
+            const [anio, correlativo] = k.split('|').map(Number);
+            return { anio, correlativo };
+          }),
+        },
+      },
+      select: {
+        ordenProduccion: { select: { anio: true, correlativo: true } },
+        idProducto: true,
+        tallas: {
+          select: { cantidad: true, talla: { select: { nombre: true } } },
+        },
+      },
+    });
+
+    // La firma es la OP + el producto + el conjunto exacto de talla→cantidad.
+    // Las tallas se comparan por NOMBRE porque es lo que trae el archivo, y
+    // ordenadas para que el orden de las columnas no cambie la firma.
+    const firma = (
+      anio: number,
+      correlativo: number,
+      idProducto: number,
+      tallas: { talla: string; cantidad: number }[],
+    ) =>
+      [
+        anio,
+        correlativo,
+        idProducto,
+        tallas
+          .filter((t) => t.cantidad > 0)
+          .map((t) => `${t.talla.toUpperCase()}:${t.cantidad}`)
+          .sort()
+          .join(','),
+      ].join('|');
+
+    const disponibles = new Map<string, number>();
+    for (const l of lineasExistentes) {
+      if (l.idProducto === null) continue;
+      const k = firma(
+        l.ordenProduccion.anio,
+        l.ordenProduccion.correlativo,
+        l.idProducto,
+        l.tallas.map((t) => ({ talla: t.talla.nombre, cantidad: t.cantidad })),
+      );
+      disponibles.set(k, (disponibles.get(k) ?? 0) + 1);
+    }
+    if (disponibles.size === 0) return [];
+
+    const duplicadas: FilaPreviewLinea[] = [];
+    for (const f of candidatas) {
+      if (f.idProducto === null) continue;
+      const k = firma(f.opAnio!, f.opCorrelativo!, f.idProducto, f.tallas);
+      const quedan = disponibles.get(k) ?? 0;
+      if (quedan === 0) continue;
+      disponibles.set(k, quedan - 1);
+      duplicadas.push(f);
+    }
+    return duplicadas;
   }
 
   async aplicarImportarLineas(
@@ -790,6 +899,21 @@ export class CosteoOrdenesService {
           throw new BadRequestException(
             `La fila ${f.fila} no tiene orden de compra, así que no se le puede asignar un Item`,
           );
+      }
+
+      // Se revalida acá, dentro de la transacción, y no solo en el preview: su
+      // salida pasa por el navegador y vuelve. Esto es lo que de verdad frena
+      // el accidente, porque cubre los dos caminos por los que llega una
+      // plantilla repetida — un segundo clic en "Aplicar" sobre el mismo
+      // diálogo ya abierto (el preview se corrió cuando todavía no estaba
+      // cargada, así que venía sin error), y un POST armado a mano.
+      const repetidas = await this.filasYaCargadas(filas, idEmpresa, tx);
+      if (repetidas.length > 0) {
+        const ops = [...new Set(repetidas.map((f) => f.opTexto))].join(', ');
+        throw new BadRequestException(
+          `${repetidas.length} de las ${filas.length} líneas ya están cargadas (OP ${ops}). ` +
+            'Parece que esta plantilla ya se subió. Volvé a generar el preview para ver qué falta cargar.',
+        );
       }
 
       const idOrdenPorCodigo = new Map<string, number>();
