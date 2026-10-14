@@ -43,6 +43,12 @@ export const costeoConsumoApi = {
       { method: 'PATCH', body: JSON.stringify({ consumoEnBlanco, enBlancoYd }) },
     ),
 
+  /** Anulación en tanda: una talla, un ítem completo o la orden entera. */
+  anularLote: (ids: number[], motivo: string, quitarTallaDeLaOrden: boolean) =>
+    apiFetch<{ anulados: number; noAplicables: number; tallasQuitadasDeLaOrden: number }>(
+      '/costeo/consumo-papel/anular-lote',
+      { method: 'PATCH', body: JSON.stringify({ ids, motivo, quitarTallaDeLaOrden }) },
+    ),
   anular: (idConsumoPapel: number, motivo?: string) =>
     apiFetch<{ anulado: boolean }>(`/costeo/consumo-papel/${idConsumoPapel}/anular`, {
       method: 'PATCH',

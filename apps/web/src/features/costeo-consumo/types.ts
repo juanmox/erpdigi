@@ -9,6 +9,8 @@ export interface TallaConsumo {
   enguiamientoYd: number
   yaEnviada: boolean
   idConsumoPapel: number | null
+  /** Lo REGISTRADO; `consumoYd` es lo que el ERP calcularía hoy. */
+  consumoGuardadoYd: number | null
 }
 
 export interface LineaConsumo {

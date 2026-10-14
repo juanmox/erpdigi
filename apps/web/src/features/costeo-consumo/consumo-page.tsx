@@ -14,6 +14,7 @@ import type { GrupoImpresoraPendiente, OrdenPendiente } from './types'
 import { DetalleOrden } from './components/detalle-orden'
 import { TablaPendientes } from './components/tabla-pendientes'
 import { ControlEnBlanco } from './components/control-en-blanco'
+import { ModalCorregir } from './components/modal-corregir'
 import { TarjetaLinea } from './components/tarjeta-linea'
 import type { LineaConsumo, ResultadoLote } from './types'
 import { hace } from './tiempo'
@@ -114,6 +115,9 @@ export function ConsumoPage() {
   // Las OP se cargan en otro módulo. Sin un camino desde acá, quien no encuentra
   // su orden no tiene cómo saber dónde se dan de alta.
   const puedeVerOrdenes = tienePermiso('costeo.orden.ver')
+  // La corrección de registros ya enviados es de supervisión, no de piso.
+  const puedeAnular = tienePermiso('costeo.consumo.anular')
+  const [corrigiendo, setCorrigiendo] = useState(false)
   const queryClient = useQueryClient()
 
   const [texto, setTexto] = useState('')
@@ -227,6 +231,31 @@ export function ConsumoPage() {
       setMensaje({
         tipo: 'error',
         texto: e instanceof ApiError ? e.message : 'No se pudo cambiar el papel en blanco',
+      }),
+  })
+
+  const anularLote = useMutation({
+    mutationFn: (v: { ids: number[]; motivo: string; quitarTalla: boolean }) =>
+      costeoConsumoApi.anularLote(v.ids, v.motivo, v.quitarTalla),
+    onSuccess: (r) => {
+      setCorrigiendo(false)
+      // Invalida también Rollos: anular devuelve papel al rollo del que se
+      // había descontado, así que el panel mostraría un restante viejo.
+      queryClient.invalidateQueries({ queryKey: ['consumo'] })
+      queryClient.invalidateQueries({ queryKey: ['costeo-rollos'] })
+      setMensaje({
+        tipo: 'ok',
+        texto:
+          `${r.anulados} registro(s) anulado(s)` +
+          (r.tallasQuitadasDeLaOrden > 0
+            ? ` · ${r.tallasQuitadasDeLaOrden} talla(s) quitada(s) de la orden`
+            : ''),
+      })
+    },
+    onError: (e) =>
+      setMensaje({
+        tipo: 'error',
+        texto: e instanceof ApiError ? e.message : 'No se pudieron anular los registros',
       }),
   })
 
@@ -597,6 +626,16 @@ export function ConsumoPage() {
         </Alert>
       )}
 
+      {data && puedeAnular && corrigiendo && (
+        <ModalCorregir
+          abierto={corrigiendo}
+          onCerrar={() => setCorrigiendo(false)}
+          data={data}
+          guardando={anularLote.isPending}
+          onAnular={(ids, motivo, quitarTalla) => anularLote.mutate({ ids, motivo, quitarTalla })}
+        />
+      )}
+
       {data && (
         <>
           {/* Cabecera de la OP: identifica lo que se está por descontar y se
@@ -610,12 +649,25 @@ export function ConsumoPage() {
                 <span className="text-muted-foreground text-xs">OC {data.orden.ordenCompra}</span>
               )}
             </div>
-            <div className="text-muted-foreground flex flex-wrap gap-x-3 text-xs">
+            <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               <span>{resumen.total} líneas</span>
               <span>{resumen.enviables} por enviar</span>
               {resumen.completas > 0 && <span>{resumen.completas} enviadas</span>}
               {resumen.bloqueadas > 0 && (
                 <span className="text-destructive">{resumen.bloqueadas} sin estándar</span>
+              )}
+              {/* Corregir lo ya enviado es de supervisión: solo aparece con
+                  `costeo.consumo.anular`, que hoy no tiene ningún rol de piso. */}
+              {puedeAnular && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto h-7"
+                  onClick={() => setCorrigiendo(true)}
+                >
+                  Corregir registros
+                </Button>
               )}
             </div>
 

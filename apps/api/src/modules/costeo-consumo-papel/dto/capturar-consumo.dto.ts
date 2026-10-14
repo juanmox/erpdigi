@@ -3,10 +3,12 @@ import {
   ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
+  IsBoolean,
   IsInt,
   IsISO8601,
   IsOptional,
   IsString,
+  MinLength,
 } from 'class-validator';
 
 export class CapturarConsumoDto {
@@ -62,4 +64,28 @@ export class AnularConsumoDto {
   @IsOptional()
   @IsString()
   motivo?: string;
+}
+
+/**
+ * Anulación en tanda, para corregir capturas malas.
+ *
+ * El motivo es OBLIGATORIO acá, a diferencia de la anulación de a una: una
+ * tanda borra varias cifras de un saque y dentro de un año "¿por qué no está
+ * este consumo?" solo se responde si quedó escrito.
+ */
+export class AnularLoteDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(1000)
+  @IsInt({ each: true })
+  ids!: number[];
+
+  @IsString()
+  @MinLength(3)
+  motivo!: string;
+
+  /** Quitar además la talla de la orden; ver `anularLote()` en el servicio. */
+  @IsOptional()
+  @IsBoolean()
+  quitarTallaDeLaOrden?: boolean;
 }

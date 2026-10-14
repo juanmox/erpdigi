@@ -50,6 +50,12 @@ export interface TallaCalculada {
   /** Ya se envió a producción (índice único parcial de `consumo_papel`). */
   yaEnviada: boolean;
   idConsumoPapel: number | null;
+  /**
+   * Lo que quedó REGISTRADO, distinto de `consumoYd`, que es lo que el ERP
+   * calcularía hoy. Son distintos a propósito: los migrados conservan la cifra
+   * del legacy. La diferencia es lo que delata una captura mala.
+   */
+  consumoGuardadoYd: number | null;
 }
 
 /**
@@ -277,13 +283,22 @@ export class CosteoConsumoPapelService {
         origen: 'PRODUCCION',
         anuladoEn: null,
       },
-      select: { idConsumoPapel: true, idLineaProduccion: true, idTalla: true },
+      select: {
+        idConsumoPapel: true,
+        idLineaProduccion: true,
+        idTalla: true,
+        // Lo que de verdad quedó registrado. Se muestra al lado de lo que el
+        // ERP calcularía, porque la diferencia entre ambos es lo que delata una
+        // captura mala: en `26OP028950` el 4XL tenía 2.0000 yd guardadas contra
+        // un cálculo imposible (ese producto no tiene esa talla).
+        consumoYd: true,
+        enguiamientoYd: true,
+      },
     });
+    // Guarda la fila entera y no solo el id: la pantalla de corrección necesita
+    // además lo que quedó registrado, para contrastarlo con lo calculado.
     const enviadoPor = new Map(
-      yaEnviados.map((c) => [
-        `${c.idLineaProduccion}|${c.idTalla}`,
-        c.idConsumoPapel,
-      ]),
+      yaEnviados.map((c) => [`${c.idLineaProduccion}|${c.idTalla}`, c]),
     );
 
     const lineasCalculadas = lineas.map((l) => {
@@ -302,7 +317,12 @@ export class CosteoConsumoPapelService {
           enguiamientoYd: +(t.cantidad * factorEng).toFixed(4),
           yaEnviada: enviadoPor.has(`${l.idLineaProduccion}|${t.idTalla}`),
           idConsumoPapel:
-            enviadoPor.get(`${l.idLineaProduccion}|${t.idTalla}`) ?? null,
+            enviadoPor.get(`${l.idLineaProduccion}|${t.idTalla}`)
+              ?.idConsumoPapel ?? null,
+          consumoGuardadoYd: (() => {
+            const g = enviadoPor.get(`${l.idLineaProduccion}|${t.idTalla}`);
+            return g ? Number(g.consumoYd) : null;
+          })(),
         };
       });
 
@@ -1483,5 +1503,104 @@ export class CosteoConsumoPapelService {
       datosNuevos: { anulado: true, motivo },
     });
     return { anulado: true };
+  }
+
+  /**
+   * Anula varios consumos de una vez, con un motivo común.
+   *
+   * Existe porque corregir una captura mala de a una fila no escala: el caso
+   * que lo motivó son los registros que vinieron mal desde el legacy, y se
+   * corrigen por talla suelta, por ítem completo o por orden completa. La
+   * pantalla resuelve cuáles ids caen en cada caso y los manda explícitos —
+   * acá no hay un "anular toda la orden", porque un endpoint así se equivoca
+   * de orden una sola vez y se lleva todo por delante.
+   *
+   * ⚠️ `quitarTallaDeLaOrden` existe por un caso concreto: una talla que nunca
+   * debió estar. Las cantidades planificadas de las OP migradas se derivaron de
+   * los propios consumos, así que un consumo malo trajo también una cantidad
+   * mala — el `4XL` de `26OP028950` estaba en los dos lados. Anular solo el
+   * consumo dejaría la talla en la orden para siempre, mostrándose como "sin
+   * enviar" y "sin estándar". Es opcional y NO va por default en el servidor:
+   * si la talla sí se planificó y lo que estuvo mal fue el consumo, borrarla
+   * perdería un dato legítimo.
+   */
+  async anularLote(
+    ids: number[],
+    motivo: string,
+    quitarTallaDeLaOrden: boolean,
+    idUsuarioActor: number,
+    idEmpresa: number,
+  ) {
+    const unicos = [...new Set(ids)];
+    if (unicos.length === 0)
+      throw new BadRequestException('No hay registros para anular');
+
+    // Se re-resuelven contra la empresa del token: la pantalla manda ids, y un
+    // id de otra empresa tiene que verse como inexistente (convención #1).
+    const filas = await this.prisma.consumoPapel.findMany({
+      where: {
+        idConsumoPapel: { in: unicos },
+        anuladoEn: null,
+        ordenProduccion: { idEmpresa },
+      },
+    });
+    if (filas.length === 0)
+      throw new NotFoundException(
+        'Ninguno de esos registros existe, ya estaba anulado, o no es de esta empresa',
+      );
+
+    const ahora = new Date();
+    const resultado = await this.prisma.$transaction(async (tx) => {
+      await tx.consumoPapel.updateMany({
+        where: { idConsumoPapel: { in: filas.map((f) => f.idConsumoPapel) } },
+        data: { anuladoEn: ahora, anuladoPor: idUsuarioActor, motivoAnulacion: motivo },
+      });
+
+      let tallasQuitadas = 0;
+      if (quitarTallaDeLaOrden) {
+        // Solo las combinaciones línea+talla que quedaron SIN ningún consumo
+        // vigente. Si otra fila sigue viva para esa talla, la cantidad
+        // planificada sigue respaldada y no se toca.
+        for (const f of filas) {
+          if (f.idLineaProduccion == null || f.idTalla == null) continue;
+          const quedan = await tx.consumoPapel.count({
+            where: {
+              idLineaProduccion: f.idLineaProduccion,
+              idTalla: f.idTalla,
+              origen: 'PRODUCCION',
+              anuladoEn: null,
+            },
+          });
+          if (quedan > 0) continue;
+          const borradas = await tx.lineaProduccionTalla.deleteMany({
+            where: { idLineaProduccion: f.idLineaProduccion, idTalla: f.idTalla },
+          });
+          tallasQuitadas += borradas.count;
+        }
+      }
+      return { tallasQuitadas };
+    });
+
+    // Una sola entrada de bitácora para la tanda: anular 40 tallas de una orden
+    // es UN acto de corrección, y 40 entradas lo volverían ilegible. El detalle
+    // de qué filas fueron queda en `datosAnteriores`.
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      entidad: 'costeo.consumo_papel',
+      idEntidad: filas.map((f) => f.idConsumoPapel).join(','),
+      accion: 'UPDATE',
+      datosAnteriores: { registros: filas },
+      datosNuevos: {
+        anulados: filas.length,
+        motivo,
+        tallasQuitadasDeLaOrden: resultado.tallasQuitadas,
+      },
+    });
+
+    return {
+      anulados: filas.length,
+      noAplicables: unicos.length - filas.length,
+      tallasQuitadasDeLaOrden: resultado.tallasQuitadas,
+    };
   }
 }

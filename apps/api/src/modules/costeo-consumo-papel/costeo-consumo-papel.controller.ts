@@ -15,6 +15,7 @@ import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CosteoConsumoPapelService } from './costeo-consumo-papel.service';
 import {
   AnularConsumoDto,
+  AnularLoteDto,
   CapturarConsumoDto,
 } from './dto/capturar-consumo.dto';
 import { EditarEnBlancoDto } from './dto/editar-en-blanco.dto';
@@ -107,5 +108,26 @@ export class CosteoConsumoPapelController {
     @EmpresaActual() idEmpresa: number,
   ) {
     return this.service.anular(id, dto.motivo, usuario.sub, idEmpresa);
+  }
+
+  /**
+   * Anulación en tanda. La pantalla manda los ids que correspondan a una talla,
+   * a un ítem completo o a la orden completa — acá no hay un "anular la orden",
+   * ver la nota de `anularLote()`.
+   */
+  @RequirePermissions('costeo.consumo.anular')
+  @Patch('anular-lote')
+  anularLote(
+    @Body() dto: AnularLoteDto,
+    @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
+  ) {
+    return this.service.anularLote(
+      dto.ids,
+      dto.motivo,
+      dto.quitarTallaDeLaOrden === true,
+      usuario.sub,
+      idEmpresa,
+    );
   }
 }
