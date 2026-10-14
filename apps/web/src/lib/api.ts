@@ -46,11 +46,45 @@ async function rawFetch(path: string, options: RequestInit) {
 
 const RUTAS_SIN_REINTENTO = new Set(['/auth/login', '/auth/refresh'])
 
+/** Refresh en curso, para que varios 401 simultáneos esperen al MISMO. */
+let refrescoEnVuelo: Promise<boolean> | null = null
+
+/**
+ * Renueva la sesión una sola vez aunque la pidan N llamadas a la vez.
+ *
+ * ⚠️ Sin esto, el refresh token se reutilizaba y el servidor cerraba la sesión.
+ * El backend ROTA el refresh en cada uso y trata la reutilización de uno ya
+ * rotado como robo de token, revocando todas las sesiones del usuario. Una
+ * pantalla que dispara varias consultas en paralelo (Reposiciones hace 6)
+ * recibe, cuando vence el access token, varios 401 a la vez: cada uno pedía su
+ * propio refresh con la MISMA cookie, el primero la rotaba y los demás llegaban
+ * con la vieja y disparaban la detección de robo.
+ *
+ * El síntoma desconcertaba porque aterrizaba en Inicio sin pedir la contraseña,
+ * y la secuencia explica por qué: el refresh perdedor falla, `intentarRefrescar`
+ * deja el estado vacío, `RutaProtegida` navega a `/login` — y un instante
+ * después el refresh ganador aplica su sesión, con lo cual `RutaPublica` ve al
+ * usuario autenticado y lo rebota de `/login` a `/`. Resultado: la pantalla de
+ * login nunca se llega a ver y lo que estuviera llenando se pierde.
+ *
+ * Reportado el 2026-10-14 sobre el formulario de Reposiciones. Reproducido
+ * contra la API con 6 refresh en paralelo (2 pasaban y 4 devolvían "Sesión
+ * inválida, inicie sesión nuevamente"), y en el navegador: 8 endpoints con 401
+ * simultáneo disparaban 8 refresh antes de esto y 1 por tanda después.
+ */
+function refrescarSesion(): Promise<boolean> {
+  if (!refreshHandler) return Promise.resolve(false)
+  refrescoEnVuelo ??= refreshHandler().finally(() => {
+    refrescoEnVuelo = null
+  })
+  return refrescoEnVuelo
+}
+
 export async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   let res = await rawFetch(path, options)
 
   if (res.status === 401 && !RUTAS_SIN_REINTENTO.has(path) && refreshHandler) {
-    const seRefresco = await refreshHandler()
+    const seRefresco = await refrescarSesion()
     if (seRefresco) {
       res = await rawFetch(path, options)
     }
