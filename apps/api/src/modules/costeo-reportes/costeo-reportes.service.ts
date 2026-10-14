@@ -180,17 +180,33 @@ export class CosteoReportesService {
           vacia(cod, c.ordenProduccion.cliente?.nombre ?? null),
         );
       const r = porOrden.get(cod)!;
-      if (c.origen === 'REPOSICION') r.reposicionYd += Number(c.consumoYd);
-      else {
-        r.impresionYd += Number(c.consumoYd);
-        r.enguiamientoYd += Number(c.enguiamientoYd);
-        r.enBlancoYd += Number(c.enBlancoYd);
-      }
+      // El papel de las reposiciones NO se cuenta acá: se cuenta abajo, desde
+      // la reposición misma. Ver la nota del bucle siguiente.
+      if (c.origen === 'REPOSICION') continue;
+      r.impresionYd += Number(c.consumoYd);
+      r.enguiamientoYd += Number(c.enguiamientoYd);
+      r.enBlancoYd += Number(c.enBlancoYd);
     }
+    /**
+     * Las yardas de la reposición —papel y tela— salen de `costeo.reposicion`,
+     * que es la misma fuente del detalle de abajo.
+     *
+     * ⚠️ El papel se contaba antes desde `consumo_papel`, y eso hacía que el
+     * reporte **se contradijera consigo mismo**: `crear()` solo escribe esa fila
+     * cuando la reposición resolvió un rollo (`idMontajeRollo != null`), así que
+     * las que no lo resolvieron aparecían en el detalle con sus yardas pero
+     * sumaban 0 en el resumen. Con el histórico migrado —que entra sin montaje a
+     * propósito— el resumen mostraba **0.0000 yd contra 3,900.82 del detalle**,
+     * en 3,612 registros. La tela nunca tuvo el problema porque siempre se leyó
+     * de acá, y es justamente lo que delató la asimetría: dos columnas de la
+     * misma fila leyendo de fuentes distintas.
+     */
     for (const rp of reposiciones) {
       const cod = rp.ordenProduccion.codigo;
       if (!porOrden.has(cod)) porOrden.set(cod, vacia(cod, null));
-      porOrden.get(cod)!.telaYd += Number(rp.yardasTela);
+      const r = porOrden.get(cod)!;
+      r.reposicionYd += Number(rp.yardasPapel);
+      r.telaYd += Number(rp.yardasTela);
     }
 
     const resumen = [...porOrden.values()]

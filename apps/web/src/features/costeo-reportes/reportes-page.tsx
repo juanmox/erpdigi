@@ -14,6 +14,34 @@ import type { FiltrosConsumo } from './types'
 
 const TODOS = '__todos__'
 
+/**
+ * Cuántas filas se dibujan por tabla.
+ *
+ * La API es rápida (1.5 s para las 43,833 filas de septiembre + octubre); lo
+ * lento es el navegador dibujándolas, a ~0.7 ms cada una: un mes tardaba 30
+ * segundos en aparecer. Con la carga del histórico eso solo iba a empeorar.
+ *
+ * El tope es el mismo criterio que ya usa la tabla de Órdenes —mostrar un
+ * primer tramo y DECIR cuántas quedaron fuera—, y acá es seguro porque **los
+ * totales se calculan en el servidor** (`data.totales`) y no sumando lo que se
+ * ve: topar la vista no los cambia. El conjunto completo sale por el Excel, que
+ * se arma en el servidor y aguanta la ventana entera en ~10 s.
+ */
+const TOPE_FILAS = 200
+
+/** "(N registro(s))", y si se topó, cuántos se ven y dónde están todos. */
+function ConteoFilas({ total }: { total: number }) {
+  return (
+    <span className="text-muted-foreground text-sm font-normal">
+      ({total.toLocaleString('es-GT')} registro(s)
+      {total > TOPE_FILAS && (
+        <> · se muestran los primeros {TOPE_FILAS}; el Excel los trae todos</>
+      )}
+      )
+    </span>
+  )
+}
+
 const yd = (n: number) =>
   n.toLocaleString('es-GT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
 
@@ -173,7 +201,9 @@ export function ReportesPage() {
       {hayDatos && data && (
         <>
           <section className="space-y-2">
-            <h2 className="text-base font-semibold text-ink">Resumen por orden</h2>
+            <h2 className="text-base font-semibold text-ink">
+              Resumen por orden <ConteoFilas total={data.resumen.length} />
+            </h2>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[860px]">
                 <TableHeader>
@@ -190,7 +220,7 @@ export function ReportesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.resumen.map((r) => (
+                  {data.resumen.slice(0, TOPE_FILAS).map((r) => (
                     <TableRow key={r.codigo}>
                       <TableCell className="font-mono">{r.codigo}</TableCell>
                       <TableCell className="break-words whitespace-normal">{r.cliente ?? '—'}</TableCell>
@@ -219,9 +249,7 @@ export function ReportesPage() {
           <section className="space-y-2">
             <h2 className="text-base font-semibold text-ink">
               Detalle de impresión{' '}
-              <span className="text-muted-foreground text-sm font-normal">
-                ({data.detalleImpresion.length} registro(s))
-              </span>
+              <ConteoFilas total={data.detalleImpresion.length} />
             </h2>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[900px]">
@@ -240,7 +268,7 @@ export function ReportesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.detalleImpresion.map((x, i) => (
+                  {data.detalleImpresion.slice(0, TOPE_FILAS).map((x, i) => (
                     <TableRow key={i}>
                       <TableCell>{fecha(x.fecha)}</TableCell>
                       <TableCell className="font-mono text-xs">{x.orden}</TableCell>
@@ -262,9 +290,7 @@ export function ReportesPage() {
           <section className="space-y-2">
             <h2 className="text-base font-semibold text-ink">
               Detalle de reposiciones{' '}
-              <span className="text-muted-foreground text-sm font-normal">
-                ({data.detalleReposiciones.length} registro(s))
-              </span>
+              <ConteoFilas total={data.detalleReposiciones.length} />
             </h2>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[900px]">
@@ -282,7 +308,7 @@ export function ReportesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.detalleReposiciones.map((x, i) => (
+                  {data.detalleReposiciones.slice(0, TOPE_FILAS).map((x, i) => (
                     <TableRow key={i}>
                       <TableCell>{fecha(x.fecha)}</TableCell>
                       <TableCell className="font-mono text-xs">{x.orden}</TableCell>

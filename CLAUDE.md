@@ -3282,6 +3282,50 @@ del apaño **antes** de cambiar el UNIQUE por el compuesto.
       así que el tope no se rompió. En producción tras desplegar: las 5 impresoras de Gabriela
       libres y MP 7 todavía ocupada por Santiago, que es lo correcto. Usuarios de prueba borrados.
 
+  - **La sesión se caía cada 15 minutos en producción: `COOKIE_SECURE=false` no se respetaba
+    (2026-10-14)**. Reportado como "estando usando el ERP se le reinicia la sesión y pierde el
+    formulario". El usuario descartó inactividad por su cuenta —pasaba antes de esa
+    implementación y con la operaria trabajando—, y tenía razón.
+    - ⚠️ **La causa es un clásico de Zod con variables de entorno**: el schema declaraba
+      `COOKIE_SECURE: z.coerce.boolean()`, y `coerce` aplica `Boolean(valor)`. En JavaScript
+      **`Boolean('false')` es `true`**, porque cualquier string no vacío lo es. O sea que el
+      `.env` de producción decía `false` —lo que este archivo exige desde el primer despliegue—
+      **y el sistema leía `true`**. Lo difícil de ver era justamente eso: el `.env` estaba bien.
+    - **Consecuencia medida, no deducida**: la cookie salía marcada `Secure` sobre un servidor
+      HTTP sin SSL, y el navegador **no la guardaba** — contadas con Playwright, **0 cookies**
+      tras un login exitoso. Sin cookie, `POST /auth/refresh` siempre da 401, así que la sesión
+      **no podía sobrevivir al vencimiento del access token (15 min)**. Le pasaba *porque* estaba
+      activa: es la siguiente petición la que descubre que el token venció.
+    - ⚠️ **Invisible en local**, y eso explica que durara: los navegadores tratan `localhost`
+      como contexto seguro y ahí **sí** aceptan cookies `Secure` por HTTP. Además local no
+      define `COOKIE_SECURE` y corre en `development`, así que nunca tomaba la rama mala.
+    - **Corregido** con un parser explícito (`booleanoDeEntorno`: acepta `true/false/1/0`, con
+      trim y sin distinguir mayúsculas). Un valor que no sea uno de esos **aborta el arranque**
+      en vez de valer `true` en silencio — el mismo criterio que el guard de rutas sin gatear.
+    - **Verificado en producción tras desplegar**, las tres cosas que antes daban mal: el
+      `Set-Cookie` ya no lleva `Secure`, el navegador **sí** guarda la cookie, y recargar la
+      página —que pierde el token en memoria y obliga a renovar— dispara **1 refresh exitoso y
+      mantiene la sesión sin pedir contraseña**.
+    - ⚠️ **Tras el despliegue todos tuvieron que volver a entrar**: nadie tenía cookie guardada.
+
+  - **Y la carrera de refresh que salió buscando lo anterior (2026-10-14)**. `apiFetch` pedía un
+    refresh por CADA 401, sin deduplicar. El backend **rota** el refresh en cada uso y trata la
+    reutilización de uno ya rotado como robo de token, **revocando todas las sesiones**. Una
+    pantalla con varias consultas en paralelo (Reposiciones hace 6) recibe varios 401 a la vez:
+    el primero rotaba la cookie y los demás llegaban con la vieja. Reproducido contra la API —
+    6 refresh simultáneos: **2 pasaban y 4 devolvían "Sesión inválida"**.
+    - **Por qué aterrizaría en Inicio sin pedir contraseña**, que era lo desconcertante del
+      reporte: el refresh perdedor deja el estado vacío y `RutaProtegida` navega a `/login`; un
+      instante después el ganador aplica su sesión, `RutaPublica` ve al usuario autenticado y lo
+      rebota de `/login` a `/`. La pantalla de login nunca se alcanza a ver.
+    - Corregido con un `Promise` compartido: los 401 simultáneos esperan al MISMO refresh.
+      Medido en navegador con 8 endpoints devolviendo 401 de golpe: **8 refresh antes, 1 por
+      tanda después** (comparación hecha revirtiendo el arreglo y repitiendo la prueba).
+    - ⚠️ **Este arreglo NO era la causa de lo reportado**, aunque lo parecía: sin cookie, todos
+      los refresh fallan de entrada y la carrera ni siquiera ocurre. Es real y hacía falta, pero
+      recién pasa a importar ahora que el refresh de verdad funciona. Queda anotado para que
+      nadie lo lea como "ya estaba resuelto antes".
+
 ### Despliegue del 2026-09-30 (`920cf14`) — ejecutado por SSH
 
 `920cf14` (reporte de consumo por OP, listado de órdenes, marca por empresa y corte del espejo a

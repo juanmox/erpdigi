@@ -19,11 +19,32 @@ const esc = (s: string | null) =>
   (s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!)
 
 /**
+ * Tope de filas por tabla, igual que en la pantalla.
+ *
+ * Un PDF de las 43,833 filas de la ventana completa no es un documento que
+ * alguien pueda usar, y armarlo en el iframe cuelga el navegador. Pero una hoja
+ * impresa a la que le faltan filas **en silencio** es peor que no imprimirla:
+ * por eso cada tabla topada lleva el aviso impreso, y los totales siguen siendo
+ * los del servidor —de todas las filas, no de las mostradas—.
+ */
+const TOPE_FILAS = 200
+
+/** Aviso dentro del documento cuando una tabla se topó. */
+const avisoTope = (total: number, cols: number) =>
+  total > TOPE_FILAS
+    ? `<tr><td colspan="${cols}" style="background:#fff8e1">
+        Se imprimen los primeros ${TOPE_FILAS} de ${total.toLocaleString('es-GT')} registros.
+        El Excel trae todos. Los totales de abajo sí incluyen el rango completo.
+      </td></tr>`
+    : ''
+
+/**
  * Consolidado de consumo por OP, en horizontal: son muchas columnas y en
  * vertical el detalle no entra sin achicar la letra hasta volverla ilegible.
  */
 export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
   const filasResumen = d.resumen
+    .slice(0, TOPE_FILAS)
     .map(
       (r) => `<tr>
       <td class="mono">${esc(r.codigo)}</td>
@@ -39,6 +60,7 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
     .join('')
 
   const filasImpresion = d.detalleImpresion
+    .slice(0, TOPE_FILAS)
     .map(
       (x) => `<tr>
       <td>${fecha(x.fecha)}</td>
@@ -56,6 +78,7 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
     .join('')
 
   const filasRepo = d.detalleReposiciones
+    .slice(0, TOPE_FILAS)
     .map(
       (x) => `<tr>
       <td>${fecha(x.fecha)}</td>
@@ -101,7 +124,7 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <th>OP</th><th>Cliente</th><th class="n">Impresión</th><th class="n">Enguiamiento</th>
       <th class="n">En blanco</th><th class="n">Reposiciones</th><th class="n">Total papel</th><th class="n">Tela</th>
     </tr></thead>
-    <tbody>${filasResumen || '<tr><td colspan="8">Sin consumo en el rango.</td></tr>'}</tbody>
+    <tbody>${filasResumen || '<tr><td colspan="8">Sin consumo en el rango.</td></tr>'}${avisoTope(d.resumen.length, 8)}</tbody>
     <tfoot><tr>
       <td colspan="2">TOTAL</td>
       <td class="n">${yd(d.totales.impresionYd)}</td>
@@ -119,7 +142,7 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <th>Fecha</th><th>OP</th><th>Item</th><th>Producto</th><th>Talla</th><th class="n">Cant.</th>
       <th>Impresora</th><th class="n">Consumo</th><th class="n">Enguiam.</th><th class="n">Total</th>
     </tr></thead>
-    <tbody>${filasImpresion || '<tr><td colspan="10">Sin impresiones en el rango.</td></tr>'}</tbody>
+    <tbody>${filasImpresion || '<tr><td colspan="10">Sin impresiones en el rango.</td></tr>'}${avisoTope(d.detalleImpresion.length, 10)}</tbody>
   </table>
 
   <h2>Detalle de reposiciones</h2>
@@ -128,7 +151,7 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <th>Fecha</th><th>OP</th><th>No. repo</th><th>Departamento</th><th>Defecto</th>
       <th>Impresora</th><th class="n">Yd papel</th><th>Tela</th><th class="n">Yd tela</th>
     </tr></thead>
-    <tbody>${filasRepo || '<tr><td colspan="9">Sin reposiciones en el rango.</td></tr>'}</tbody>
+    <tbody>${filasRepo || '<tr><td colspan="9">Sin reposiciones en el rango.</td></tr>'}${avisoTope(d.detalleReposiciones.length, 9)}</tbody>
   </table>
 </body></html>`)
 }
