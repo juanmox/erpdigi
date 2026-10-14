@@ -26,6 +26,8 @@ export interface InsumoTela {
   idInsumo: number
   codigo: string
   descripcion: string
+  /** Nombre de la categoría. Se usa para quedarse solo con las telas. */
+  categoria?: string
 }
 
 export interface SiguienteNumero {

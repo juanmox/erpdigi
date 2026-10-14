@@ -3239,6 +3239,49 @@ del apaño **antes** de cambiar el UNIQUE por el compuesto.
       genuinamente nuevo sobre una OP ya cargada entra normal (201)**, tomando el Item `-4`. Cero
       desborde a 1500 y 390 px, consola limpia. Datos y usuario de prueba borrados.
 
+  - **Una reposición ya no deja la impresora "ocupada" (2026-10-14)**. Santiago se topó con el
+    tope de impresora ajena en **4 de las 5** impresoras con trabajo pendiente, todas marcadas
+    como en uso por Gabriela, que **ya se había retirado de su turno**.
+    - **Lo primero fue descartar la migración legacy de la noche anterior**, que era el sospechoso
+      obvio: ⚠️ la consulta de ocupación filtra por **`creado_en`, no por `fecha`**, y las 33,631
+      filas migradas tienen `creado_en` del momento de la carga. Durante 8 horas sí se vieron como
+      actividad recientísima — pero para cuando apareció el reporte ya habían pasado 14, así que
+      **0 filas migradas estaban en la ventana**. Medido, no supuesto.
+    - **La causa real**: `ocupacionDeImpresoras()` consultaba `costeo.consumo_papel` **sin filtrar
+      por `origen`**. Una reposición también escribe ahí y también lleva impresora, pero quien la
+      crea **no está usando la máquina**. El usuario lo formuló mejor que yo: *"reposiciones solo
+      registra en qué impresora se hizo la reposición, no que realmente haya usado esa impresora…
+      debería descontar el papel de esa impresora y liberar la impresora, dado que solo es registro
+      no uso"*. Gabriela es operaria de Reposiciones: sus **156 filas de `consumo_papel` son todas
+      `origen='REPOSICION'`, cero de producción**.
+    - **Es el otro sentido de una decisión que ya estaba tomada en F5-1C**, donde se dejó a
+      Reposiciones fuera del tope con ese mismo argumento. Se implementó que no se **bloqueen**,
+      pero no que tampoco **generen** la señal. Media decisión implementada se ve igual que una
+      decisión completa hasta que la otra mitad hace daño.
+    - **Quedan separadas las dos preguntas que leen la misma tabla**, y conviene no volver a
+      mezclarlas: *¿cuánto papel salió de este rollo?* las cuenta todas (`consumoPorMontajeIds()`
+      no filtra `origen`, y **no se tocó**: la reposición sigue descontando sus yardas);
+      *¿quién está en esta máquina?* cuenta solo producción.
+    - **El aviso del envío masivo ahora dice hace cuánto.** El backend ya mandaba el `desde` y el
+      encabezado de cada impresora ya lo mostraba, pero `capturarLote` lo descartaba al armar la
+      falla por línea, así que el banner rojo decía **quién pero no cuándo** — justo el dato que
+      deja juzgar si el otro ya se retiró. El helper `hace()` se sacó de `tabla-pendientes` a su
+      propio módulo para que las dos pantallas usen el mismo.
+    - ⚠️ **Una hipótesis intermedia mía era incorrecta y conviene no reciclarla**: llegué a medir
+      que "4 de 6 relevos entre operarios caen dentro de la ventana de 8 h" y propuse angostarla.
+      Esos relevos eran **reposiciones contaminando la señal**, no relevos reales. Con el filtro
+      puesto la ventana no hace falta tocarla; si vuelve a aparecer en relevos de verdad, se mide
+      de nuevo con datos limpios.
+    - *Nota de nomenclatura*: el rol se llama **Operador Reposiciones** en pantalla pero su
+      `codigo` interno sigue siendo `OPERADOR_TRANSFERENCIA` (se renombró sin tocar el código a
+      propósito, para no dejar huérfanas las asignaciones). Citar el código interno al hablar de
+      personas confunde — el usuario lo corrigió en esta sesión.
+    - **Verificado** reproduciendo el escenario en local en los dos sentidos: con una reposición
+      ajena de hace 10 min la impresora queda **libre**, y la prueba de control —una captura de
+      producción ajena de hace 12 min— la **sigue marcando ocupada** con su usuario y su `desde`,
+      así que el tope no se rompió. En producción tras desplegar: las 5 impresoras de Gabriela
+      libres y MP 7 todavía ocupada por Santiago, que es lo correcto. Usuarios de prueba borrados.
+
 ### Despliegue del 2026-09-30 (`920cf14`) — ejecutado por SSH
 
 `920cf14` (reporte de consumo por OP, listado de órdenes, marca por empresa y corte del espejo a

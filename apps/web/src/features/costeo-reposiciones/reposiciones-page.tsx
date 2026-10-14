@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,12 @@ const HORA_LOCAL = () => {
   ahora.setMinutes(ahora.getMinutes() - ahora.getTimezoneOffset())
   return ahora.toISOString().slice(0, 16)
 }
+
+/**
+ * Categoria del catalogo de insumos que corresponde a este campo. Por nombre
+ * y no por id: los ids de catalogo difieren entre local y produccion.
+ */
+const CATEGORIA_TELA = 'Telas'
 
 const SIN_VALOR = '__ninguno__'
 
@@ -67,7 +73,19 @@ export function ReposicionesPage() {
   const { data: departamentos } = useQuery({ queryKey: ['costeo-reposiciones', 'departamentos'], queryFn: () => costeoReposicionesApi.departamentos() })
   const { data: defectos } = useQuery({ queryKey: ['costeo-reposiciones', 'defectos'], queryFn: () => costeoReposicionesApi.defectos() })
   const { data: calandras } = useQuery({ queryKey: ['costeo-reposiciones', 'calandras'], queryFn: () => costeoReposicionesApi.calandras() })
-  const { data: insumosTela } = useQuery({ queryKey: ['costeo-reposiciones', 'insumos-tela'], queryFn: () => costeoReposicionesApi.insumosTela() })
+  const { data: todosLosInsumos } = useQuery({ queryKey: ['costeo-reposiciones', 'insumos-tela'], queryFn: () => costeoReposicionesApi.insumosTela() })
+
+  // `/recetas/insumos` devuelve el catálogo completo, así que el selector
+  // ofrecía también hilos, elásticos, etiquetas y herrajes — reportado por el
+  // usuario. El campo es "Insumo de tela", así que solo van las telas.
+  //
+  // Se filtra por NOMBRE de categoría y no por `idCategoria`: los ids de los
+  // catálogos no son los mismos en local y en producción (la talla `2XS-XS` es
+  // 440 en una y 298 en la otra), y acá se filtraría mal sin que nada avise.
+  const insumosTela = useMemo(
+    () => (todosLosInsumos ?? []).filter((i) => i.categoria === CATEGORIA_TELA),
+    [todosLosInsumos],
+  )
   const { data: impresoras } = useQuery({
     queryKey: ['costeo-rollos', 'impresoras'],
     queryFn: () => costeoRollosApi.listarImpresoras(),
@@ -353,9 +371,12 @@ export function ReposicionesPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={SIN_VALOR}>Sin tela</SelectItem>
-                      {insumosTela?.map((i) => (
+                      {/* El código adelante es solo visual: lo que se guarda
+                          sigue siendo el id. Los operarios identifican la tela
+                          por su código antes que por la descripción. */}
+                      {insumosTela.map((i) => (
                         <SelectItem key={i.idInsumo} value={String(i.idInsumo)}>
-                          {i.descripcion}
+                          {i.codigo} - {i.descripcion}
                         </SelectItem>
                       ))}
                     </SelectContent>
