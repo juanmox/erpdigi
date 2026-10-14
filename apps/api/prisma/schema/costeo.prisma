@@ -493,6 +493,11 @@ model Reposicion {
   fecha             DateTime  @db.Timestamptz(3)
   idOrdenProduccion Int       @map("id_orden_produccion")
   numeroRepo        Int       @map("numero_repo") @db.SmallInt
+  /// Número tal como lo escribió el legacy. Solo lo llevan las filas migradas:
+  /// el legacy lo dejaba teclear y lo repetía dentro de una misma orden, así que
+  /// al migrar se renumera y el original se conserva acá para poder rastrear la
+  /// Requisición de Bodega en papel. Ver la migración 20261013120000.
+  numeroRepoLegacy  Int?      @map("numero_repo_legacy") @db.SmallInt
   // GENERATED ALWAYS AS ... STORED — ver nota en OrdenProduccion.codigo.
   codigoRepo        String    @default(dbgenerated()) @unique @map("codigo_repo") @db.VarChar(10)
   idDepartamento    Int       @map("id_departamento")
