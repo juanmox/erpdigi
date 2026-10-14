@@ -1,5 +1,30 @@
 import { z } from 'zod';
 
+/**
+ * Booleano leído de una variable de entorno, que siempre llega como texto.
+ *
+ * ⚠️ **No usar `z.coerce.boolean()` acá.** `coerce` aplica `Boolean(valor)`, y
+ * en JavaScript `Boolean('false')` es **`true`**: cualquier string no vacío lo
+ * es. Con eso, poner `COOKIE_SECURE=false` en el `.env` se leía como `true`.
+ *
+ * Causó un bug real en producción (2026-10-14): la cookie del refresh token
+ * salía marcada `Secure` sobre un servidor HTTP sin SSL, así que el navegador
+ * **ni siquiera la guardaba** —0 cookies— y el refresh nunca podía funcionar.
+ * La sesión se caía al vencer el access token, en pleno uso. Lo difícil de ver
+ * era que el `.env` estaba correcto: decía `false` y el sistema leía `true`.
+ *
+ * No aparecía en local porque los navegadores tratan `localhost` como contexto
+ * seguro y ahí sí aceptan cookies `Secure` por HTTP.
+ *
+ * Un valor que no sea uno de los cuatro aceptados **falla el arranque** en vez
+ * de adivinar: un typo tiene que ser ruidoso, no silenciosamente `true`.
+ */
+const booleanoDeEntorno = z
+  .string()
+  .transform((v) => v.trim().toLowerCase())
+  .pipe(z.enum(['true', 'false', '1', '0']))
+  .transform((v) => v === 'true' || v === '1');
+
 export const envSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
@@ -12,7 +37,7 @@ export const envSchema = z.object({
   // false para un despliegue de producción sin HTTPS (red interna, ver CLAUDE.md) —
   // con NODE_ENV=production y sin este override, el cookie Secure rompería el login
   // porque el navegador nunca lo manda de vuelta por HTTP plano.
-  COOKIE_SECURE: z.coerce.boolean().optional(),
+  COOKIE_SECURE: booleanoDeEntorno.optional(),
   // Espejo de Reposiciones hacia Google Sheets (ver GoogleSheetsService) — los tres
   // opcionales a propósito: si faltan, el espejo simplemente se omite (nunca bloquea
   // el guardado real). IMPORTANTE: cualquier variable de entorno nueva DEBE
