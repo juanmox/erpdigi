@@ -16,6 +16,7 @@ import { TablaPendientes } from './components/tabla-pendientes'
 import { ControlEnBlanco } from './components/control-en-blanco'
 import { TarjetaLinea } from './components/tarjeta-linea'
 import type { LineaConsumo, ResultadoLote } from './types'
+import { hace } from './tiempo'
 
 type Filtro = 'pendientes' | 'todas'
 
@@ -55,9 +56,17 @@ function resumirLote(r: ResultadoLote): {
   const otras = r.fallidas.filter((f) => !f.impresoraOcupada)
   let reintentoOcupada: ReintentoOcupada | undefined
   if (ocupadas.length > 0) {
-    const porImpresora = new Map<number, { impresora: string; usuario: string }>()
+    const porImpresora = new Map<
+      number,
+      { impresora: string; usuario: string; desde: string }
+    >()
     for (const f of ocupadas) porImpresora.set(f.impresoraOcupada!.idImpresora, f.impresoraOcupada!)
-    const detalle = [...porImpresora.values()].map((x) => `${x.impresora} (${x.usuario})`)
+    // El "hace cuánto" es lo que deja decidir: con un relevo de turno el otro
+    // operario suele haberse retirado hace rato, y sin ese dato el aviso solo
+    // dice un nombre.
+    const detalle = [...porImpresora.values()].map(
+      (x) => `${x.impresora} (${x.usuario}, ${hace(x.desde)})`,
+    )
     partes.push(
       `${ocupadas.length} línea(s) en uso por otro operario: ${detalle.join(', ')}`,
     )

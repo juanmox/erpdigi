@@ -128,7 +128,13 @@ export interface ResultadoLote {
      * y se reenvía, y queda registrado. Viene agrupable por impresora para no
      * repetir el mismo aviso una vez por línea.
      */
-    impresoraOcupada?: { idImpresora: number; impresora: string; usuario: string }
+    impresoraOcupada?: {
+      idImpresora: number
+      impresora: string
+      usuario: string
+      /** Desde cuándo la viene usando: lo que deja juzgar si ya se retiró. */
+      desde: string
+    }
   }[]
 }
 

@@ -408,6 +408,17 @@ export class CosteoConsumoPapelService {
       FROM costeo.consumo_papel
       WHERE id_impresora = ANY(${ids}::int[])
         AND anulado_en IS NULL
+        -- ⚠️ Solo PRODUCCION. Una reposición también escribe acá y también
+        -- lleva impresora, pero quien la crea NO está usando la máquina: pide
+        -- papel para reponer un defecto. Sin este filtro, la operaria de
+        -- reposiciones dejaba "ocupadas" todas las impresoras que tocaba en su
+        -- turno, y el operario de impresión del turno siguiente se topaba con
+        -- un aviso en cada una — pasó en producción el 2026-10-14, con 4 de 5
+        -- impresoras marcadas por reposiciones de alguien que ya se había
+        -- retirado. Es además lo que ya se había decidido en F5-1C al dejar las
+        -- reposiciones fuera del tope: faltaba el otro sentido, que tampoco lo
+        -- generen.
+        AND origen = 'PRODUCCION'
         AND creado_en >= ${desde}::timestamptz
       ORDER BY id_impresora, creado_en DESC
     `;
@@ -711,6 +722,7 @@ export class CosteoConsumoPapelService {
           idImpresora: number;
           impresora: string;
           usuario: string;
+          desde: Date;
         };
       }[],
     };
@@ -767,6 +779,7 @@ export class CosteoConsumoPapelService {
                 idImpresora?: number;
                 impresora?: string;
                 usuario?: string;
+                desde?: Date;
               })
             : null;
         resultado.fallidas.push({
@@ -786,6 +799,11 @@ export class CosteoConsumoPapelService {
                   idImpresora: cuerpo.idImpresora!,
                   impresora: cuerpo.impresora!,
                   usuario: cuerpo.usuario!,
+                  // Sin el "desde", el aviso del envío masivo dice quién usa la
+                  // máquina pero no hace cuánto, que es justamente lo que deja
+                  // decidir si ya se retiró. El envío de a una sí lo trae
+                  // dentro del mensaje; acá se perdía.
+                  desde: cuerpo.desde!,
                 }
               : undefined,
         });

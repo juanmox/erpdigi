@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { GrupoColapsable } from '@/components/shared/grupo-colapsable'
 import { ControlEnBlanco } from './control-en-blanco'
+import { hace } from '../tiempo'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type {
   GrupoImpresoraPendiente,
@@ -27,18 +28,6 @@ interface Props {
 
 const fecha = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString('es-GT', { timeZone: 'America/Guatemala' }) : '—'
-
-/**
- * "hace 12 min" en vez de una hora absoluta: para decidir si la máquina sigue
- * ocupada, lo que importa es cuán reciente es la actividad, no a qué hora fue.
- */
-function hace(iso: string) {
-  const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
-  if (min < 1) return 'ahora mismo'
-  if (min < 60) return `hace ${min} min`
-  const h = Math.floor(min / 60)
-  return `hace ${h} h ${min % 60} min`
-}
 
 /**
  * Aviso de que otro operario viene usando esta impresora.
