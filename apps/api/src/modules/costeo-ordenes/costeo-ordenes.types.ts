@@ -3,12 +3,19 @@
 // esta lista se amplía conforme aparecen órdenes que las necesitan (mismo
 // criterio ya usado con productos).
 //
-// Las tallas NUEVAS SIEMPRE VAN AL FINAL. El parser lee desde la columna 18 en
-// adelante (`IDX_TALLA_INICIO`) y las tallas son las últimas columnas, así que
-// agregar al final deja seguir cargando los archivos ya armados con la
-// plantilla vieja: las columnas que les faltan se leen vacías y se saltan.
-// Insertar en el medio, en cambio, correría todas las siguientes y haría que
-// un archivo viejo cargue cantidades en la talla equivocada, en silencio.
+// El ORDEN de esta lista ya NO afecta la lectura: desde el 2026-10-07 el parser
+// ubica cada talla por su nombre de encabezado (`resolverColumnas`), así que
+// agregar, quitar o reordenar no desalinea ningún archivo ya armado. Lo único
+// que define es el orden de las columnas en la plantilla que se descarga.
+//
+// (La advertencia anterior —"siempre al final, porque el parser lee desde
+// `IDX_TALLA_INICIO`"— quedó desactualizada con ese cambio. Se deja dicho
+// porque guiarse por ella llevaría a evitar un riesgo que ya no existe.)
+//
+// ⚠️ Una talla que NO esté acá y aparezca como columna en un archivo hace que
+// esa fila se rechace con un error que la nombra — antes se ignoraba en
+// silencio y las piezas desaparecían (caso real: `2XS` en la 26OP031793, que
+// cargaba 18 de 22 sin decir nada).
 export const TALLAS_IMPORT_LINEAS = [
   'YXS',
   'YS',
@@ -30,6 +37,9 @@ export const TALLAS_IMPORT_LINEAS = [
   '2XS-XS',
   'S-M',
   'L-XL',
+  // Agregada el 2026-10-15: existía en el catálogo (grupo ADULT) pero no en la
+  // plantilla, que solo traía `XS` y la combinada `2XS-XS`.
+  '2XS',
 ] as const;
 
 export interface FilaTallaCantidad {

@@ -240,7 +240,27 @@ function resolverColumnas(ws: ExcelJS.Worksheet) {
     col: porNombre.get(normalizarEncabezado(talla)) ?? null,
   })).filter((t): t is typeof t & { col: number } => t.col != null);
 
-  return { idx, tallas };
+  // Columnas con encabezado que el import no sabe leer. Hace falta saberlas
+  // para poder RECHAZAR una fila que ponga cantidades ahí: antes se ignoraban
+  // en silencio y las piezas desaparecían sin ningún error (caso real: alguien
+  // agregó a mano una columna `2XS` y la 26OP031793 cargaba 18 de 22).
+  //
+  // No se rechaza el archivo entero por tener una columna de más: una columna
+  // extra VACÍA es inofensiva (notas, un cálculo auxiliar). Lo que se rechaza
+  // es la fila que de verdad perdería cantidades.
+  const conocidas = new Set<string>([
+    ...Object.values(ALIAS_COLUMNAS).flat(),
+    ...TALLAS_IMPORT_LINEAS.map((t) => normalizarEncabezado(t)),
+    normalizarEncabezado(ENCABEZADO_EN_BLANCO),
+  ]);
+  const desconocidas: { nombre: string; col: number }[] = [];
+  encabezado.eachCell((cell, col) => {
+    const crudo = textoCelda(cell.value).trim();
+    const n = normalizarEncabezado(crudo);
+    if (n && !conocidas.has(n)) desconocidas.push({ nombre: crudo, col });
+  });
+
+  return { idx, tallas, desconocidas };
 }
 
 const EN_BLANCO_SI = ['si', 'sí', 's', 'x', '1', 'true', 'verdadero'];
@@ -537,7 +557,7 @@ export class CosteoOrdenesService {
     // TODAS las columnas por nombre de encabezado — ver ALIAS_COLUMNAS. Así
     // conviven la plantilla actual y la anterior (que traía "Enguiamiento" e
     // "Imagen", quitadas el 2026-10-07) sin que las tallas se desalineen.
-    const { idx, tallas: colTallas } = resolverColumnas(ws);
+    const { idx, tallas: colTallas, desconocidas } = resolverColumnas(ws);
     const texto = (row: ExcelJS.Row, c: ClaveColumna) =>
       idx[c] == null ? '' : textoCelda(row.getCell(idx[c]).value).trim();
     const fecha = (row: ExcelJS.Row, c: ClaveColumna) =>
@@ -562,6 +582,8 @@ export class CosteoOrdenesService {
       /** null = la celda traía texto que no se pudo interpretar. */
       enBlanco: boolean | null;
       tallas: FilaTallaCantidad[];
+      /** Columnas que el import no reconoce y que esta fila usó con cantidad. */
+      tallasIgnoradas: string[];
     }[] = [];
 
     ws.eachRow((row, rowNumber) => {
@@ -575,6 +597,17 @@ export class CosteoOrdenesService {
         const cantidad = valor == null || valor === '' ? 0 : Number(valor);
         if (Number.isFinite(cantidad) && cantidad > 0)
           tallas.push({ talla, cantidad });
+      }
+
+      // Cantidades puestas en una columna que el import no sabe leer. Se
+      // detectan por fila y no al abrir el archivo porque una columna extra
+      // vacía es inofensiva; lo que no puede pasar inadvertido es una fila
+      // que pierda piezas.
+      const tallasIgnoradas: string[] = [];
+      for (const { nombre, col } of desconocidas) {
+        const valor = row.getCell(col).value;
+        const n = valor == null || valor === '' ? 0 : Number(valor);
+        if (Number.isFinite(n) && n > 0) tallasIgnoradas.push(`${nombre} (${n})`);
       }
 
       crudo.push({
@@ -600,6 +633,7 @@ export class CosteoOrdenesService {
         estatus: texto(row, 'estatus'),
         prioridad: texto(row, 'prioridad'),
         tallas,
+        tallasIgnoradas,
       });
     });
 
@@ -702,6 +736,14 @@ export class CosteoOrdenesService {
         error = `Desarrollo "${r.desarrollo}" no coincide con el desarrollo ya registrado para "${r.producto}" ("${desarrolloPorIdProducto.get(idProducto)}")`;
       else if (r.impresora && idImpresora === null)
         error = `Impresora "${r.impresora}" no reconocida`;
+      // Va ANTES del chequeo de totalPiezas a propósito: una fila cuya única
+      // cantidad esté en una columna desconocida daría "Sin cantidad en
+      // ninguna talla reconocida", que manda a buscar el problema donde no
+      // está. Acá el mensaje nombra la columna y la cantidad que se perdería.
+      else if (r.tallasIgnoradas.length > 0)
+        error =
+          `La columna ${r.tallasIgnoradas.join(', ')} no es una talla que el import reconozca, ` +
+          'así que esas piezas no se cargarían. Usá la plantilla descargada tal cual, o pedí que se agregue esa talla.';
       else if (totalPiezas <= 0)
         error = 'Sin cantidad en ninguna talla reconocida';
       // Un typo en esa celda tiene que verse, no convertirse en un `false`
