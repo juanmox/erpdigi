@@ -84,8 +84,10 @@ interface ProductoFila {
   minutos_mo: Prisma.Decimal;
   costo_mo_minuto: Prisma.Decimal;
   id_cliente: number | null;
+  id_subcliente: number | null;
   activo: boolean;
   cliente_nombre: string | null;
+  subcliente_nombre: string | null;
   costo_unitario: Prisma.Decimal;
   /// Estado del desarrollo asignado (NULL si el producto no tiene uno).
   estado_desarrollo: string | null;
@@ -165,12 +167,14 @@ export class ProductosService {
              COALESCE(d.minutos_mo, 0)      AS minutos_mo,
              COALESCE(d.costo_mo_minuto, 0) AS costo_mo_minuto,
              d.estado AS estado_desarrollo,
-             p.id_cliente, p.activo,
+             p.id_cliente, p.id_subcliente, p.activo,
              c.nombre AS cliente_nombre,
+             sc.nombre AS subcliente_nombre,
              round(v.costo_unitario, 4) AS costo_unitario
       FROM recetas.productos p
       JOIN recetas.v_producto_costo v ON v.id_producto = p.id_producto
       LEFT JOIN recetas.clientes c ON c.id_cliente = p.id_cliente
+      LEFT JOIN recetas.subclientes sc ON sc.id_subcliente = p.id_subcliente
       LEFT JOIN recetas.desarrollos d ON d.codigo = p.desarrollo
       WHERE ${where}
       ORDER BY p.codigo
@@ -193,8 +197,10 @@ export class ProductosService {
         minutosMo: p.minutos_mo.toNumber(),
         costoMoMinuto: p.costo_mo_minuto.toNumber(),
         idCliente: p.id_cliente,
+        idSubcliente: p.id_subcliente,
         activo: p.activo,
         clienteNombre: p.cliente_nombre,
+        subclienteNombre: p.subcliente_nombre,
         costoUnitario: p.costo_unitario.toNumber(),
         estadoDesarrollo: p.estado_desarrollo,
       })),
@@ -493,6 +499,42 @@ export class ProductosService {
       );
   }
 
+  /**
+   * El subcliente tiene que pertenecer al cliente del producto. Sin esto se
+   * podría marcar una prenda de Cliff Keen como "Under Armour", que cuelga de
+   * BSN — y la estadística por subcliente quedaría mezclando clientes.
+   * La base no puede imponerlo sola: exigiría una FK compuesta y `id_cliente`
+   * del producto es nullable.
+   */
+  private async exigirSubclienteDelCliente(
+    idSubcliente: number | null | undefined,
+    idCliente: number | null | undefined,
+  ) {
+    if (idSubcliente == null) return;
+    const sub = await this.prisma.subcliente.findUnique({
+      where: { idSubcliente },
+      select: {
+        idCliente: true,
+        nombre: true,
+        activo: true,
+        cliente: { select: { nombre: true } },
+      },
+    });
+    if (!sub) throw new BadRequestException('El subcliente no existe');
+    if (!sub.activo)
+      throw new BadRequestException(
+        `El subcliente "${sub.nombre}" está inactivo`,
+      );
+    if (idCliente == null)
+      throw new BadRequestException(
+        `Para asignar el subcliente "${sub.nombre}" el producto necesita cliente (${sub.cliente.nombre})`,
+      );
+    if (sub.idCliente !== idCliente)
+      throw new BadRequestException(
+        `El subcliente "${sub.nombre}" pertenece a ${sub.cliente.nombre}, no al cliente elegido`,
+      );
+  }
+
   async crear(dto: CrearProductoDto, idUsuarioActor: number) {
     if (!(await this.referencias.deporteEsValido(dto.deporte))) {
       throw new BadRequestException(`Deporte "${dto.deporte}" no reconocido`);
@@ -505,6 +547,7 @@ export class ProductosService {
         'Un producto necesita un desarrollo aprobado: la receta y el costo vienen de ahí',
       );
     await this.exigirDesarrolloAsignable(desarrollo);
+    await this.exigirSubclienteDelCliente(dto.idSubcliente, dto.idCliente);
 
     try {
       const producto = await this.prisma.producto.create({
@@ -512,6 +555,7 @@ export class ProductosService {
           codigo: dto.codigo.trim(),
           descripcion: dto.descripcion.trim(),
           idCliente: dto.idCliente ?? null,
+          idSubcliente: dto.idSubcliente ?? null,
           desarrollo,
           patron: dto.patron?.trim() || null,
           tamano: dto.tamano?.trim() || null,
@@ -571,6 +615,24 @@ export class ProductosService {
     if (dto.tamano !== undefined) data.tamano = dto.tamano?.trim() || null;
     if (dto.deporte !== undefined) data.deporte = dto.deporte?.trim() || null;
     if (dto.precioVenta !== undefined) data.precioVenta = dto.precioVenta;
+    if (dto.idSubcliente !== undefined) {
+      // El cliente contra el que se valida es el que va a quedar tras el PATCH,
+      // no el que había: cambiar cliente y subcliente a la vez debe cuadrar.
+      const idClienteFinal =
+        dto.idCliente !== undefined ? dto.idCliente : anterior.idCliente;
+      await this.exigirSubclienteDelCliente(dto.idSubcliente, idClienteFinal);
+      data.subcliente = dto.idSubcliente
+        ? { connect: { idSubcliente: dto.idSubcliente } }
+        : { disconnect: true };
+    } else if (dto.idCliente !== undefined && anterior.idSubcliente != null) {
+      // Cambiar de cliente sin tocar el subcliente lo dejaría colgando de otro
+      // cliente. Se revalida, y si ya no corresponde se rechaza en vez de
+      // arrastrar una marca ajena en silencio.
+      await this.exigirSubclienteDelCliente(
+        anterior.idSubcliente,
+        dto.idCliente,
+      );
+    }
 
     if (dto.desarrollo !== undefined) {
       const nuevo = dto.desarrollo?.trim() || null;

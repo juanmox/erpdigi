@@ -163,6 +163,29 @@ export function ReportesPage() {
             </SelectContent>
           </Select>
         </div>
+        {/* Solo aparece si el rango tiene alguno: con un solo subcliente en
+            todo el sistema, un selector siempre visible sería ruido. */}
+        {data && data.opciones.subclientes.length > 0 && (
+          <div>
+            <Label className="mb-1 block text-xs">Subcliente</Label>
+            <Select
+              value={filtros.idSubcliente || TODOS}
+              onValueChange={(v) =>
+                setFiltros((f) => ({ ...f, idSubcliente: v === TODOS ? undefined : v }))
+              }
+            >
+              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={TODOS}>Todos</SelectItem>
+                {data.opciones.subclientes.map((sc) => (
+                  <SelectItem key={sc.idSubcliente} value={String(sc.idSubcliente)}>
+                    {sc.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <Button onClick={() => setAplicados(filtros)} disabled={isFetching}>
           {isFetching ? 'Cargando…' : 'Ver'}
         </Button>
@@ -191,10 +214,28 @@ export function ReportesPage() {
         <Alert variant="destructive"><AlertDescription>{errorExport}</AlertDescription></Alert>
       )}
 
+      {/* Con el filtro de subcliente puesto, el total de reposiciones queda
+          corto en exactamente esto: una reposición se registra contra la ORDEN
+          y no contra una prenda, así que en una orden que mezcla no hay forma
+          de saber de qué subcliente fue. Se dice en vez de atribuirla de más. */}
+      {data?.reposicionesNoAtribuibles && (
+        <Alert>
+          <AlertDescription>
+            {data.reposicionesNoAtribuibles.cantidad} reposición(es) quedaron fuera de este
+            total ({yd(data.reposicionesNoAtribuibles.papelYd)} yd de papel y{' '}
+            {yd(data.reposicionesNoAtribuibles.telaYd)} de tela): son de órdenes que mezclan
+            este subcliente con prendas directas del mismo cliente, y una reposición se
+            registra contra la orden, no contra la prenda.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {data && !hayDatos && !isFetching && (
         <p className="text-muted-foreground rounded-md border border-border p-4 text-center text-sm">
           No hay consumo registrado entre {dia(data.filtros.desde)} y {dia(data.filtros.hasta)}
-          {data.filtros.idCliente || data.filtros.idImpresora ? ' con esos filtros' : ''}.
+          {data.filtros.idCliente || data.filtros.idImpresora || data.filtros.idSubcliente
+            ? ' con esos filtros'
+            : ''}.
         </p>
       )}
 
@@ -252,13 +293,14 @@ export function ReportesPage() {
               <ConteoFilas total={data.detalleImpresion.length} />
             </h2>
             <div className="overflow-x-auto rounded-md border border-border">
-              <Table className="min-w-[900px]">
+              <Table className="min-w-[1000px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Fecha</TableHead>
                     <TableHead>OP</TableHead>
                     <TableHead>Item</TableHead>
                     <TableHead>Producto</TableHead>
+                    <TableHead>Subcliente</TableHead>
                     <TableHead>Talla</TableHead>
                     <TableHead className="text-right">Cant.</TableHead>
                     <TableHead>Impresora</TableHead>
@@ -274,6 +316,7 @@ export function ReportesPage() {
                       <TableCell className="font-mono text-xs">{x.orden}</TableCell>
                       <TableCell className="font-mono text-xs break-all whitespace-normal">{x.codigoLine ?? '—'}</TableCell>
                       <TableCell className="break-words whitespace-normal">{x.producto ?? '—'}</TableCell>
+                      <TableCell className="break-words whitespace-normal">{x.subcliente ?? '—'}</TableCell>
                       <TableCell>{x.talla ?? '—'}</TableCell>
                       <TableCell className="text-right tabular-nums">{x.cantidad ?? '—'}</TableCell>
                       <TableCell>{x.impresora}</TableCell>

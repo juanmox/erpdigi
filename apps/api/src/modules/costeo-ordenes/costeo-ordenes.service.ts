@@ -607,7 +607,8 @@ export class CosteoOrdenesService {
       for (const { nombre, col } of desconocidas) {
         const valor = row.getCell(col).value;
         const n = valor == null || valor === '' ? 0 : Number(valor);
-        if (Number.isFinite(n) && n > 0) tallasIgnoradas.push(`${nombre} (${n})`);
+        if (Number.isFinite(n) && n > 0)
+          tallasIgnoradas.push(`${nombre} (${n})`);
       }
 
       crudo.push({
@@ -637,31 +638,58 @@ export class CosteoOrdenesService {
       });
     });
 
-    const [clientes, lineasProducto, productos, impresoras, existentesLine] =
-      await Promise.all([
-        this.prisma.cliente.findMany({
-          select: { idCliente: true, codigo: true },
-        }),
-        this.prisma.lineaProducto.findMany({
-          select: { idLineaProducto: true, nombre: true },
-        }),
-        this.prisma.producto.findMany({
-          select: { idProducto: true, codigo: true, desarrollo: true },
-        }),
-        this.prisma.impresora.findMany({
-          select: { idImpresora: true, codigo: true },
-        }),
-        // Solo los Item de ESTA empresa — el UNIQUE es
-        // `(id_empresa, codigo_line)`. Se usan para saber por dónde sigue la
-        // numeración de cada orden de compra, no para marcar duplicados: el
-        // Item ya no viene del archivo.
-        this.prisma.lineaProduccion.findMany({
-          where: { idEmpresa },
-          select: { codigoLine: true },
-        }),
-      ]);
+    const [
+      clientes,
+      subclientes,
+      lineasProducto,
+      productos,
+      impresoras,
+      existentesLine,
+    ] = await Promise.all([
+      this.prisma.cliente.findMany({
+        select: { idCliente: true, codigo: true },
+      }),
+      // Un subcliente no se factura aparte, así que su código en la columna
+      // Cliente resuelve al cliente PADRE. Existe para que las plantillas ya
+      // armadas con `411` (Under Armour) sigan cargando sin retipear.
+      this.prisma.subcliente.findMany({
+        where: { activo: true, codigo: { not: null } },
+        select: {
+          codigo: true,
+          nombre: true,
+          idCliente: true,
+          cliente: { select: { codigo: true, nombre: true } },
+        },
+      }),
+      this.prisma.lineaProducto.findMany({
+        select: { idLineaProducto: true, nombre: true },
+      }),
+      this.prisma.producto.findMany({
+        select: { idProducto: true, codigo: true, desarrollo: true },
+      }),
+      this.prisma.impresora.findMany({
+        select: { idImpresora: true, codigo: true },
+      }),
+      // Solo los Item de ESTA empresa — el UNIQUE es
+      // `(id_empresa, codigo_line)`. Se usan para saber por dónde sigue la
+      // numeración de cada orden de compra, no para marcar duplicados: el
+      // Item ya no viene del archivo.
+      this.prisma.lineaProduccion.findMany({
+        where: { idEmpresa },
+        select: { codigoLine: true },
+      }),
+    ]);
     const clientePorCodigo = new Map(
       clientes.map((c) => [c.codigo.toLowerCase(), c.idCliente]),
+    );
+    // Si un código existiera como cliente Y como subcliente, gana el cliente:
+    // se consulta este mapa solo cuando el de clientes no encontró nada. La
+    // migración de subclientes aborta si el código sigue vivo en `clientes`,
+    // así que el caso no debería poder darse.
+    const subclientePorCodigo = new Map(
+      subclientes
+        .filter((sc) => !clientePorCodigo.has(sc.codigo!.toLowerCase()))
+        .map((sc) => [sc.codigo!.toLowerCase(), sc]),
     );
     // Catálogo global desde el 2026-10-09: la línea ya no depende del cliente,
     // así que alcanza con el nombre.
@@ -693,9 +721,19 @@ export class CosteoOrdenesService {
     }
     const filas: FilaPreviewLinea[] = crudo.map((r) => {
       const opParsed = parsearCodigoOp(r.op);
-      const idCliente = r.cliente
+      let aviso: string | null = null;
+      let idCliente = r.cliente
         ? (clientePorCodigo.get(r.cliente.toLowerCase()) ?? null)
         : null;
+      if (idCliente === null && r.cliente) {
+        const sub = subclientePorCodigo.get(r.cliente.toLowerCase());
+        if (sub) {
+          idCliente = sub.idCliente;
+          aviso =
+            `"${r.cliente}" es ${sub.nombre}, un subcliente de ${sub.cliente.nombre}: ` +
+            `la orden se carga a ${sub.cliente.codigo}. La marca sale del producto, no de esta columna.`;
+        }
+      }
       const idLineaProducto = r.lineaProducto
         ? (lineaProductoPorNombre.get(r.lineaProducto.toLowerCase()) ?? null)
         : null;
@@ -782,6 +820,8 @@ export class CosteoOrdenesService {
         totalPiezas,
         consumoEnBlanco: r.enBlanco === true,
         error,
+        // El aviso solo tiene sentido si la fila de verdad se va a importar.
+        aviso: error ? null : aviso,
       } satisfies FilaPreviewLinea;
     });
 

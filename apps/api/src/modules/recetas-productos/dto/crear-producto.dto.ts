@@ -22,6 +22,12 @@ export class CrearProductoDto {
   @IsInt()
   idCliente?: number | null;
 
+  /** Marca o división del cliente (ver recetas.subclientes). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  idSubcliente?: number | null;
+
   @IsOptional()
   @IsString()
   desarrollo?: string | null;

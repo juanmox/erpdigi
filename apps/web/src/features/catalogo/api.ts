@@ -14,6 +14,7 @@ import type {
   InsumoCatalogo,
   LineaReceta,
   ProductoCatalogo,
+  Subcliente,
   Talla,
   UnidadMedida,
 } from './types'
@@ -43,6 +44,7 @@ export const catalogoApi = {
   unidadesMedida: () => apiFetch<UnidadMedida[]>('/recetas/unidades-medida'),
   areasUso: () => apiFetch<AreaUso[]>('/recetas/areas-uso'),
   clientes: () => apiFetch<Cliente[]>('/recetas/clientes'),
+  subclientes: () => apiFetch<Subcliente[]>('/recetas/subclientes'),
   tallas: () => apiFetch<Talla[]>('/recetas/tallas'),
   deportes: () => apiFetch<Deporte[]>('/recetas/deportes'),
 

@@ -26,6 +26,7 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
   const esEdicion = !!producto
 
   const { data: clientes } = useQuery({ queryKey: ['catalogo', 'clientes'], queryFn: () => catalogoApi.clientes() })
+  const { data: subclientes } = useQuery({ queryKey: ['catalogo', 'subclientes'], queryFn: () => catalogoApi.subclientes() })
   const { data: tallas } = useQuery({ queryKey: ['catalogo', 'tallas'], queryFn: () => catalogoApi.tallas() })
   const { data: deportes } = useQuery({ queryKey: ['catalogo', 'deportes'], queryFn: () => catalogoApi.deportes() })
 
@@ -40,6 +41,7 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
   const [codigo, setCodigo] = useState('')
   const [descripcion, setDescripcion] = useState('')
   const [idCliente, setIdCliente] = useState('')
+  const [idSubcliente, setIdSubcliente] = useState('')
   const [desarrollo, setDesarrollo] = useState('')
   const [desarrolloElegido, setDesarrolloElegido] = useState<Desarrollo | null>(null)
   const [patron, setPatron] = useState('')
@@ -54,6 +56,7 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
       setCodigo(producto?.codigo ?? '')
       setDescripcion(producto?.descripcion ?? '')
       setIdCliente(producto?.idCliente ? String(producto.idCliente) : '')
+      setIdSubcliente(producto?.idSubcliente ? String(producto.idSubcliente) : '')
       setDesarrollo(producto?.desarrollo ?? '')
       setDesarrolloElegido(null)
       setPatron(producto?.patron ?? '')
@@ -63,6 +66,13 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
       setError(null)
     }
   }, [open, producto])
+
+  // Solo los del cliente elegido: el servidor rechaza un subcliente de otro,
+  // y ofrecerlos invitaría a ese error.
+  const subclientesDelCliente = useMemo(
+    () => (subclientes ?? []).filter((sc) => String(sc.idCliente) === idCliente),
+    [subclientes, idCliente],
+  )
 
   const opcionesDesarrollo = useMemo(() => {
     const texto = desarrollo.trim().toLowerCase()
@@ -91,6 +101,7 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
     const body = {
       descripcion: descripcion.trim(),
       idCliente: idCliente ? Number(idCliente) : null,
+      idSubcliente: idSubcliente ? Number(idSubcliente) : null,
       patron: patron.trim() || null,
       tamano: tamano || null,
       deporte: deporte || null,
@@ -170,7 +181,15 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
           </div>
           <div>
             <Label className="mb-1 block text-xs">Cliente</Label>
-            <Select value={idCliente || SIN_VALOR} onValueChange={(v) => setIdCliente(v === SIN_VALOR ? '' : v)}>
+            <Select
+              value={idCliente || SIN_VALOR}
+              onValueChange={(v) => {
+                setIdCliente(v === SIN_VALOR ? '' : v)
+                // Un subcliente pertenece a un cliente: al cambiar de cliente
+                // el anterior deja de corresponder, y el servidor lo rechaza.
+                setIdSubcliente('')
+              }}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Sin cliente" />
               </SelectTrigger>
@@ -183,6 +202,33 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div>
+            <Label className="mb-1 block text-xs">Subcliente</Label>
+            <Select
+              value={idSubcliente || SIN_VALOR}
+              onValueChange={(v) => setIdSubcliente(v === SIN_VALOR ? '' : v)}
+              disabled={!idCliente || subclientesDelCliente.length === 0}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Sin subcliente" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SIN_VALOR}>Sin subcliente</SelectItem>
+                {subclientesDelCliente.map((sc) => (
+                  <SelectItem key={sc.idSubcliente} value={String(sc.idSubcliente)}>
+                    {sc.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground mt-1 text-xs">
+              {!idCliente
+                ? 'Elegí primero un cliente.'
+                : subclientesDelCliente.length === 0
+                  ? 'Este cliente no tiene subclientes.'
+                  : 'Marca o división del cliente. Se factura al cliente, pero permite separar la estadística.'}
+            </p>
           </div>
           <div>
             <Label className="mb-1 block text-xs">Deporte</Label>

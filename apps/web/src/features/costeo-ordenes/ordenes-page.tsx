@@ -154,7 +154,15 @@ export function OrdenesPage() {
           { key: 'cliente', header: 'Cliente', render: (f) => f.clienteCodigo ?? '—' },
           { key: 'lineaProducto', header: 'Línea de producto', render: (f) => f.lineaProductoNombre ?? '—' },
           { key: 'total', header: 'Piezas', className: 'text-right', render: (f) => f.totalPiezas },
-          { key: 'estado', header: 'Estado', className: 'whitespace-normal', render: (f) => f.error ?? 'OK' },
+          {
+            key: 'estado',
+            header: 'Estado',
+            className: 'whitespace-normal',
+            // El aviso no impide importar: la fila entra igual. Se muestra en
+            // ámbar para que se distinga de un error, que sí la frena.
+            render: (f) =>
+              f.error ?? (f.aviso ? <span className="text-amber-700">{f.aviso}</span> : 'OK'),
+          },
         ]}
         onArchivoElegido={async (archivo) => (await costeoOrdenesApi.previewImportar(archivo)).filas}
         onAplicar={async (filas) => {

@@ -12,6 +12,11 @@ export class ReferenciasController {
     return this.referenciasService.clientes();
   }
 
+  @Get('recetas/subclientes')
+  subclientes() {
+    return this.referenciasService.subclientes();
+  }
+
   @Get('recetas/tallas')
   tallas() {
     return this.referenciasService.tallas();

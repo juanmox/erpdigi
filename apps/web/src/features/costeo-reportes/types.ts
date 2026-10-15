@@ -24,6 +24,8 @@ export interface DetalleImpresion {
   orden: string
   codigoLine: string | null
   producto: string | null
+  /** Marca/división del cliente, tomada del producto de esa fila. */
+  subcliente: string | null
   talla: string | null
   cantidad: number | null
   impresora: string
@@ -52,13 +54,26 @@ export interface ReporteConsumo {
   opciones: {
     clientes: { idCliente: number; nombre: string }[]
     impresoras: { idImpresora: number; codigo: string }[]
+    subclientes: { idSubcliente: number; nombre: string }[]
   }
   filtros: {
     desde: string
     hasta: string
     idCliente: number | null
     idImpresora: number | null
+    idSubcliente: number | null
   }
+  /**
+   * Con el filtro de subcliente puesto: las reposiciones que tocan ese
+   * subcliente pero caen en órdenes que lo mezclan con prendas directas, así
+   * que no se les puede atribuir. Null si no hay filtro o no hay ninguna.
+   * Se muestra porque el total queda corto en exactamente esto.
+   */
+  reposicionesNoAtribuibles: {
+    cantidad: number
+    papelYd: number
+    telaYd: number
+  } | null
   resumen: ResumenOrdenConsumo[]
   totales: TotalesConsumo
   detalleImpresion: DetalleImpresion[]
@@ -70,4 +85,5 @@ export interface FiltrosConsumo {
   hasta: string
   idCliente?: string
   idImpresora?: string
+  idSubcliente?: string
 }

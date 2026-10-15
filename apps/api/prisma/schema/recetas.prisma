@@ -30,12 +30,44 @@ model Cliente {
   ordenesFacturacionCosteo OrdenFacturacion[]
 
   desarrollos Desarrollo[]
+  subclientes Subcliente[]
 
   @@map("clientes")
   @@schema("recetas")
 }
 
 /// Snapshot de cabecera de un producto congelado al momento de cotizar.
+/// División o marca que cuelga de un cliente y NO se factura aparte: la factura
+/// va siempre al cliente padre. Nace de Under Armour, que había entrado como
+/// cliente (411) por no tener dónde más ir.
+///
+/// ⚠️ Es por cliente (@@unique([idCliente, nombre])) y no global, al revés que
+/// costeo.LineaProducto: un tipo de prenda es universal, una división pertenece
+/// a su casa matriz.
+///
+/// `codigo` es lo que permite que la plantilla de Órdenes siga aceptando el
+/// `411` que ya traen los archivos armados — el import lo resuelve al cliente
+/// padre y lo avisa en el preview. Un código que también exista como cliente
+/// haría ambigua esa resolución: el import prefiere el cliente, y la migración
+/// aborta si el código sigue vivo en `clientes`.
+model Subcliente {
+  idSubcliente Int      @id @default(autoincrement()) @map("id_subcliente")
+  idCliente    Int      @map("id_cliente")
+  codigo       String?  @unique @db.VarChar(20)
+  nombre       String   @db.VarChar(150)
+  activo       Boolean  @default(true)
+  creadoEn     DateTime @default(now()) @map("creado_en") @db.Timestamptz(6)
+
+  cliente   Cliente    @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
+  productos Producto[]
+
+  // + SQL: CHECK de nombre/código no vacíos (Prisma no expresa CHECK).
+  @@unique([idCliente, nombre])
+  @@index([idCliente])
+  @@map("subclientes")
+  @@schema("recetas")
+}
+
 model CotizacionDetalle {
   idDetalle      Int                       @id @default(autoincrement()) @map("id_detalle")
   idCotizacion   Int                       @map("id_cotizacion")
@@ -163,6 +195,10 @@ model Producto {
   tamano              String?             @db.VarChar(60)
   deporte             String?             @db.VarChar(60)
   idCliente           Int?                @map("id_cliente")
+  /// Marca o división del cliente, para segmentar sin romper la facturación
+  /// (ver Subcliente). Va acá y no en la orden porque 38 órdenes mezclan
+  /// prendas de subcliente con prendas directas del mismo cliente.
+  idSubcliente        Int?                @map("id_subcliente")
   precioVenta         Decimal             @default(0) @map("precio_venta") @db.Decimal(12, 2)
   /// ⚠️ LEGACY — no son autoritativos: la mano de obra vive en
   /// Desarrollo.minutosMo / .costoMoMinuto desde 2026-08-26, y nada las lee ni
@@ -174,6 +210,7 @@ model Producto {
   creadoEn            DateTime            @default(now()) @map("creado_en") @db.Timestamptz(6)
   detalleCotizaciones CotizacionDetalle[]
   cliente             Cliente?            @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
+  subcliente          Subcliente?         @relation(fields: [idSubcliente], references: [idSubcliente], onDelete: SetNull, onUpdate: Cascade)
 
   /// Relaciones inversas del módulo Costeo Real (costeo.prisma).
   consumosEstandarCosteo  ConsumoEstandar[]
@@ -181,6 +218,8 @@ model Producto {
   consumosPapelCosteo     ConsumoPapel[]
 
   @@index([idCliente], map: "idx_prod_cliente")
+  // + SQL: el índice de id_subcliente es PARCIAL (WHERE IS NOT NULL) porque los
+  // productos con subcliente son la minoría; Prisma no expresa índices parciales.
   @@index([codigo(ops: raw("gin_trgm_ops"))], map: "idx_prod_codigo_trgm", type: Gin)
   @@index([desarrollo], map: "idx_prod_desarrollo")
   @@index([descripcion(ops: raw("gin_trgm_ops"))], map: "idx_prod_desc_trgm", type: Gin)

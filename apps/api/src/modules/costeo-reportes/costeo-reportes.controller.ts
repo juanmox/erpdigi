@@ -21,7 +21,7 @@ const DIA = /^\d{4}-\d{2}-\d{2}$/;
 // que no pueden divergir. El detalle de por qué está allá.
 
 /**
- * Los cuatro filtros se resuelven acá y no en el servicio, para que las dos
+ * Los filtros se resuelven acá y no en el servicio, para que las dos
  * rutas (datos y Excel) compartan exactamente la misma interpretación — si una
  * leyera las fechas distinto que la otra, el Excel no coincidiría con lo que se
  * ve en pantalla.
@@ -72,6 +72,7 @@ function filtros(q: Record<string, string | undefined>): FiltrosConsumo {
     hastaTexto: q.hasta,
     idCliente: num(q.idCliente),
     idImpresora: num(q.idImpresora),
+    idSubcliente: num(q.idSubcliente),
   };
 }
 

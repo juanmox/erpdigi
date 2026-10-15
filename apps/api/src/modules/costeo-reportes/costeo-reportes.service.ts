@@ -16,6 +16,12 @@ export interface FiltrosConsumo {
   hastaTexto: string;
   idCliente?: number;
   idImpresora?: number;
+  /**
+   * Marca/division del cliente. Filtra por el SUBCLIENTE DEL PRODUCTO, no
+   * por el de la orden: el dato vive en el producto porque 38 ordenes
+   * mezclan prendas de subcliente con prendas directas del mismo cliente.
+   */
+  idSubcliente?: number;
 }
 
 /** `2026-09-30` -> `30/09/2026`, sin pasar por `Date` ni por zonas horarias. */
@@ -67,6 +73,68 @@ export class CosteoReportesService {
    * que importa para cerrar un mes, y puede diferir de `creado_en` cuando se
    * registra algo con fecha pasada.
    */
+  /**
+   * Separa las ordenes que tocan un subcliente en dos grupos: las que son
+   * 100% suyas (atribucion inequivoca) y las que lo mezclan con prendas
+   * directas del mismo cliente. Solo hace falta porque una reposicion no
+   * registra de que prenda fue; para los consumos el producto lo dice.
+   */
+  private async ordenesDeUnSoloSubcliente(
+    idEmpresa: number,
+    idSubcliente: number,
+  ) {
+    const lineas = await this.prisma.lineaProduccion.findMany({
+      where: { idEmpresa },
+      select: {
+        idOrdenProduccion: true,
+        producto: { select: { idSubcliente: true } },
+      },
+    });
+    const total = new Map<number, number>();
+    const propias = new Map<number, number>();
+    for (const l of lineas) {
+      total.set(l.idOrdenProduccion, (total.get(l.idOrdenProduccion) ?? 0) + 1);
+      if (l.producto?.idSubcliente === idSubcliente)
+        propias.set(
+          l.idOrdenProduccion,
+          (propias.get(l.idOrdenProduccion) ?? 0) + 1,
+        );
+    }
+    const inequivocas: number[] = [];
+    const mezcladas: number[] = [];
+    for (const [op, n] of propias)
+      (n === total.get(op) ? inequivocas : mezcladas).push(op);
+    return { inequivocas, mezcladas };
+  }
+
+  /**
+   * Reposiciones que tocan el subcliente pedido pero caen en ordenes que lo
+   * mezclan con prendas directas, asi que no se les puede asignar. Devuelve
+   * null cuando no hay filtro de subcliente: no hay nada que advertir.
+   */
+  private async reposicionesAmbiguas(
+    ops: { mezcladas: number[] } | null,
+    rangoFecha: { gte: Date; lt: Date },
+    idImpresora?: number,
+  ) {
+    if (!ops || ops.mezcladas.length === 0) return null;
+    const filas = await this.prisma.reposicion.findMany({
+      where: {
+        anuladoEn: null,
+        fecha: rangoFecha,
+        idOrdenProduccion: { in: ops.mezcladas },
+        ...(idImpresora ? { idImpresora } : {}),
+      },
+      select: { yardasPapel: true, yardasTela: true },
+    });
+    if (filas.length === 0) return null;
+    return {
+      cantidad: filas.length,
+      papelYd: F4(filas.reduce((a, r) => a + Number(r.yardasPapel), 0)),
+      telaYd: F4(filas.reduce((a, r) => a + Number(r.yardasTela), 0)),
+    };
+  }
+
   async consumoPorOrden(idEmpresa: number, f: FiltrosConsumo) {
     // `lt` y no `lte`: el límite superior es el arranque del día siguiente.
     const rangoFecha = { gte: f.desde, lt: f.hastaExclusivo };
@@ -75,6 +143,17 @@ export class CosteoReportesService {
       ...(f.idCliente ? { idCliente: f.idCliente } : {}),
     };
 
+    // ATENCION: una reposicion se vincula a la ORDEN, nunca a una linea ni a
+    // un producto (verificado contra costeo.prisma), asi que no se le puede
+    // atribuir un subcliente por el mismo camino que a un consumo. Se
+    // incluyen solo las de ordenes donde TODAS las lineas son de ese
+    // subcliente, que es donde la atribucion es inequivoca; las de ordenes
+    // mezcladas quedan fuera y se informan aparte, en vez de atribuirlas de
+    // mas en silencio.
+    const opsDelSubcliente = f.idSubcliente
+      ? await this.ordenesDeUnSoloSubcliente(idEmpresa, f.idSubcliente)
+      : null;
+
     const [consumos, reposiciones] = await Promise.all([
       this.prisma.consumoPapel.findMany({
         where: {
@@ -82,6 +161,9 @@ export class CosteoReportesService {
           fecha: rangoFecha,
           ordenProduccion: ordenDeLaEmpresa,
           ...(f.idImpresora ? { idImpresora: f.idImpresora } : {}),
+          ...(f.idSubcliente
+            ? { producto: { idSubcliente: f.idSubcliente } }
+            : {}),
         },
         include: {
           ordenProduccion: {
@@ -93,7 +175,12 @@ export class CosteoReportesService {
             },
           },
           lineaProduccion: { select: { codigoLine: true } },
-          producto: { select: { codigo: true } },
+          producto: {
+            select: {
+              codigo: true,
+              subcliente: { select: { nombre: true } },
+            },
+          },
           talla: { select: { nombre: true } },
           impresora: { select: { codigo: true } },
           tipoPapel: { select: { nombre: true } },
@@ -110,6 +197,9 @@ export class CosteoReportesService {
           fecha: rangoFecha,
           ordenProduccion: ordenDeLaEmpresa,
           ...(f.idImpresora ? { idImpresora: f.idImpresora } : {}),
+          ...(opsDelSubcliente
+            ? { idOrdenProduccion: { in: opsDelSubcliente.inequivocas } }
+            : {}),
         },
         include: {
           ordenProduccion: { select: { codigo: true } },
@@ -124,26 +214,49 @@ export class CosteoReportesService {
     ]);
 
     // ── Opciones de filtro, del rango completo ──────────────────────
-    const [ordenesDelRango, impresorasDelRango] = await Promise.all([
-      this.prisma.ordenProduccion.findMany({
-        where: {
-          idEmpresa,
-          consumosPapel: { some: { anuladoEn: null, fecha: rangoFecha } },
-          idCliente: { not: null },
-        },
-        select: { idCliente: true, cliente: { select: { nombre: true } } },
-        distinct: ['idCliente'],
-      }),
-      this.prisma.consumoPapel.findMany({
-        where: {
-          anuladoEn: null,
-          fecha: rangoFecha,
-          ordenProduccion: { idEmpresa },
-        },
-        select: { idImpresora: true, impresora: { select: { codigo: true } } },
-        distinct: ['idImpresora'],
-      }),
-    ]);
+    const [ordenesDelRango, impresorasDelRango, subclientesDelRango] =
+      await Promise.all([
+        this.prisma.ordenProduccion.findMany({
+          where: {
+            idEmpresa,
+            consumosPapel: { some: { anuladoEn: null, fecha: rangoFecha } },
+            idCliente: { not: null },
+          },
+          select: { idCliente: true, cliente: { select: { nombre: true } } },
+          distinct: ['idCliente'],
+        }),
+        this.prisma.consumoPapel.findMany({
+          where: {
+            anuladoEn: null,
+            fecha: rangoFecha,
+            ordenProduccion: { idEmpresa },
+          },
+          select: {
+            idImpresora: true,
+            impresora: { select: { codigo: true } },
+          },
+          distinct: ['idImpresora'],
+        }),
+        // Igual que clientes e impresoras: salen del rango y ANTES de
+        // aplicar los filtros, para que elegir uno no borre los demas.
+        this.prisma.producto.findMany({
+          where: {
+            idSubcliente: { not: null },
+            consumosPapelCosteo: {
+              some: {
+                anuladoEn: null,
+                fecha: rangoFecha,
+                ordenProduccion: { idEmpresa },
+              },
+            },
+          },
+          select: {
+            idSubcliente: true,
+            subcliente: { select: { nombre: true } },
+          },
+          distinct: ['idSubcliente'],
+        }),
+      ]);
     const opciones = {
       clientes: ordenesDelRango
         .map((o) => ({
@@ -157,6 +270,12 @@ export class CosteoReportesService {
           codigo: c.impresora.codigo,
         }))
         .sort((a, b) => a.codigo.localeCompare(b.codigo)),
+      subclientes: subclientesDelRango
+        .map((p) => ({
+          idSubcliente: p.idSubcliente!,
+          nombre: p.subcliente?.nombre ?? '',
+        }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre)),
     };
 
     // ── Resumen por OP ──────────────────────────────────────────────────
@@ -255,6 +374,9 @@ export class CosteoReportesService {
           c.origen === 'EN_BLANCO'
             ? ETIQUETA_EN_BLANCO
             : (c.producto?.codigo ?? null),
+        // Inequivoco a este nivel: la fila ES de un producto. En el
+        // resumen no va, porque una OP puede mezclar subclientes.
+        subcliente: c.producto?.subcliente?.nombre ?? null,
         talla: c.talla?.nombre ?? null,
         cantidad: c.cantidad,
         impresora: c.impresora.codigo,
@@ -303,7 +425,16 @@ export class CosteoReportesService {
         hasta: f.hastaTexto,
         idCliente: f.idCliente ?? null,
         idImpresora: f.idImpresora ?? null,
+        idSubcliente: f.idSubcliente ?? null,
       },
+      // Lo que el filtro de subcliente NO pudo atribuir. Se informa en vez
+      // de callarlo: con el filtro puesto, el total de reposiciones queda
+      // corto en exactamente esto, y sin el numero pareceria completo.
+      reposicionesNoAtribuibles: await this.reposicionesAmbiguas(
+        opsDelSubcliente,
+        rangoFecha,
+        f.idImpresora,
+      ),
       resumen,
       totales,
       detalleImpresion,
@@ -384,6 +515,7 @@ export class CosteoReportesService {
       'Cliente',
       'LINE',
       'Producto',
+      'Subcliente',
       'Talla',
       'Cantidad',
       'No. repo',
@@ -421,6 +553,7 @@ export class CosteoReportesService {
           clientePorOp.get(x.orden) ?? '',
           x.codigoLine ?? '',
           x.producto ?? '',
+          x.subcliente ?? '',
           x.talla ?? '',
           x.cantidad ?? '',
           '',
@@ -484,6 +617,7 @@ export class CosteoReportesService {
       'OP',
       'LINE',
       'Producto',
+      'Subcliente',
       'Talla',
       'Cantidad',
       'Impresora',
@@ -499,6 +633,7 @@ export class CosteoReportesService {
         x.orden,
         x.codigoLine ?? '',
         x.producto ?? '',
+        x.subcliente ?? '',
         x.talla ?? '',
         x.cantidad ?? '',
         x.impresora,

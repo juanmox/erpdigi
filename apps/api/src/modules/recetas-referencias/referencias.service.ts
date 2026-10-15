@@ -9,6 +9,25 @@ export class ReferenciasService {
     return this.prisma.cliente.findMany({ orderBy: { nombre: 'asc' } });
   }
 
+  /**
+   * Subclientes activos (divisiones/marcas de un cliente). Traen su cliente
+   * padre porque el selector del producto tiene que poder mostrar a quién
+   * pertenecen: dos clientes podrían tener un subcliente con el mismo nombre.
+   */
+  subclientes() {
+    return this.prisma.subcliente.findMany({
+      where: { activo: true },
+      orderBy: [{ cliente: { nombre: 'asc' } }, { nombre: 'asc' }],
+      select: {
+        idSubcliente: true,
+        idCliente: true,
+        codigo: true,
+        nombre: true,
+        cliente: { select: { nombre: true } },
+      },
+    });
+  }
+
   tallas() {
     return this.prisma.talla.findMany({ orderBy: { orden: 'asc' } });
   }

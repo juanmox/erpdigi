@@ -6,6 +6,7 @@ function query(f: FiltrosConsumo) {
   const p = new URLSearchParams({ desde: f.desde, hasta: f.hasta })
   if (f.idCliente) p.set('idCliente', f.idCliente)
   if (f.idImpresora) p.set('idImpresora', f.idImpresora)
+  if (f.idSubcliente) p.set('idSubcliente', f.idSubcliente)
   return p.toString()
 }
 

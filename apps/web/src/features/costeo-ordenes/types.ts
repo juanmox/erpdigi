@@ -30,6 +30,8 @@ export interface FilaPreviewLinea {
   tallas: FilaTallaCantidad[]
   totalPiezas: number
   error: string | null
+  /** Advertencia que NO impide importar (hoy: alias de subcliente). */
+  aviso: string | null
 }
 
 export interface LineaProduccionDetalle {

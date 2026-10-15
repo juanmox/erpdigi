@@ -44,6 +44,15 @@ export interface Talla {
   frecuente: boolean
 }
 
+/** Division o marca de un cliente; no se factura aparte (ver recetas.subclientes). */
+export interface Subcliente {
+  idSubcliente: number
+  idCliente: number
+  codigo: string | null
+  nombre: string
+  cliente: { nombre: string }
+}
+
 export interface Deporte {
   idDeporte: number
   nombre: string
@@ -61,8 +70,11 @@ export interface ProductoCatalogo {
   minutosMo: number
   costoMoMinuto: number
   idCliente: number | null
+  /** Marca o división del cliente (ver Subcliente). */
+  idSubcliente: number | null
   activo: boolean
   clienteNombre: string | null
+  subclienteNombre: string | null
   costoUnitario: number
   /// Estado del desarrollo asignado (null si no tiene).
   estadoDesarrollo: string | null

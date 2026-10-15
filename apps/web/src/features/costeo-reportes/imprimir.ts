@@ -67,6 +67,7 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <td class="mono">${esc(x.orden)}</td>
       <td class="mono">${esc(x.codigoLine)}</td>
       <td>${esc(x.producto)}</td>
+      <td>${esc(x.subcliente)}</td>
       <td>${esc(x.talla)}</td>
       <td class="n">${x.cantidad ?? ''}</td>
       <td>${esc(x.impresora)}</td>
@@ -139,10 +140,10 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
   <h2>Detalle de impresión</h2>
   <table>
     <thead><tr>
-      <th>Fecha</th><th>OP</th><th>Item</th><th>Producto</th><th>Talla</th><th class="n">Cant.</th>
+      <th>Fecha</th><th>OP</th><th>Item</th><th>Producto</th><th>Subcliente</th><th>Talla</th><th class="n">Cant.</th>
       <th>Impresora</th><th class="n">Consumo</th><th class="n">Enguiam.</th><th class="n">Total</th>
     </tr></thead>
-    <tbody>${filasImpresion || '<tr><td colspan="10">Sin impresiones en el rango.</td></tr>'}${avisoTope(d.detalleImpresion.length, 10)}</tbody>
+    <tbody>${filasImpresion || '<tr><td colspan="11">Sin impresiones en el rango.</td></tr>'}${avisoTope(d.detalleImpresion.length, 11)}</tbody>
   </table>
 
   <h2>Detalle de reposiciones</h2>

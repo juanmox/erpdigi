@@ -80,4 +80,11 @@ export interface FilaPreviewLinea {
   /** Columna "En blanco" de la plantilla; false si el archivo no la trae. */
   consumoEnBlanco: boolean;
   error: string | null;
+  /**
+   * Advertencia que NO impide importar la fila (a diferencia de `error`). Hoy
+   * la usa el alias de subcliente: una plantilla que todavía trae el código
+   * `411` carga igual, a nombre del cliente padre, pero lo dice en vez de
+   * resolverlo en silencio.
+   */
+  aviso: string | null;
 }
