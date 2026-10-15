@@ -517,6 +517,12 @@ export class CosteoConsumoPapelService {
         consumosPapel: {
           none: { origen: 'PRODUCCION', anuladoEn: null },
         },
+        // ⚠️ Y con al menos una talla. Una línea sin tallas no es trabajo: no
+        // hay nada que imprimir y `capturarUna()` no podría enviarla nunca, así
+        // que se quedaría en la cola para siempre. Pasa cuando una corrección
+        // anula TODAS las tallas de un ítem (ver `anularLote`), y pasó de
+        // verdad el 2026-10-15 con 4 ítems que quedaron mostrándose en cero.
+        tallas: { some: {} },
       },
       include: {
         ordenProduccion: { include: { cliente: true } },
@@ -1578,6 +1584,22 @@ export class CosteoConsumoPapelService {
           tallasQuitadas += borradas.count;
         }
       }
+
+      /**
+       * ⚠️ El ítem NO se borra aunque quede sin ninguna talla, y no es un
+       * olvido: **la base lo impide, con razón**. `consumo_papel` tiene
+       * `CHECK (origen='PRODUCCION' AND id_linea_produccion IS NOT NULL)` y la
+       * FK es `ON DELETE SET NULL`, así que borrar la línea intenta dejar en
+       * NULL una columna que el CHECK exige — Postgres rechaza con 23514.
+       *
+       * O sea: un consumo de producción, incluso ANULADO, necesita saber de qué
+       * ítem era. Borrar la línea destruiría justamente el rastro que la
+       * anulación existe para conservar. Se intentó y el CHECK lo frenó.
+       *
+       * El problema que esto iba a resolver —el ítem vacío quedándose para
+       * siempre en la cola de trabajo— se resuelve donde corresponde: en el
+       * criterio de "pendiente", que ahora exige `tallas: { some: {} }`.
+       */
       return { tallasQuitadas };
     });
 

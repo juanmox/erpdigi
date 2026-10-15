@@ -175,7 +175,8 @@ export function ModalCorregir({
                   <span className="text-muted-foreground block text-xs">
                     Déjalo marcado si la talla nunca debió estar. Desmárcalo si la prenda sí se
                     pidió y lo que estuvo mal fue el consumo: así la talla queda pendiente de
-                    capturar.
+                    capturar. Si un ítem se queda sin
+                    ninguna talla, deja de aparecer como trabajo pendiente.
                   </span>
                 </span>
               </label>

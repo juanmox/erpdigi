@@ -376,6 +376,11 @@ export class CosteoOrdenesService {
   ) {
     const lineaPendiente = {
       consumosPapel: { none: { origen: 'PRODUCCION', anuladoEn: null } },
+      // Mismo criterio que el panel de Impresión de OPs, incluido el "y con al
+      // menos una talla": una línea sin tallas no se puede imprimir, así que no
+      // es trabajo pendiente. Si los dos criterios divergen, las dos pantallas
+      // dan respuestas distintas a la misma pregunta.
+      tallas: { some: {} },
     } as const;
 
     // `some: {}` en los tres modos: una OP sin ninguna línea no tiene nada que
