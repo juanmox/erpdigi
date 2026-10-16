@@ -7,6 +7,7 @@ Cubre tres commits que van **juntos y en orden**:
 | A | Catálogos de deporte y línea | `8b2d44b` |
 | B | Subclientes (migración + código + script de fusión) | `d2d85c7` |
 | C | `clientes.activo` + la FK deja de vaciar órdenes | `c9cfe70` |
+| D | Seguridad del despliegue, y `UABBGTWSH1` marcado como Under Armour | — |
 
 > **Ensayado antes de escribir esto.** El procedimiento completo —fusión,
 > reversión, fusión de nuevo y las dos migraciones— se corrió contra una base
@@ -58,9 +59,22 @@ pg_dump "$URL" --schema=recetas --schema=costeo --schema=core \
 ls -la ~/backups/antes-subclientes-$STAMP.sql   # que NO esté vacío
 ```
 
-### 2. Verificación previa (no escribe nada)
+### 2. Traer los scripts
+
+⚠️ Los scripts viven en el repo, así que el `git pull` va **antes** del
+preflight. Es seguro: solo actualiza archivos en disco; PM2 sigue corriendo el
+build anterior y nada cambia para los usuarios hasta el paso 4.
 
 ```bash
+cd /home/erpadmin/digitexsa-erp && git pull --ff-only
+```
+
+(`deploy.sh` hace su propio pull; después de esto le queda como no-op.)
+
+### 3. Verificación previa (no escribe nada)
+
+```bash
+cd apps/api
 psql "$URL" -f scripts/preflight-subclientes.sql
 ```
 
@@ -71,7 +85,7 @@ Qué tiene que dar:
 - **5** — los tres riesgos en **0**. Si alguno da 1, el despliegue ya se aplicó
   en parte: **parar** y revisar antes de seguir.
 
-### 3. Fusión
+### 4. Fusión
 
 ```bash
 psql "$URL" -v ON_ERROR_STOP=1 -f scripts/fusionar-under-armour-en-bsn.sql
@@ -91,7 +105,7 @@ psql "$URL" -c "SELECT count(*) FROM costeo.orden_produccion WHERE id_cliente IS
 preflight lo imprime en su punto 4). Si subió, algo vació órdenes: **parar y
 revertir**.
 
-### 4. Despliegue
+### 5. Despliegue
 
 ```bash
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
@@ -101,7 +115,7 @@ bash scripts/deploy.sh
 
 Esperar a que llegue a **"Listo"**. Aplica las dos migraciones.
 
-### 5. Verificación posterior
+### 6. Verificación posterior
 
 ```bash
 psql "$URL" -c "
@@ -110,6 +124,10 @@ SELECT (SELECT count(*) FROM recetas.subclientes) AS subclientes,
        (SELECT count(*) FROM recetas.clientes WHERE activo) AS activos,
        (SELECT count(*) FROM recetas.productos) = (SELECT count(*) FROM recetas.v_producto_costo) AS invariante;"
 ```
+
+`marcados` debe dar **44**: los 43 del prefijo `UA-`/`YUA-` más `UABBGTWSH1`,
+que está escrito sin guion y por eso necesita su propia migración (confirmado
+con el usuario que sí es Under Armour; se usa en 85 líneas de producción).
 
 `invariante` debe ser `t`. Y la guarda nueva:
 
@@ -122,7 +140,7 @@ Tiene que **fallar** con un error de llave foránea. Si pasa, la FK no quedó.
 En el navegador: abrir una OP con prendas `UA-*` y confirmar que dice
 `BSN SPORTS` con `Under Armour` debajo.
 
-### 6. Catálogos de deporte y línea (aparte, opcional)
+### 7. Catálogos de deporte y línea (aparte, opcional)
 
 No es parte del despliegue; se puede correr después, cualquier día.
 
@@ -158,8 +176,10 @@ ensayo**: devolvió las 725 órdenes y los 4 productos, dejando el total de
 en orden inverso, y después la reversión.
 
 ```bash
+psql "$URL" -f prisma/migrations/20261015160000_subcliente_ua_sin_guion/rollback.sql
 psql "$URL" -f prisma/migrations/20261015140000_cliente_activo_y_guarda/rollback.sql
 psql "$URL" -f prisma/migrations/20261015120000_subclientes/rollback.sql
+npx prisma migrate resolve --rolled-back 20261015160000_subcliente_ua_sin_guion
 npx prisma migrate resolve --rolled-back 20261015140000_cliente_activo_y_guarda
 npx prisma migrate resolve --rolled-back 20261015120000_subclientes
 psql "$URL" -v ON_ERROR_STOP=1 -f scripts/revertir-fusion-under-armour.sql
