@@ -15,10 +15,40 @@ Cubre tres commits que van **juntos y en orden**:
 
 ---
 
-## ⚠️ Las migraciones que tocan `recetas` NO las aplica `deploy.sh`
+## ✅ RESUELTO el 2026-10-16: `recetas` ya es de `digitexsa_erp`
 
-Esto hizo fallar el despliegue real del 2026-10-15 y conviene leerlo antes de
-planificar cualquier migración futura sobre `recetas`.
+Lo que sigue describe un problema que **ya no existe**, y se conserva porque
+explica por qué las migraciones de este despliegue figuran como resueltas a
+mano en el historial de Prisma, y qué significa el error `42501` si reaparece.
+
+`REASSIGN OWNED BY erpadmin TO digitexsa_erp` pasó los 30 objetos de `recetas`
+—14 tablas, 14 secuencias, 2 vistas, más el schema, la función
+`fn_siguiente_folio` y la extensión `pg_trgm`— al rol con el que corre la app.
+Verificado después: `CREATE TABLE` y `ALTER TABLE` en `recetas` funcionan con
+ese rol (las dos operaciones exactas que habían fallado), los índices trigram
+siguen vivos, el invariante `productos = v_producto_costo` en pie y PM2 sin
+reiniciar. **`deploy.sh` vuelve a ser un solo comando.**
+
+`recetas` era de `erpadmin` solo porque lo había creado `01_erp`, apagado desde
+el 2026-08-31. Consolidar el dueño elimina la causa de raíz.
+
+⚠️ **`erpadmin` ya no puede leer `recetas`.** No afecta a producción —nada se
+conecta con ese rol; la app, el deploy y los respaldos usan `digitexsa_erp`—
+pero sí quita la vía rápida de diagnóstico (`psql -d erpdb` por peer). Para
+recuperarla, como `digitexsa_erp` (ya no hace falta sudo, porque ahora es el
+dueño):
+
+```bash
+psql "$URL" -c "GRANT USAGE ON SCHEMA recetas TO erpadmin;
+                GRANT SELECT ON ALL TABLES IN SCHEMA recetas TO erpadmin;
+                ALTER DEFAULT PRIVILEGES IN SCHEMA recetas GRANT SELECT ON TABLES TO erpadmin;"
+```
+
+---
+
+## El problema que había (histórico)
+
+Esto hizo fallar el despliegue real del 2026-10-15.
 
 `recetas` es de **`erpadmin`**; `core` y `costeo` son de **`digitexsa_erp`**, el
 rol con el que corre la app. **Ninguno de los dos es miembro del otro ni
