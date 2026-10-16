@@ -15,6 +15,52 @@ Cubre tres commits que van **juntos y en orden**:
 
 ---
 
+## ⚠️ Las migraciones que tocan `recetas` NO las aplica `deploy.sh`
+
+Esto hizo fallar el despliegue real del 2026-10-15 y conviene leerlo antes de
+planificar cualquier migración futura sobre `recetas`.
+
+`recetas` es de **`erpadmin`**; `core` y `costeo` son de **`digitexsa_erp`**, el
+rol con el que corre la app. **Ninguno de los dos es miembro del otro ni
+superusuario**, así que `prisma migrate deploy` —que conecta como
+`digitexsa_erp`— no puede:
+
+- **crear** objetos en `recetas` (falla con `42501 permission denied for schema
+  recetas`), ni
+- **alterar** tablas de `recetas`: un `ALTER TABLE` exige ser DUEÑO, y un
+  `GRANT CREATE` no alcanza para eso.
+
+Qué hacer, que es lo que se hizo ese día:
+
+```bash
+# 1. Limpiar el intento fallido (verificando antes qué quedó aplicado).
+npx prisma migrate resolve --rolled-back <nombre_migracion>
+
+# 2. Aplicar cada migración con el dueño que corresponde.
+#    Solo recetas  -> psql -d erpdb            (conecta como erpadmin por peer)
+#    Solo costeo   -> psql "$URL"              (conecta como digitexsa_erp)
+#    CRUZA schemas -> PARTIRLA y correr cada mitad con su dueño.
+
+# 3. Avisarle a Prisma que ya están.
+npx prisma migrate resolve --applied <nombre_migracion>
+```
+
+De las tres de este despliegue: `20261015120000_subclientes` es toda de
+`recetas`; `20261015160000_subcliente_ua_sin_guion` también; y
+`20261015140000_cliente_activo_y_guarda` **cruza** —agrega una columna en
+`recetas.clientes` y cambia una FK en `costeo.orden_produccion`—, así que hubo
+que partirla.
+
+**Los permisos de las tablas nuevas salen solos**: el
+`ALTER DEFAULT PRIVILEGES FOR ROLE erpadmin IN SCHEMA recetas` que se dejó en
+agosto le da `arwd` a `digitexsa_erp` sobre todo lo que `erpadmin` cree ahí
+(verificado sobre `recetas.subclientes`). Sin eso, la app levantaría y fallaría
+en silencio con `42501` en cada consulta.
+
+⚠️ **Un ensayo en una base local NO detecta nada de esto**: ahí un solo rol es
+dueño de todo. Para que un ensayo cubra este riesgo tendría que reproducir
+también los dueños, no solo los datos.
+
 ## Por qué el orden no se puede cambiar
 
 `fusionar-under-armour-en-bsn.sql` va **antes** de `migrate deploy`, y la base
