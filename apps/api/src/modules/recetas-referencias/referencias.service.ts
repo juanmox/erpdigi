@@ -5,8 +5,17 @@ import { PrismaService } from '../../prisma/prisma.service';
 export class ReferenciasService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Solo los activos: este endpoint alimenta selectores, y ofrecer un cliente
+   * retirado invita a seguir usándolo. Los registros que YA apuntan a uno
+   * inactivo no se ven afectados — su nombre se resuelve por id, no por esta
+   * lista.
+   */
   clientes() {
-    return this.prisma.cliente.findMany({ orderBy: { nombre: 'asc' } });
+    return this.prisma.cliente.findMany({
+      where: { activo: true },
+      orderBy: { nombre: 'asc' },
+    });
   }
 
   /**

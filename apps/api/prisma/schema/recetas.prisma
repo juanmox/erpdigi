@@ -22,6 +22,10 @@ model Cliente {
   idCliente Int        @id @default(autoincrement()) @map("id_cliente")
   codigo    String     @unique @db.VarChar(20)
   nombre    String     @db.VarChar(150)
+  /// Retirar en vez de borrar. Un cliente mal creado solo se podía eliminar, y
+  /// eso obliga a repuntar todo su histórico primero; desactivarlo lo saca de
+  /// los selectores y del import dejando los datos donde están.
+  activo    Boolean    @default(true)
   productos Producto[]
 
   /// Relaciones inversas del módulo Costeo Real (costeo.prisma) — costeo

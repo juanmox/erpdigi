@@ -67,6 +67,15 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
     }
   }, [open, producto])
 
+  // Un producto puede apuntar a un cliente que después se retiró. El selector
+  // solo trae activos, así que hay que reponerlo a mano o el formulario diría
+  // "Sin cliente" para un producto que sí lo tiene.
+  const clienteRetirado = useMemo(() => {
+    if (!producto?.idCliente || !clientes) return null
+    if (clientes.some((c) => c.idCliente === producto.idCliente)) return null
+    return { id: producto.idCliente, nombre: producto.clienteNombre ?? 'Cliente retirado' }
+  }, [producto, clientes])
+
   // Solo los del cliente elegido: el servidor rechaza un subcliente de otro,
   // y ofrecerlos invitaría a ese error.
   const subclientesDelCliente = useMemo(
@@ -195,6 +204,15 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={SIN_VALOR}>Sin cliente</SelectItem>
+                {/* El cliente actual, aunque esté retirado: /recetas/clientes
+                    solo devuelve activos, así que sin esto un producto de un
+                    cliente retirado mostraría "Sin cliente" — y guardarlo lo
+                    perdería de verdad. */}
+                {clienteRetirado && (
+                  <SelectItem value={String(clienteRetirado.id)}>
+                    {clienteRetirado.nombre} (retirado)
+                  </SelectItem>
+                )}
                 {clientes?.map((c) => (
                   <SelectItem key={c.idCliente} value={String(c.idCliente)}>
                     {c.nombre}

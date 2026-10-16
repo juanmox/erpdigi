@@ -206,7 +206,10 @@ model OrdenProduccion {
   creadoEn          DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
   creadoPor         Int       @map("creado_por")
 
-  cliente          Cliente?          @relation(fields: [idCliente], references: [idCliente])
+  /// ⚠️ onDelete: Restrict desde 2026-10-15. Era SET NULL —la única de las
+  /// cinco FK hacia clientes que lo era—, así que borrar un cliente no
+  /// fallaba: le vaciaba el cliente a todas sus órdenes, en silencio.
+  cliente          Cliente?          @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
   lineaProducto    LineaProducto?    @relation(fields: [idLineaProducto], references: [idLineaProducto])
   ofOp             OfOp[]
   lineasProduccion LineaProduccion[]

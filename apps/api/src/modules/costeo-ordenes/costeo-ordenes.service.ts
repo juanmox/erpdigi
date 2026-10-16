@@ -506,7 +506,10 @@ export class CosteoOrdenesService {
   }
 
   listarClientes() {
-    return this.prisma.cliente.findMany({ orderBy: { nombre: 'asc' } });
+    return this.prisma.cliente.findMany({
+      where: { activo: true },
+      orderBy: { nombre: 'asc' },
+    });
   }
 
   listarLineasProducto() {
@@ -646,8 +649,11 @@ export class CosteoOrdenesService {
       impresoras,
       existentesLine,
     ] = await Promise.all([
+      // Se traen también los inactivos, con su estado: hace falta para que el
+      // mensaje distinga "no existe" de "está retirado", que llevan a arreglos
+      // distintos. Resolver uno retirado sería seguir alimentándolo.
       this.prisma.cliente.findMany({
-        select: { idCliente: true, codigo: true },
+        select: { idCliente: true, codigo: true, activo: true },
       }),
       // Un subcliente no se factura aparte, así que su código en la columna
       // Cliente resuelve al cliente PADRE. Existe para que las plantillas ya
@@ -680,7 +686,12 @@ export class CosteoOrdenesService {
       }),
     ]);
     const clientePorCodigo = new Map(
-      clientes.map((c) => [c.codigo.toLowerCase(), c.idCliente]),
+      clientes
+        .filter((c) => c.activo)
+        .map((c) => [c.codigo.toLowerCase(), c.idCliente]),
+    );
+    const clienteInactivoPorCodigo = new Map(
+      clientes.filter((c) => !c.activo).map((c) => [c.codigo.toLowerCase(), c]),
     );
     // Si un código existiera como cliente Y como subcliente, gana el cliente:
     // se consulta este mapa solo cuando el de clientes no encontró nada. La
@@ -755,7 +766,9 @@ export class CosteoOrdenesService {
         error = `La orden de compra "${r.ordenCompra}" ya la usa otra OP del archivo — los Item quedarían repetidos`;
       else if (!r.cliente) error = 'Cliente vacío';
       else if (idCliente === null)
-        error = `Cliente "${r.cliente}" no reconocido`;
+        error = clienteInactivoPorCodigo.has(r.cliente.toLowerCase())
+          ? `El cliente "${r.cliente}" está retirado, así que no se le pueden cargar órdenes nuevas`
+          : `Cliente "${r.cliente}" no reconocido`;
       else if (r.lineaProducto && idLineaProducto === null)
         error = `Línea de producto "${r.lineaProducto}" no existe — dar de alta primero desde Órdenes de Producción → "Líneas de producto"`;
       else if (!r.producto) error = 'Producto vacío';
@@ -1128,6 +1141,7 @@ export class CosteoOrdenesService {
     // hoja "Tipos de papel" del import de rollos.
     const [clientes, lineas] = await Promise.all([
       this.prisma.cliente.findMany({
+        where: { activo: true },
         select: { codigo: true, nombre: true },
         orderBy: { nombre: 'asc' },
       }),
