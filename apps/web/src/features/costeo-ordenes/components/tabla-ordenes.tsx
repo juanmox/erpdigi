@@ -350,6 +350,12 @@ function ResumenOrden({
         {orden.codigo}
       </button>
       <span className="text-sm font-medium text-ink">{orden.cliente ?? 'Sin cliente'}</span>
+      {/* La marca viene de los productos; una orden puede tener más de una. */}
+      {orden.subclientes.map((sc) => (
+        <Badge key={sc} variant="outline">
+          {sc}
+        </Badge>
+      ))}
       {orden.lineaProducto && <Badge variant="secondary">{orden.lineaProducto}</Badge>}
       <span className="text-ink-faint text-xs">
         OC: {orden.ordenCompra ?? '—'} · Compromiso: {fechaCorta(orden.fechaCompromiso)} ·{' '}

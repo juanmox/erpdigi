@@ -71,6 +71,8 @@ export interface OrdenProduccionDetalle {
   ordenCompra: string | null
   estatus: string
   cliente: { idCliente: number; codigo: string; nombre: string } | null
+  /** Marcas presentes en la orden, de los productos de sus líneas. */
+  subclientes: string[]
   lineaProducto: { idLineaProducto: number; nombre: string } | null
   lineasProduccion: LineaProduccionDetalle[]
 }
@@ -95,6 +97,7 @@ export interface OrdenPendiente {
   idOrdenProduccion: number
   codigo: string
   cliente: string | null
+  subclientes: string[]
   lineaProducto: string | null
   ordenCompra: string | null
   fechaCompromiso: string | null

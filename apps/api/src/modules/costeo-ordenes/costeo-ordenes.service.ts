@@ -321,7 +321,10 @@ export class CosteoOrdenesService {
         lineaProducto: true,
         lineasProduccion: {
           include: {
-            producto: true,
+            // Con el subcliente, para poder mostrar la marca en la ficha: al
+            // fusionar un subcliente en su cliente padre la orden pasa a decir
+            // el padre, y sin esto la marca desaparecería de la vista.
+            producto: { include: { subcliente: { select: { nombre: true } } } },
             tallas: { include: { talla: true } },
             // Solo para saber si la línea ya se envió a imprimir; `take: 1`
             // porque alcanza con que exista uno.
@@ -351,6 +354,15 @@ export class CosteoOrdenesService {
     // puede corregir después de enviar sin tocar lo ya capturado.
     return {
       ...orden,
+      // Lista y no valor único: una orden puede mezclar prendas de un
+      // subcliente con prendas directas del mismo cliente.
+      subclientes: [
+        ...new Set(
+          orden.lineasProduccion
+            .map((l) => l.producto?.subcliente?.nombre)
+            .filter((n): n is string => !!n),
+        ),
+      ].sort(),
       // Decimal de Prisma serializa como string; la pantalla lo quiere número.
       enBlancoYd: Number(orden.enBlancoYd),
       lineasProduccion: orden.lineasProduccion.map(
@@ -426,7 +438,17 @@ export class CosteoOrdenesService {
           lineasProduccion: {
             where: estado === 'pendientes' ? lineaPendiente : undefined,
             include: {
-              producto: { select: { codigo: true, descripcion: true } },
+              producto: {
+                select: {
+                  codigo: true,
+                  descripcion: true,
+                  // Para mostrar la marca en la pantalla. Al fusionar un
+                  // subcliente en su cliente padre, la orden deja de decir
+                  // "Under Armour" y pasa a decir "BSN SPORTS"; sin esto la
+                  // marca desaparece de la vista y parece dato perdido.
+                  subcliente: { select: { nombre: true } },
+                },
+              },
               impresora: { select: { codigo: true } },
               tallas: {
                 include: { talla: { select: { nombre: true, orden: true } } },
@@ -494,6 +516,17 @@ export class CosteoOrdenesService {
           idOrdenProduccion: o.idOrdenProduccion,
           codigo: o.codigo,
           cliente: o.cliente?.nombre ?? null,
+          // Los distintos subclientes presentes en la orden. Es una LISTA y no
+          // un valor porque una orden puede mezclar prendas de un subcliente
+          // con prendas directas del mismo cliente (38 casos reales): poner
+          // uno solo obligaría a elegir un bando.
+          subclientes: [
+            ...new Set(
+              o.lineasProduccion
+                .map((l) => l.producto?.subcliente?.nombre)
+                .filter((n): n is string => !!n),
+            ),
+          ].sort(),
           lineaProducto: o.lineaProducto?.nombre ?? null,
           ordenCompra: o.ordenCompra,
           fechaCompromiso: o.fechaCompromiso,

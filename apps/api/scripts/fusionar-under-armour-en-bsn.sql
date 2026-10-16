@@ -39,6 +39,19 @@ SELECT (SELECT id_cliente FROM recetas.clientes WHERE codigo='411' AND nombre='U
        -- cliente de antes (en local había 7, de la migración del legacy).
        (SELECT count(*) FROM costeo.orden_produccion WHERE id_cliente IS NULL) AS sin_cliente_antes;
 
+-- Se GUARDA qué se va a tocar antes de tocarlo. Sin esta lista, deshacer la
+-- fusión exigiría restaurar el respaldo completo de la base; con ella alcanza
+-- con `revertir-fusion-under-armour.sql`, que la lee de la bitácora.
+CREATE TEMP TABLE afectados AS
+SELECT 'orden_produccion' AS tabla, o.codigo AS clave
+  FROM costeo.orden_produccion o WHERE o.id_cliente = (SELECT ua FROM ids)
+UNION ALL
+SELECT 'producto', p.codigo FROM recetas.productos p WHERE p.id_cliente = (SELECT ua FROM ids)
+UNION ALL
+SELECT 'desarrollo', d.codigo FROM recetas.desarrollos d WHERE d.id_cliente = (SELECT ua FROM ids)
+UNION ALL
+SELECT 'orden_facturacion', f.codigo FROM costeo.orden_facturacion f WHERE f.id_cliente = (SELECT ua FROM ids);
+
 UPDATE recetas.productos        SET id_cliente=(SELECT bsn FROM ids) WHERE id_cliente=(SELECT ua FROM ids);
 UPDATE recetas.desarrollos      SET id_cliente=(SELECT bsn FROM ids) WHERE id_cliente=(SELECT ua FROM ids);
 UPDATE costeo.orden_produccion  SET id_cliente=(SELECT bsn FROM ids) WHERE id_cliente=(SELECT ua FROM ids);
@@ -61,9 +74,16 @@ DELETE FROM recetas.clientes WHERE id_cliente=(SELECT ua FROM ids);
 INSERT INTO core.auditoria (id_empresa, id_usuario, usuario_nombre, entidad, id_entidad, accion, datos_anteriores, datos_nuevos)
 SELECT (SELECT id_empresa FROM core.empresas WHERE codigo='DIGITEXSA'), NULL, 'migración SQL',
        'recetas.clientes', '411', 'DELETE',
-       jsonb_build_object('codigo','411','nombre','UNDER ARMOUR'),
+       -- `datos_anteriores` lleva la lista completa de lo repuntado, por
+       -- código y nunca por id: es lo que hace reversible la fusión.
+       jsonb_build_object(
+         'codigo','411','nombre','UNDER ARMOUR',
+         'repuntados', (SELECT coalesce(jsonb_object_agg(tabla, claves), '{}'::jsonb)
+                        FROM (SELECT tabla, jsonb_agg(clave ORDER BY clave) AS claves
+                              FROM afectados GROUP BY tabla) t)),
        jsonb_build_object('motivo','No es un cliente sino un subcliente de BSN SPORTS; no figura en el catálogo autoritativo de 99 clientes',
-                          'destino','BSN SPORTS (181)');
+                          'destino','BSN SPORTS (181)',
+                          'revertir_con','apps/api/scripts/revertir-fusion-under-armour.sql');
 
 DO $$
 DECLARE antes int; ahora int;
@@ -72,5 +92,8 @@ BEGIN
   SELECT count(*) INTO ahora FROM costeo.orden_produccion WHERE id_cliente IS NULL;
   IF ahora <> antes THEN RAISE EXCEPTION 'OP sin cliente pasó de % a %: el SET NULL vació órdenes', antes, ahora; END IF;
 END $$;
+
+-- Qué se hizo, para que quede a la vista en la consola del despliegue.
+SELECT tabla, count(*) AS repuntados FROM afectados GROUP BY tabla ORDER BY 1;
 
 COMMIT;

@@ -87,6 +87,14 @@ export function OrdenesPage() {
                 <div>
                   <div className="text-ink-faint">Cliente</div>
                   <div className="font-medium text-ink">{orden.cliente?.nombre ?? '—'}</div>
+                  {/* La marca sale de los productos de las líneas, no de la
+                      orden. Se muestra acá para que no parezca perdida: al
+                      fusionar un subcliente en su cliente padre, la orden pasa
+                      a decir el padre y la marca ya no estaría en ningún lado
+                      de esta pantalla. */}
+                  {orden.subclientes.length > 0 && (
+                    <div className="text-ink-faint text-xs">{orden.subclientes.join(' · ')}</div>
+                  )}
                 </div>
                 <div>
                   <div className="text-ink-faint">Línea de producto</div>
