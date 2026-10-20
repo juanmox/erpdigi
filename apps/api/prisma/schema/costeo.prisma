@@ -519,6 +519,12 @@ model Reposicion {
   // que pasó, instrucciones de Diseño, etc.). Sin límite de longitud, mismo
   // patrón que consumo_papel.observacion / of_insumo.nota.
   comentario        String?
+  /// REIMPRESION (papel + tela) o MATERIALES (N insumos en reposicionInsumos).
+  /// Son EXCLUYENTES por decision del usuario (2026-10-19), y la exclusividad
+  /// la impone la base.
+  // + SQL: CHECK (tipo IN (...)) y ck_reposicion_tipo_regla, que es NOT VALID
+  //   porque ~190 filas vigentes ya la violaban al crearse.
+  tipo              String    @default("REIMPRESION") @db.VarChar(20)
   creadoEn          DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
   creadoPor         Int       @map("creado_por")
   anuladoEn         DateTime? @map("anulado_en") @db.Timestamptz(3)
@@ -534,6 +540,7 @@ model Reposicion {
   tipoPapel       TipoPapel?      @relation(fields: [idTipoPapel], references: [idTipoPapel])
   insumoTela      Insumo?         @relation(fields: [idInsumoTela], references: [idInsumo])
   consumosPapel   ConsumoPapel[]
+  reposicionInsumos ReposicionInsumo[]
 
   // Evita que dos reposiciones concurrentes para la misma OP terminen con el
   // mismo número — el número sugerido (MAX+1) solo es confiable si el motor
@@ -616,6 +623,37 @@ model PlantillaInsumoDetalle {
 }
 
 // ── Sincronización a Google Sheets (Transactional Outbox) ───────────
+/// Materiales de una reposicion tipo MATERIALES. Una requisicion lleva N.
+///
+/// La evidencia de que hace falta N y no un par de columnas: 229 de 309 grupos
+/// de reposiciones con la misma OP, fecha, departamento y defecto tienen
+/// insumos DISTINTOS, o sea que ya se parte una requisicion en varias filas
+/// porque solo cabe un insumo.
+///
+/// Se llama `reposicion_insumo` y no `_material` a proposito: si algun dia la
+/// tela se muda aca, el nombre ya sirve.
+model ReposicionInsumo {
+  idReposicionInsumo Int      @id @default(autoincrement()) @map("id_reposicion_insumo")
+  idReposicion       Int      @map("id_reposicion")
+  idInsumo           Int      @map("id_insumo")
+  /// `cantidad` y NUNCA `yardas`: de los 443 materiales, 248 se miden en
+  /// UNIDAD y 195 en YARDAS. La unidad se lee del insumo, no se guarda aca.
+  cantidad           Decimal  @db.Decimal(14, 4)
+  creadoEn           DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+
+  reposicion Reposicion @relation(fields: [idReposicion], references: [idReposicion], onDelete: Cascade, onUpdate: Cascade)
+  /// Restrict y no SetNull: un insumo ya requisado no se puede borrar. Es lo
+  /// contrario de `Reposicion.idInsumoTela`, que al ser SET NULL habria
+  /// vaciado la tela en silencio al borrar un insumo.
+  insumo     Insumo     @relation(fields: [idInsumo], references: [idInsumo], onDelete: Restrict, onUpdate: Cascade)
+
+  // + SQL: CHECK (cantidad > 0).
+  @@unique([idReposicion, idInsumo])
+  @@index([idInsumo])
+  @@map("reposicion_insumo")
+  @@schema("costeo")
+}
+
 model SyncOutbox {
   idSyncOutbox Int       @id @default(autoincrement()) @map("id_sync_outbox")
   destino      String    @db.VarChar(40)

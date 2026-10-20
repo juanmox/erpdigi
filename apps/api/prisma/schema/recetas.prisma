@@ -155,6 +155,7 @@ model Insumo {
   /// Relaciones inversas del módulo Costeo Real (costeo.prisma) — costeo
   /// referencia este catálogo por FK, no lo duplica (ver docs/02, decisión D1).
   reposicionesTelaCosteo        Reposicion[]
+  reposicionInsumosCosteo       ReposicionInsumo[]
   costosCosteo                  InsumoCosto[]
   ofInsumoCosteo                OfInsumo[]
   plantillaInsumoDetalleCosteo  PlantillaInsumoDetalle[]
