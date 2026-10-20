@@ -23,6 +23,22 @@ const INCLUDE_REPOSICION = {
   calandra: true,
   tipoPapel: true,
   insumoTela: true,
+  // Las lineas de material, con su insumo y unidad resueltos: la pantalla y
+  // el impreso los necesitan, y la unidad NO se guarda en la linea — se lee
+  // del catalogo, para que no se desincronice.
+  reposicionInsumos: {
+    include: {
+      insumo: {
+        select: {
+          idInsumo: true,
+          codigo: true,
+          descripcion: true,
+          unidad: { select: { nombre: true } },
+        },
+      },
+    },
+    orderBy: { idReposicionInsumo: 'asc' },
+  },
   ordenProduccion: { include: { cliente: true, lineaProducto: true } },
 } as const;
 
@@ -145,7 +161,72 @@ export class CosteoReposicionesService {
       idUsuarioActor,
     );
     const fecha = new Date(dto.fecha);
-    const yardasPapel = dto.yardasPapel ?? 0;
+    const tipo = dto.tipo ?? 'REIMPRESION';
+    const materiales = dto.materiales ?? [];
+
+    // ── Coherencia ───────────────────────────────────────────────────
+    // Las reglas se verifican contra LO QUE LLEGO, no contra el tipo que
+    // manda el cliente: si no, se esquivarian cambiando el tipo. El CHECK de
+    // la base las respalda, pero aca el mensaje puede decir que falta.
+    //
+    // Por que hacen falta: el formulario dejaba crear reposiciones sin
+    // impresora, sin papel o sin tela, y eso ya produjo datos malos — 17 con
+    // yardas de papel y sin impresora (29.16 yd que salieron y no se
+    // descontaron de ningun rollo, porque sin montaje no se escribe
+    // consumo_papel). El legacy si lo exigia: 0 de 3,612 migradas sin
+    // impresora o sin tela.
+    const faltan: string[] = [];
+    if (tipo === 'MATERIALES') {
+      if (materiales.length === 0)
+        faltan.push(
+          'una reposición de materiales necesita al menos un material',
+        );
+      if (dto.idImpresora != null) faltan.push('no lleva impresora');
+      if ((dto.yardasPapel ?? 0) > 0) faltan.push('no lleva yardas de papel');
+      if (dto.idInsumoTela != null) faltan.push('no lleva tela');
+      if ((dto.yardasTela ?? 0) > 0) faltan.push('no lleva yardas de tela');
+    } else {
+      if (materiales.length > 0)
+        faltan.push('una reimpresión no lleva materiales: son excluyentes');
+      if (dto.idImpresora == null) faltan.push('falta la impresora');
+      if ((dto.yardasPapel ?? 0) <= 0)
+        faltan.push('faltan las yardas de papel');
+      if (dto.idInsumoTela == null) faltan.push('falta la tela');
+      if ((dto.yardasTela ?? 0) <= 0) faltan.push('faltan las yardas de tela');
+    }
+    if (faltan.length > 0)
+      throw new BadRequestException(
+        `No se puede registrar: ${faltan.join('; ')}.`,
+      );
+
+    // Los materiales se resuelven contra el catalogo: un insumo inexistente o
+    // inactivo se rechaza aca con un mensaje legible, en vez de dejar que
+    // reviente la FK.
+    if (materiales.length > 0) {
+      const ids = [...new Set(materiales.map((m) => m.idInsumo))];
+      if (ids.length !== materiales.length)
+        throw new BadRequestException(
+          'Hay un material repetido en la lista: sumá las cantidades en una sola línea.',
+        );
+      const encontrados = await this.prisma.insumo.findMany({
+        where: { idInsumo: { in: ids } },
+        select: { idInsumo: true, codigo: true, activo: true },
+      });
+      const faltantes = ids.filter(
+        (id) => !encontrados.some((e) => e.idInsumo === id),
+      );
+      if (faltantes.length > 0)
+        throw new BadRequestException(
+          `Hay ${faltantes.length} material(es) que ya no existen en el catálogo.`,
+        );
+      const inactivos = encontrados.filter((e) => !e.activo);
+      if (inactivos.length > 0)
+        throw new BadRequestException(
+          `Material(es) retirado(s) del catálogo: ${inactivos.map((i) => i.codigo).join(', ')}.`,
+        );
+    }
+
+    const yardasPapel = tipo === 'MATERIALES' ? 0 : (dto.yardasPapel ?? 0);
 
     const { idReposicion, nrolloTexto } = await this.prisma.$transaction(
       async (tx) => {
@@ -212,12 +293,27 @@ export class CosteoReposicionesService {
             idMontajeRollo,
             idTipoPapel,
             yardasPapel,
-            idInsumoTela: dto.idInsumoTela ?? null,
-            yardasTela: dto.yardasTela ?? 0,
+            idInsumoTela:
+              tipo === 'MATERIALES' ? null : (dto.idInsumoTela ?? null),
+            yardasTela: tipo === 'MATERIALES' ? 0 : (dto.yardasTela ?? 0),
+            tipo,
             comentario: dto.comentario ?? null,
             creadoPor: idUsuarioActor,
           },
         });
+
+        // Las lineas de material van en la misma transaccion: una reposicion
+        // MATERIALES sin lineas no tiene sentido, y el CHECK de la base no
+        // puede imponerlo porque es entre tablas.
+        if (materiales.length > 0) {
+          await tx.reposicionInsumo.createMany({
+            data: materiales.map((m) => ({
+              idReposicion: reposicion.idReposicion,
+              idInsumo: m.idInsumo,
+              cantidad: m.cantidad,
+            })),
+          });
+        }
 
         // Si la reposición sí consumió papel de un rollo resuelto, queda
         // registrada también como hecho de consumo — es lo que permite que
@@ -270,7 +366,15 @@ export class CosteoReposicionesService {
       where: { idEmpresa },
       select: { espejaSheets: true },
     });
-    if (empresa?.espejaSheets)
+    // ⚠️ Las de MATERIALES NO se espejan, por decision explicita del usuario
+    // (2026-10-19): solo PostgreSQL. La hoja "Registro" del libro legacy son
+    // 16 columnas fijas sin ninguna de material, y la mas parecida (J/K, TELA
+    // y YARDAS TELA) la leen los Dashboards como tela — mandar bolsas y
+    // etiquetas ahi las contaria como yardas de tela.
+    //
+    // Consecuencia a tener presente: las requisiciones de material NO
+    // aparecen en los Dashboards de Data Studio.
+    if (empresa?.espejaSheets && tipo !== 'MATERIALES')
       void this.espejarEnGoogleSheets(detalle, nrolloTexto);
 
     return detalle;

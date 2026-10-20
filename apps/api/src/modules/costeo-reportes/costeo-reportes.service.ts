@@ -49,6 +49,15 @@ const F4 = (n: number) => +n.toFixed(4);
  */
 export const ETIQUETA_EN_BLANCO = 'En blanco por REPO';
 
+/** `61601403 × 12 UNIDAD · 6120100 × 500 YARDAS`, para una sola celda. */
+export function resumirMateriales(
+  materiales: { codigo: string; cantidad: number; unidad: string }[],
+): string {
+  return materiales
+    .map((m) => `${m.codigo} × ${m.cantidad} ${m.unidad}`)
+    .join(' · ');
+}
+
 @Injectable()
 export class CosteoReportesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -208,6 +217,21 @@ export class CosteoReportesService {
           impresora: { select: { codigo: true } },
           tipoPapel: { select: { nombre: true } },
           insumoTela: { select: { codigo: true, descripcion: true } },
+          // Una reposicion de MATERIALES no lleva papel ni tela: lo que
+          // entrego son estas lineas. Sin ellas su fila del detalle sale
+          // practicamente vacia y lo requisado no aparece en ningun lado.
+          reposicionInsumos: {
+            include: {
+              insumo: {
+                select: {
+                  codigo: true,
+                  descripcion: true,
+                  unidad: { select: { nombre: true } },
+                },
+              },
+            },
+            orderBy: { idReposicionInsumo: 'asc' },
+          },
         },
         orderBy: [{ fecha: 'asc' }, { idReposicion: 'asc' }],
       }),
@@ -396,6 +420,7 @@ export class CosteoReportesService {
       fecha: rp.fecha,
       orden: rp.ordenProduccion.codigo,
       codigoRepo: rp.codigoRepo,
+      tipo: rp.tipo,
       departamento: rp.departamento.nombre,
       defecto: rp.defecto.nombre,
       impresora: rp.impresora?.codigo ?? null,
@@ -403,6 +428,21 @@ export class CosteoReportesService {
       yardasPapel: Number(rp.yardasPapel),
       tela: rp.insumoTela?.descripcion ?? null,
       yardasTela: Number(rp.yardasTela),
+      /**
+       * Los materiales requisados, cada uno en la unidad de su catalogo.
+       *
+       * ⚠️ NO entran en ningun total de yardas del reporte, y no es un olvido:
+       * no salen del rollo y mezclan unidades (de los 443 materiales, 248
+       * estan en UNIDAD y 195 en YARDAS), asi que sumarlos daria un numero sin
+       * significado fisico. Lo que hace falta para costearlos es el precio del
+       * insumo, que es trabajo de F5.
+       */
+      materiales: rp.reposicionInsumos.map((m) => ({
+        codigo: m.insumo.codigo,
+        descripcion: m.insumo.descripcion,
+        unidad: m.insumo.unidad.nombre,
+        cantidad: Number(m.cantidad),
+      })),
     }));
 
     return {
@@ -528,6 +568,12 @@ export class CosteoReportesService {
       'Total papel (yd)',
       'Tela',
       'Tela (yd)',
+      // El material va en SUS columnas y nunca en las de papel o tela: es otro
+      // material, con su propia unidad, y meterlo en una columna de yardas
+      // corromperia cualquier tabla dinamica que sume papel.
+      'Material',
+      'Cantidad material',
+      'Unidad',
     ]);
     encC.eachCell((c) => Object.assign(c, negrita));
 
@@ -569,21 +615,54 @@ export class CosteoReportesService {
         ],
       });
 
-    for (const x of d.detalleReposiciones)
+    for (const x of d.detalleReposiciones) {
+      // ⚠️ Los cinco vacíos son LINE, Producto, Subcliente, Talla y Cantidad.
+      // Faltaba el último, así que desde "Cantidad" en adelante TODA fila de
+      // reposición salía corrida una columna: el número de repo caía bajo
+      // "Cantidad", las yardas de papel bajo "Tipo de papel" y la descripción
+      // de la tela bajo "Total papel (yd)". Medido sobre el libro real: 3,623
+      // filas mal rotuladas, y cualquier tabla dinámica sumaba 0 de papel.
+      const comunes = [
+        fecha(x.fecha),
+        x.tipo === 'MATERIALES' ? 'Materiales' : 'Reposición',
+        x.orden,
+        clientePorOp.get(x.orden) ?? '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        x.codigoRepo ?? '',
+        x.departamento,
+        x.defecto,
+      ];
+      if (x.tipo === 'MATERIALES') {
+        // Una fila por material: es lo que permite agrupar por insumo. Las
+        // columnas de papel y tela quedan vacías, no en 0 — un 0 se lee como
+        // "se entregaron cero yardas" y acá no se entregó papel en absoluto.
+        for (const m of x.materiales)
+          filas.push({
+            fecha: x.fecha,
+            celdas: [
+              ...comunes,
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              `${m.codigo} ${m.descripcion}`,
+              m.cantidad,
+              m.unidad,
+            ],
+          });
+        continue;
+      }
       filas.push({
         fecha: x.fecha,
         celdas: [
-          fecha(x.fecha),
-          'Reposición',
-          x.orden,
-          clientePorOp.get(x.orden) ?? '',
-          '',
-          '',
-          '',
-          '',
-          x.codigoRepo ?? '',
-          x.departamento,
-          x.defecto,
+          ...comunes,
           x.impresora ?? '',
           x.tipoPapel ?? '',
           x.yardasPapel,
@@ -593,8 +672,12 @@ export class CosteoReportesService {
           // La tela va en su columna y NO suma al papel: es otro material y no
           // sale del rollo. Sumarla daría un número sin significado físico.
           x.yardasTela,
+          '',
+          '',
+          '',
         ],
       });
+    }
 
     // Ordenadas por fecha para que la hoja se lea como una línea de tiempo:
     // mezcladas por tipo es justamente lo que se quiere poder agrupar después.
@@ -606,9 +689,11 @@ export class CosteoReportesService {
     cons.views = [{ state: 'frozen', ySplit: 1 }];
     // Autofiltro sobre el rango real, que es lo que hace usable la hoja sin
     // tener que seleccionarla a mano cada vez.
+    // Hasta la última columna de verdad: estaba fijo en 18 cuando ya eran 19,
+    // así que "Tela (yd)" quedaba fuera del filtro.
     cons.autoFilter = {
       from: { row: 1, column: 1 },
-      to: { row: 1, column: 18 },
+      to: { row: 1, column: encC.cellCount },
     };
 
     const imp = wb.addWorksheet('Detalle impresión');
@@ -649,6 +734,7 @@ export class CosteoReportesService {
       'Fecha',
       'OP',
       'No. repo',
+      'Tipo',
       'Departamento',
       'Defecto',
       'Impresora',
@@ -656,6 +742,7 @@ export class CosteoReportesService {
       'Yardas papel',
       'Tela',
       'Yardas tela',
+      'Materiales',
     ]);
     encRep.eachCell((c) => Object.assign(c, negrita));
     for (const x of d.detalleReposiciones)
@@ -663,6 +750,7 @@ export class CosteoReportesService {
         fecha(x.fecha),
         x.orden,
         x.codigoRepo ?? '',
+        x.tipo === 'MATERIALES' ? 'Materiales' : 'Reimpresión',
         x.departamento,
         x.defecto,
         x.impresora ?? '',
@@ -670,8 +758,14 @@ export class CosteoReportesService {
         x.yardasPapel,
         x.tela ?? '',
         x.yardasTela,
+        // Esta hoja es una fila por reposición, así que los materiales van
+        // resumidos en una celda. Uno por fila está en "Consolidado", que es
+        // la hoja pensada para agrupar.
+        resumirMateriales(x.materiales),
       ]);
-    rep.columns.forEach((c, i) => (c.width = i === 4 || i === 8 ? 26 : 14));
+    rep.columns.forEach(
+      (c, i) => (c.width = i === 5 || i === 9 || i === 11 ? 26 : 14),
+    );
 
     return wb.xlsx.writeBuffer();
   }

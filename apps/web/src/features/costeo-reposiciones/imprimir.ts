@@ -18,12 +18,15 @@ export function imprimirReposicion(
   const fechaFmt = `${String(f.getDate()).padStart(2, '0')}.${String(f.getMonth() + 1).padStart(2, '0')}.${String(f.getFullYear()).slice(-2)}`
 
   // Una reposición puede consumir papel Y tela a la vez — se imprime una fila
-  // por cada material presente, nunca se descarta uno a favor del otro.
-  const filas: { codigo: string; descripcion: string; cantidad: number }[] = []
+  // por cada material presente, nunca se descarta uno a favor del otro. Una
+  // reposición de MATERIALES no trae ninguno de los dos: lleva sus N líneas de
+  // insumo, cada una con la unidad de su catálogo.
+  const filas: { codigo: string; descripcion: string; unidad: string; cantidad: number }[] = []
   if (Number(r.yardasPapel) > 0) {
     filas.push({
       codigo: '',
       descripcion: `${r.tipoPapel?.nombre ?? 'Papel'} — cargar a la OP ${r.ordenProduccion.codigo}`,
+      unidad: 'yds.',
       cantidad: Number(r.yardasPapel),
     })
   }
@@ -31,9 +34,24 @@ export function imprimirReposicion(
     filas.push({
       codigo: r.insumoTela?.codigo ?? '',
       descripcion: `${r.insumoTela?.descripcion ?? 'Tela'} — cargar a la OP ${r.ordenProduccion.codigo}`,
+      unidad: 'yds.',
       cantidad: Number(r.yardasTela),
     })
   }
+  for (const m of r.reposicionInsumos) {
+    filas.push({
+      codigo: m.insumo.codigo,
+      descripcion: `${m.insumo.descripcion} — cargar a la OP ${r.ordenProduccion.codigo}`,
+      unidad: m.insumo.unidad.nombre.toLowerCase(),
+      cantidad: Number(m.cantidad),
+    })
+  }
+
+  // El total solo tiene sentido si todas las filas comparten unidad. Una
+  // requisición de materiales puede mezclar UNIDAD con YARDAS, y sumar esas dos
+  // cosas daría un número que no significa nada.
+  const unidades = new Set(filas.map((x) => x.unidad))
+  const unidadComun = unidades.size === 1 ? [...unidades][0] : null
   const totalCantidad = filas.reduce((acc, x) => acc + x.cantidad, 0)
   const primerMaterial = filas[0]?.descripcion.split(' — ')[0] ?? ''
   const descripcionCabecera = [r.ordenProduccion.cliente?.nombre, primerMaterial].filter(Boolean).join(' - ')
@@ -94,7 +112,7 @@ export function imprimirReposicion(
             (fila) => `<tr>
           <td>${fila.codigo}</td>
           <td>${fila.descripcion}</td>
-          <td>yds.</td>
+          <td>${fila.unidad}</td>
           <td class="r">${fmt(fila.cantidad)}</td>
           <td>${r.ordenProduccion.codigo}</td>
         </tr>`,
@@ -102,7 +120,7 @@ export function imprimirReposicion(
           .join('')}
       </tbody>
       <tfoot>
-        <tr><td colspan="3">TOTAL</td><td class="r">${fmt(totalCantidad)}</td><td>yds.</td></tr>
+        <tr><td colspan="3">TOTAL</td><td class="r">${unidadComun ? fmt(totalCantidad) : '—'}</td><td>${unidadComun ?? ''}</td></tr>
       </tfoot>
     </table>
 

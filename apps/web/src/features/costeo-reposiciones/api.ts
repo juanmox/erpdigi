@@ -1,9 +1,15 @@
 import { apiFetch } from '@/lib/api'
-import type { Calandra, Defecto, Departamento, InsumoTela, Reposicion, SiguienteNumero } from './types'
+import type { Calandra, Defecto, Departamento, InsumoTela, Reposicion, SiguienteNumero, TipoReposicion } from './types'
+
+export interface MaterialBody {
+  idInsumo: number
+  cantidad: number
+}
 
 export interface CrearReposicionBody {
   fecha: string
   codigoOp: string
+  tipo?: TipoReposicion
   idDepartamento: number
   idEmpleado?: number
   idDefecto: number
@@ -13,6 +19,7 @@ export interface CrearReposicionBody {
   idCalandra?: number
   idInsumoTela?: number
   yardasTela?: number
+  materiales?: MaterialBody[]
   comentario?: string
 }
 
@@ -20,7 +27,7 @@ export const costeoReposicionesApi = {
   departamentos: () => apiFetch<Departamento[]>('/costeo/reposiciones/departamentos'),
   defectos: () => apiFetch<Defecto[]>('/costeo/reposiciones/defectos'),
   calandras: () => apiFetch<Calandra[]>('/costeo/reposiciones/calandras'),
-  insumosTela: () => apiFetch<InsumoTela[]>('/recetas/insumos'),
+  insumos: () => apiFetch<InsumoTela[]>('/recetas/insumos'),
   siguienteNumero: (codigoOp: string) =>
     apiFetch<SiguienteNumero>(`/costeo/reposiciones/siguiente-numero?codigoOp=${encodeURIComponent(codigoOp)}`),
   listar: (idOrdenProduccion?: number) =>

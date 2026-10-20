@@ -1,5 +1,6 @@
 import { encabezadoMarcaHTML, type MarcaEmpresa } from '@/app/marca-empresa'
 import { imprimirHTML } from '@/lib/imprimir'
+import { resumirMateriales } from '@/lib/materiales'
 import type { ReporteConsumo } from './types'
 
 const yd = (n: number) =>
@@ -85,12 +86,14 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <td>${fecha(x.fecha)}</td>
       <td class="mono">${esc(x.orden)}</td>
       <td class="mono">${esc(x.codigoRepo)}</td>
+      <td>${x.tipo === 'MATERIALES' ? 'Materiales' : 'Reimpresión'}</td>
       <td>${esc(x.departamento)}</td>
       <td>${esc(x.defecto)}</td>
       <td>${esc(x.impresora)}</td>
       <td class="n">${yd(x.yardasPapel)}</td>
       <td>${esc(x.tela)}</td>
       <td class="n">${yd(x.yardasTela)}</td>
+      <td>${esc(resumirMateriales(x.materiales))}</td>
     </tr>`,
     )
     .join('')
@@ -149,10 +152,10 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
   <h2>Detalle de reposiciones</h2>
   <table>
     <thead><tr>
-      <th>Fecha</th><th>OP</th><th>No. repo</th><th>Departamento</th><th>Defecto</th>
-      <th>Impresora</th><th class="n">Yd papel</th><th>Tela</th><th class="n">Yd tela</th>
+      <th>Fecha</th><th>OP</th><th>No. repo</th><th>Tipo</th><th>Departamento</th><th>Defecto</th>
+      <th>Impresora</th><th class="n">Yd papel</th><th>Tela</th><th class="n">Yd tela</th><th>Materiales</th>
     </tr></thead>
-    <tbody>${filasRepo || '<tr><td colspan="9">Sin reposiciones en el rango.</td></tr>'}${avisoTope(d.detalleReposiciones.length, 9)}</tbody>
+    <tbody>${filasRepo || '<tr><td colspan="11">Sin reposiciones en el rango.</td></tr>'}${avisoTope(d.detalleReposiciones.length, 11)}</tbody>
   </table>
 </body></html>`)
 }

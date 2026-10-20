@@ -36,10 +36,18 @@ export interface DetalleImpresion {
   totalYd: number
 }
 
+export interface MaterialRequisado {
+  codigo: string
+  descripcion: string
+  unidad: string
+  cantidad: number
+}
+
 export interface DetalleReposicion {
   fecha: string
   orden: string
   codigoRepo: string | null
+  tipo: 'REIMPRESION' | 'MATERIALES'
   departamento: string
   defecto: string
   impresora: string | null
@@ -47,6 +55,13 @@ export interface DetalleReposicion {
   yardasPapel: number
   tela: string | null
   yardasTela: number
+  /**
+   * Lo requisado en una reposición de materiales, cada uno en su unidad.
+   *
+   * ⚠️ No suma a ningún total de yardas del reporte: no sale del rollo y
+   * mezcla unidades, así que un total sería un número sin significado físico.
+   */
+  materiales: MaterialRequisado[]
 }
 
 export interface ReporteConsumo {

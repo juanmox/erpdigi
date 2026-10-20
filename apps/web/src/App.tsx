@@ -1,4 +1,5 @@
 import { Navigate, Route, BrowserRouter, Routes } from 'react-router-dom'
+import { Toaster } from 'sonner'
 import { Shell } from '@/app/shell'
 import { AuthProvider, useAuth } from '@/features/auth/auth-context'
 import { LoginPage } from '@/features/auth/login-page'
@@ -52,6 +53,12 @@ function RutaPublica({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <AuthProvider>
+      {/* Un solo <Toaster> para toda la app — montarlo por pantalla
+          duplicaria los avisos o los perderia al cambiar de ruta. Colores
+          ricos (richColors) para que el nivel se distinga sin leer el
+          texto, y un boton de cerrar visible en todos — los errores no
+          desaparecen solos (ver lib/avisos.tsx) y necesitan una salida. */}
+      <Toaster richColors closeButton position="top-center" />
       <BrowserRouter basename="/erp">
         <Routes>
           <Route

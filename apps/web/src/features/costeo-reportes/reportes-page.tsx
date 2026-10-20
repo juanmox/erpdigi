@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { resumirMateriales } from '@/lib/materiales'
 import { useMarcaEmpresa } from '@/app/marca-empresa'
 import { ApiError } from '@/lib/api'
 import { costeoReportesApi } from './api'
@@ -336,18 +337,22 @@ export function ReportesPage() {
               <ConteoFilas total={data.detalleReposiciones.length} />
             </h2>
             <div className="overflow-x-auto rounded-md border border-border">
-              <Table className="min-w-[900px]">
+              <Table className="min-w-[1100px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Fecha</TableHead>
                     <TableHead>OP</TableHead>
                     <TableHead>No. repo</TableHead>
+                    <TableHead>Tipo</TableHead>
                     <TableHead>Departamento</TableHead>
                     <TableHead>Defecto</TableHead>
                     <TableHead>Impresora</TableHead>
                     <TableHead className="text-right">Yd papel</TableHead>
                     <TableHead>Tela</TableHead>
                     <TableHead className="text-right">Yd tela</TableHead>
+                    {/* Los materiales van en su columna y fuera de todo total:
+                        no salen del rollo y cada uno trae su propia unidad. */}
+                    <TableHead>Materiales</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -356,12 +361,16 @@ export function ReportesPage() {
                       <TableCell>{fecha(x.fecha)}</TableCell>
                       <TableCell className="font-mono text-xs">{x.orden}</TableCell>
                       <TableCell className="font-mono text-xs">{x.codigoRepo ?? '—'}</TableCell>
+                      <TableCell>{x.tipo === 'MATERIALES' ? 'Materiales' : 'Reimpresión'}</TableCell>
                       <TableCell className="break-words whitespace-normal">{x.departamento}</TableCell>
                       <TableCell className="break-words whitespace-normal">{x.defecto}</TableCell>
                       <TableCell>{x.impresora ?? '—'}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(x.yardasPapel)}</TableCell>
                       <TableCell className="break-words whitespace-normal">{x.tela ?? '—'}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(x.yardasTela)}</TableCell>
+                      <TableCell className="break-words whitespace-normal text-xs">
+                        {x.materiales.length > 0 ? resumirMateriales(x.materiales) : '—'}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

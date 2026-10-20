@@ -1,13 +1,37 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsDateString,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
   IsString,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+
+export const TIPOS_REPOSICION = ['REIMPRESION', 'MATERIALES'] as const;
+export type TipoReposicion = (typeof TIPOS_REPOSICION)[number];
+
+/** Una línea de material de una reposición tipo MATERIALES. */
+export class MaterialReposicionDto {
+  @Type(() => Number)
+  @IsInt()
+  idInsumo!: number;
+
+  /**
+   * En la unidad del insumo, que se lee del catálogo y NO se manda: de los 443
+   * materiales, 248 están en UNIDAD y 195 en YARDAS.
+   */
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.0001)
+  cantidad!: number;
+}
 
 export class CrearReposicionDto {
   @IsDateString()
@@ -19,6 +43,18 @@ export class CrearReposicionDto {
   @IsString()
   @MinLength(1)
   codigoOp!: string;
+
+  /**
+   * REIMPRESION (papel + tela) o MATERIALES (N insumos). Son EXCLUYENTES.
+   *
+   * ⚠️ El tipo decide qué se exige, pero las reglas se verifican contra lo que
+   * de verdad llegó, no contra este campo: si el servicio confiara en él, un
+   * cliente podría saltarse la validación mandando el tipo que le conviene.
+   * Por defecto REIMPRESION, que es lo que eran las 3,623 existentes.
+   */
+  @IsOptional()
+  @IsIn(TIPOS_REPOSICION)
+  tipo?: TipoReposicion;
 
   @Type(() => Number)
   @IsInt()
@@ -65,6 +101,19 @@ export class CrearReposicionDto {
   @IsNumber()
   @Min(0)
   yardasTela?: number;
+
+  /**
+   * Las líneas de una reposición MATERIALES. El tope de 50 es defensivo: una
+   * requisición real lleva unas pocas, y sin límite un POST armado a mano
+   * podría mandar miles dentro de una sola transacción.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => MaterialReposicionDto)
+  materiales?: MaterialReposicionDto[];
 
   @IsOptional()
   @IsString()
