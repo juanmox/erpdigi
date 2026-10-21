@@ -43,6 +43,7 @@ const ESTILOS = `
   .c{text-align:center;}
   .mono{font-family:"Courier New",monospace;}
   .grupo td{background:#f3f4fb;font-weight:bold;text-transform:uppercase;font-size:9px;}
+  .ubicacion td{background:#203080;color:#fff;font-weight:bold;font-size:10.5px;padding-top:6px;padding-bottom:6px;}
   .cajita{display:inline-block;width:9px;height:9px;border:1px solid #666;}
   .anotar{background:#fcfcfc;}
   .tot td{border-top:2px solid #203080;font-weight:bold;}
@@ -56,33 +57,57 @@ const ESTILOS = `
 `
 
 /** Hoja de conteo: los rollos en bodega, agrupados por tipo de papel. */
+/**
+ * Agrupada primero por UBICACIÓN y adentro por tipo de papel — no solo por
+ * tipo como antes. Es la razón de ser de esta hoja ahora: quien cuenta en
+ * Digitexsa no tiene por qué ver las filas de DigitalPro mezcladas en medio.
+ * Lo "sin clasificar" va en su propio grupo y nunca se mete en ninguna de
+ * las dos ubicaciones conocidas por adivinanza.
+ */
 function hojaDeConteo(enBodega: RolloInventario[], incluyeCostos: boolean): string {
   if (enBodega.length === 0)
     return '<p class="nota">No hay rollos en bodega.</p>'
 
-  const porTipo = new Map<string, RolloInventario[]>()
+  const SIN_CLASIFICAR = 'Sin clasificar'
+  const porUbicacion = new Map<string, RolloInventario[]>()
   for (const r of enBodega) {
-    const xs = porTipo.get(r.tipoPapel) ?? []
+    const clave = r.ubicacion ?? SIN_CLASIFICAR
+    const xs = porUbicacion.get(clave) ?? []
     xs.push(r)
-    porTipo.set(r.tipoPapel, xs)
+    porUbicacion.set(clave, xs)
   }
+  const ubicacionesOrdenadas = [...porUbicacion.keys()].sort((a, b) =>
+    a === SIN_CLASIFICAR ? 1 : b === SIN_CLASIFICAR ? -1 : a.localeCompare(b, 'es'),
+  )
 
   let filas = ''
-  for (const tipo of [...porTipo.keys()].sort((a, b) => a.localeCompare(b, 'es'))) {
-    const xs = porTipo.get(tipo)!
-    const total = xs.reduce((t, r) => t + (r.restante ?? 0), 0)
-    filas += `<tr class="grupo"><td colspan="${incluyeCostos ? 8 : 7}">${esc(tipo)} — ${xs.length} rollo(s) · ${yd(total)} yd</td></tr>`
-    for (const r of xs) {
-      filas += `<tr>
-        <td class="c"><span class="cajita"></span></td>
-        <td class="mono">${esc(r.codigo)}</td>
-        <td>${esc(r.numeroFactura)}</td>
-        <td class="r">${r.diasDesdeFactura}</td>
-        <td class="r">${yd(r.restante)}</td>
-        ${incluyeCostos ? `<td class="r">${q(r.valor)}</td>` : ''}
-        <td class="anotar"></td>
-        <td class="anotar"></td>
-      </tr>`
+  for (const ubic of ubicacionesOrdenadas) {
+    const enUbic = porUbicacion.get(ubic)!
+    const totalUbic = enUbic.reduce((t, r) => t + (r.restante ?? 0), 0)
+    filas += `<tr class="ubicacion"><td colspan="${incluyeCostos ? 8 : 7}">${esc(ubic)} — ${enUbic.length} rollo(s) · ${yd(totalUbic)} yd</td></tr>`
+
+    const porTipo = new Map<string, RolloInventario[]>()
+    for (const r of enUbic) {
+      const xs = porTipo.get(r.tipoPapel) ?? []
+      xs.push(r)
+      porTipo.set(r.tipoPapel, xs)
+    }
+    for (const tipo of [...porTipo.keys()].sort((a, b) => a.localeCompare(b, 'es'))) {
+      const xs = porTipo.get(tipo)!
+      const total = xs.reduce((t, r) => t + (r.restante ?? 0), 0)
+      filas += `<tr class="grupo"><td colspan="${incluyeCostos ? 8 : 7}">${esc(tipo)} — ${xs.length} rollo(s) · ${yd(total)} yd</td></tr>`
+      for (const r of xs) {
+        filas += `<tr>
+          <td class="c"><span class="cajita"></span></td>
+          <td class="mono">${esc(r.codigo)}</td>
+          <td>${esc(r.numeroFactura)}</td>
+          <td class="r">${r.diasDesdeFactura}</td>
+          <td class="r">${yd(r.restante)}</td>
+          ${incluyeCostos ? `<td class="r">${q(r.valor)}</td>` : ''}
+          <td class="anotar"></td>
+          <td class="anotar"></td>
+        </tr>`
+      }
     }
   }
 
@@ -126,6 +151,15 @@ export function imprimirInventarioRollos(
         `<tr><td>${ETIQUETA_ESTADO[e.estado] ?? e.estado}</td>
          <td class="r">${e.rollos}</td>
          <td class="r">${yd(e.yardasRestantes)}</td></tr>`,
+    )
+    .join('')
+
+  const filasUbicacion = d.porUbicacion
+    .map(
+      (u) =>
+        `<tr><td>${esc(u.nombre)}</td>
+         <td class="r">${u.rollos}</td>
+         <td class="r">${yd(u.yardas)}</td></tr>`,
     )
     .join('')
 
@@ -265,6 +299,14 @@ export function imprimirInventarioRollos(
       </section>
 
       <section><h2>Balance de papel</h2>${balance}</section>
+
+      <section>
+        <h2>Por ubicación</h2>
+        <table><thead><tr><th>Ubicación</th><th class="r">Rollos</th><th class="r">Yardas restantes</th></tr></thead>
+        <tbody>${filasUbicacion}</tbody></table>
+        <p class="nota">Sobre todos los rollos, no solo bodega. "Sin clasificar" se asigna desde
+        "Corregir ingreso".</p>
+      </section>
 
       <section>
         <h2>Por tipo de papel</h2>

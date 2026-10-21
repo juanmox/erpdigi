@@ -285,6 +285,31 @@ model OfOp {
 /// secuencias son del artículo, y el código del rollo
 /// (`<numeroFactura>-<totalRollos>-<secuencia>`, vista `v_rollo_codigo`)
 /// coincide con la etiqueta física.
+/// Ubicación física de un rollo de papel: Digitexsa o DigitalPro, por ahora.
+/// NO es el catálogo de bodegas del módulo de inventario completo (pausado,
+/// ver docs/05-INVENTARIO-POR-BODEGA.md) — ese es un concepto más rico
+/// (incluirá "Bodega de Materiales", sin ubicación física única) y se llama
+/// distinto a propósito para no chocar cuando llegue.
+model Ubicacion {
+  idUbicacion Int     @id @default(autoincrement()) @map("id_ubicacion")
+  codigo      String  @unique @db.VarChar(20)
+  nombre      String  @db.VarChar(60)
+  /// Opcional y solo informativo (para heredar el color de marca en
+  /// pantalla) — NUNCA un filtro de acceso. Mismo criterio que la planta
+  /// compartida del 2026-09-28: las dos ubicaciones difieren por distancia
+  /// física, no por tenencia. Sin @relation, mismo motivo que el resto de
+  /// los `idEmpresa` de este schema (no llenar `core.Empresa` de arrays
+  /// inversos).
+  idEmpresa   Int?    @map("id_empresa")
+  activo      Boolean @default(true)
+  creadoEn    DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+
+  rollos RolloPapel[]
+
+  @@map("ubicacion")
+  @@schema("costeo")
+}
+
 model FacturaPapel {
   idFacturaPapel Int      @id @default(autoincrement()) @map("id_factura_papel")
   numeroFactura  String   @map("numero_factura") @db.VarChar(30)
@@ -330,11 +355,16 @@ model RolloPapel {
   /// resto de las columnas de auditoría de `costeo` (ver F1).
   consumidoFueraPor    Int?      @map("consumido_fuera_por")
   consumidoFueraEn     DateTime? @map("consumido_fuera_en") @db.Timestamptz(3)
+  /// Dónde está parado físicamente. NULL = sin clasificar todavía (ver nota
+  /// de la migración 20261020120000: los rollos existentes no tienen de
+  /// dónde sacar este dato, se asignan a mano por rango).
+  idUbicacion      Int?     @map("id_ubicacion")
   creadoEn         DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
 
   facturaPapel FacturaPapel   @relation(fields: [idFacturaPapel], references: [idFacturaPapel])
   tipoPapel    TipoPapel      @relation(fields: [idTipoPapel], references: [idTipoPapel])
   montajes     MontajeRollo[]
+  ubicacion    Ubicacion?     @relation(fields: [idUbicacion], references: [idUbicacion])
 
   // + SQL: FOREIGN KEY (id_factura_papel, id_tipo_papel) REFERENCES
   //   factura_papel(id_factura_papel, id_tipo_papel) ON UPDATE CASCADE — es lo

@@ -31,6 +31,19 @@ export function TabCorregirIngreso() {
     queryKey: ['costeo-rollos', 'tipos-papel'],
     queryFn: () => costeoRollosApi.listarTiposPapel(),
   })
+  const { data: ubicaciones } = useQuery({
+    queryKey: ['costeo-rollos', 'ubicaciones'],
+    queryFn: () => costeoRollosApi.listarUbicaciones(),
+  })
+
+  // Reasignar ubicación: mismo patrón "por rango" que sacar de circulación,
+  // pero sin restricción de estado (no es una corrección de captura) ni
+  // permiso aparte (cualquiera que pueda corregir ingresos puede ubicar).
+  const [ubicDesde, setUbicDesde] = useState('')
+  const [ubicHasta, setUbicHasta] = useState('')
+  const [idUbicacionAsignar, setIdUbicacionAsignar] = useState('')
+  const [asignando, setAsignando] = useState(false)
+  const [msgUbic, setMsgUbic] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
 
   const [numeroBuscar, setNumeroBuscar] = useState('')
   const [buscando, setBuscando] = useState(false)
@@ -107,6 +120,35 @@ export function TabCorregirIngreso() {
       })
     } finally {
       setMarcando(false)
+    }
+  }
+
+  async function asignarUbicacionRango() {
+    if (!factura || !idUbicacionAsignar) return
+    setAsignando(true)
+    setMsgUbic(null)
+    try {
+      const r = await costeoRollosApi.asignarUbicacion({
+        idFacturaPapel: factura.idFacturaPapel,
+        desde: Number(ubicDesde),
+        hasta: Number(ubicHasta),
+        idUbicacion: Number(idUbicacionAsignar),
+      })
+      setMsgUbic({
+        tipo: 'ok',
+        texto:
+          `${r.afectados} rollo(s) ubicado(s)` +
+          (r.sinCambio > 0 ? ` · ${r.sinCambio} ya estaban ahí` : ''),
+      })
+      await queryClient.invalidateQueries({ queryKey: ['costeo-rollos'] })
+      await recargar(factura.numeroFactura, factura.idFacturaPapel)
+    } catch (e) {
+      setMsgUbic({
+        tipo: 'error',
+        texto: e instanceof ApiError ? e.message : 'No se pudo asignar la ubicación',
+      })
+    } finally {
+      setAsignando(false)
     }
   }
 
@@ -220,6 +262,73 @@ export function TabCorregirIngreso() {
             dato original está mal, corregilo directamente en la base de datos.
           </AlertDescription>
         </Alert>
+      )}
+
+      {/* Fuera del gate de `editable`, igual que "sacar de circulacion":
+          ubicar un rollo no es corregir una captura, es decir donde esta
+          parado AHORA. Se puede reubicar aunque el rollo ya se haya montado o
+          agotado. */}
+      {factura && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Asignar ubicación</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-ink-faint text-xs">
+              En qué sitio físico están parados los rollos de este rango — Digitexsa o DigitalPro.
+              No cambia nada más del rollo.
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <Label className="mb-1 block text-xs">Del rollo #</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={ubicDesde}
+                  onChange={(e) => setUbicDesde(e.target.value)}
+                  className="w-24"
+                />
+              </div>
+              <div>
+                <Label className="mb-1 block text-xs">al #</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={ubicHasta}
+                  onChange={(e) => setUbicHasta(e.target.value)}
+                  className="w-24"
+                />
+              </div>
+              <div className="min-w-[200px]">
+                <Label className="mb-1 block text-xs">Ubicación</Label>
+                <Select value={idUbicacionAsignar} onValueChange={setIdUbicacionAsignar}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Seleccionar…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ubicaciones?.map((u) => (
+                      <SelectItem key={u.idUbicacion} value={String(u.idUbicacion)}>
+                        {u.nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                size="sm"
+                disabled={asignando || !ubicDesde || !ubicHasta || !idUbicacionAsignar}
+                onClick={() => void asignarUbicacionRango()}
+              >
+                Asignar
+              </Button>
+            </div>
+            {msgUbic && (
+              <Alert variant={msgUbic.tipo === 'error' ? 'destructive' : 'default'}>
+                <AlertDescription>{msgUbic.texto}</AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Va FUERA del gate de `editable` a propósito: corregir los datos de la

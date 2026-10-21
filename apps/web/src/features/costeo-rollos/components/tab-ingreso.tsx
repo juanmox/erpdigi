@@ -21,10 +21,15 @@ export function TabIngreso() {
     queryKey: ['costeo-rollos', 'tipos-papel'],
     queryFn: () => costeoRollosApi.listarTiposPapel(),
   })
+  const { data: ubicaciones } = useQuery({
+    queryKey: ['costeo-rollos', 'ubicaciones'],
+    queryFn: () => costeoRollosApi.listarUbicaciones(),
+  })
 
   const [numeroFactura, setNumeroFactura] = useState('')
   const [fecha, setFecha] = useState(HOY)
   const [idTipoPapel, setIdTipoPapel] = useState('')
+  const [idUbicacion, setIdUbicacion] = useState('')
   const [totalRollos, setTotalRollos] = useState('')
   const [yardasPorRollo, setYardasPorRollo] = useState('')
   const [costoUnitario, setCostoUnitario] = useState('')
@@ -38,6 +43,7 @@ export function TabIngreso() {
     setNumeroFactura('')
     setFecha(HOY)
     setIdTipoPapel('')
+    setIdUbicacion('')
     setTotalRollos('')
     setYardasPorRollo('')
     setCostoUnitario('')
@@ -54,6 +60,10 @@ export function TabIngreso() {
       setError('Seleccioná el tipo de papel')
       return
     }
+    if (!idUbicacion) {
+      setError('Seleccioná dónde queda este lote')
+      return
+    }
     if (!(total > 0)) {
       setError('El total de rollos debe ser mayor a 0')
       return
@@ -66,6 +76,7 @@ export function TabIngreso() {
         fecha,
         totalRollos: total,
         idTipoPapel: Number(idTipoPapel),
+        idUbicacion: Number(idUbicacion),
         yardasPorRollo: yardasPorRollo ? Number(yardasPorRollo) : undefined,
         costoUnitario: costoUnitario ? Number(costoUnitario) : undefined,
       })
@@ -124,6 +135,21 @@ export function TabIngreso() {
                 {tiposPapel?.map((t) => (
                   <SelectItem key={t.idTipoPapel} value={String(t.idTipoPapel)}>
                     {t.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="mb-1 block text-xs">Ubicación</Label>
+            <Select value={idUbicacion} onValueChange={setIdUbicacion}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="¿Dónde queda este lote?" />
+              </SelectTrigger>
+              <SelectContent>
+                {ubicaciones?.map((u) => (
+                  <SelectItem key={u.idUbicacion} value={String(u.idUbicacion)}>
+                    {u.nombre}
                   </SelectItem>
                 ))}
               </SelectContent>

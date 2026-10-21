@@ -7,6 +7,18 @@ export interface TipoPapel {
   activo: boolean
 }
 
+/**
+ * Donde esta parado un rollo: Digitexsa o DigitalPro, por ahora. NO es el
+ * catalogo de bodegas del modulo de inventario completo (pausado) -- ver la
+ * nota del modelo Prisma.
+ */
+export interface Ubicacion {
+  idUbicacion: number
+  codigo: string
+  nombre: string
+  activo: boolean
+}
+
 export interface Impresora {
   idImpresora: number
   codigo: string
@@ -187,6 +199,8 @@ export interface RolloInventario {
   secuencia: number
   tipoPapel: string
   tipoPapelCodigo: string
+  /** null = todavia sin clasificar. */
+  ubicacion: string | null
   estado: EstadoRollo
   yardasIniciales: number | null
   consumidas: number
@@ -236,6 +250,8 @@ export interface Inventario {
     yardasMontadas: number
     valorEnBodega: number | null
   }[]
+  /** Sobre TODOS los rollos, no solo bodega. "Sin clasificar" va al final. */
+  porUbicacion: { nombre: string; rollos: number; yardas: number }[]
   enBodega: RolloInventario[]
   enImpresoras: MontajeInventario[]
   senales: {

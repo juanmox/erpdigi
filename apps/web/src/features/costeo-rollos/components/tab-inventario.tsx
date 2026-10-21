@@ -71,7 +71,8 @@ export function TabInventario() {
       (r) =>
         r.codigo.toLowerCase().includes(t) ||
         r.numeroFactura.toLowerCase().includes(t) ||
-        r.tipoPapel.toLowerCase().includes(t),
+        r.tipoPapel.toLowerCase().includes(t) ||
+        (r.ubicacion ?? '').toLowerCase().includes(t),
     )
   }, [data, texto])
 
@@ -202,6 +203,42 @@ export function TabInventario() {
           <p className="text-ink-faint mt-2 text-xs">
             Las yardas de Agotado, Descartado y Consumido fuera del ERP son saldo en libros de papel
             que ya no está en bodega — no son papel disponible.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Por ubicación</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-ink-muted">
+                <th className="py-1.5 pr-2">Ubicación</th>
+                <th className="py-1.5 pr-2 text-right">Rollos</th>
+                <th className="py-1.5 text-right">Yardas restantes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.porUbicacion.map((u) => (
+                <tr key={u.nombre} className="border-b border-border/60">
+                  <td className="py-1.5 pr-2">
+                    {u.nombre === 'Sin clasificar' ? (
+                      <span className="text-accent-warm-strong">{u.nombre}</span>
+                    ) : (
+                      u.nombre
+                    )}
+                  </td>
+                  <td className="py-1.5 pr-2 text-right">{u.rollos}</td>
+                  <td className="py-1.5 text-right">{yd(u.yardas)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-ink-faint mt-2 text-xs">
+            Sobre todos los rollos, no solo bodega — un rollo montado también está en algún lado. Lo
+            "sin clasificar" se asigna desde la pestaña "Corregir ingreso".
           </p>
         </CardContent>
       </Card>
@@ -408,6 +445,7 @@ export function TabInventario() {
                     <tr className="border-b border-border text-left text-xs text-ink-muted">
                       <th className="py-1 pr-2">Rollo</th>
                       <th className="py-1 pr-2">Factura</th>
+                      <th className="py-1 pr-2">Ubicación</th>
                       <th className="py-1 pr-2 text-right">Días</th>
                       <th className="py-1 pr-2 text-right">Restante</th>
                       {data.incluyeCostos && <th className="py-1 text-right">Valor</th>}
@@ -418,6 +456,11 @@ export function TabInventario() {
                       <tr key={x.idRolloPapel} className="border-b border-border/60">
                         <td className="py-1 pr-2 font-mono text-xs">{x.codigo}</td>
                         <td className="py-1 pr-2 text-xs">{x.numeroFactura}</td>
+                        <td className="py-1 pr-2 text-xs">
+                          {x.ubicacion ?? (
+                            <span className="text-accent-warm-strong">Sin clasificar</span>
+                          )}
+                        </td>
                         <td className="py-1 pr-2 text-right text-xs">{x.diasDesdeFactura}</td>
                         <td className="py-1 pr-2 text-right">
                           {yd(x.restante)}

@@ -15,6 +15,7 @@ import { DesmontarMontajeDto } from './dto/desmontar-montaje.dto';
 import { EditarIngresoDto } from './dto/editar-ingreso.dto';
 import { IngresoFacturaPapelDto } from './dto/ingreso-factura-papel.dto';
 import { ListarIngresosDto } from './dto/listar-ingresos.dto';
+import { AsignarUbicacionDto } from './dto/asignar-ubicacion.dto';
 import { ListarRollosDto } from './dto/listar-rollos.dto';
 import { MarcarConsumidoFueraDto } from './dto/marcar-consumido-fuera.dto';
 import { MontarRolloDto } from './dto/montar-rollo.dto';
@@ -83,6 +84,13 @@ export class CosteoRollosService {
     });
   }
 
+  listarUbicaciones() {
+    return this.prisma.ubicacion.findMany({
+      where: { activo: true },
+      orderBy: { nombre: 'asc' },
+    });
+  }
+
   listarRollos(filtro: ListarRollosDto) {
     return this.prisma.rolloPapel.findMany({
       where: {
@@ -134,10 +142,16 @@ export class CosteoRollosService {
   }
 
   async ingreso(dto: IngresoFacturaPapelDto, idUsuarioActor: number) {
-    const tipoPapel = await this.prisma.tipoPapel.findUnique({
-      where: { idTipoPapel: dto.idTipoPapel },
-    });
+    const [tipoPapel, ubicacion] = await Promise.all([
+      this.prisma.tipoPapel.findUnique({
+        where: { idTipoPapel: dto.idTipoPapel },
+      }),
+      this.prisma.ubicacion.findUnique({
+        where: { idUbicacion: dto.idUbicacion },
+      }),
+    ]);
     if (!tipoPapel) throw new NotFoundException('Tipo de papel no encontrado');
+    if (!ubicacion) throw new NotFoundException('Ubicación no encontrada');
 
     // El mismo número de factura SÍ se puede volver a cargar, siempre que sea
     // con otro tipo de papel: una factura del proveedor trae varios artículos
@@ -173,6 +187,7 @@ export class CosteoRollosService {
           idFacturaPapel: factura.idFacturaPapel,
           secuencia: i + 1,
           idTipoPapel: dto.idTipoPapel,
+          idUbicacion: dto.idUbicacion,
           yardasIniciales: dto.yardasPorRollo ?? null,
           costoUnitario: dto.costoUnitario ?? null,
         })),
@@ -192,6 +207,7 @@ export class CosteoRollosService {
         // El NOMBRE y no el id: la bitácora narra para quien lee, y además un
         // nombre es una foto del momento que sobrevive a que lo renombren.
         tipoPapel: tipoPapel.nombre,
+        ubicacion: ubicacion.nombre,
       },
     });
 
@@ -472,6 +488,83 @@ export class CosteoRollosService {
       // Los que ya estaban como se pedía: no es un error, pero decirlo evita
       // que alguien crea que marcó 20 cuando 5 ya lo estaban.
       sinCambio: rollos.length - afectados.length,
+    };
+  }
+
+  /**
+   * Asigna la ubicación física a un RANGO de rollos de una factura. Es el
+   * único camino (además de elegirla al ingresar) para que un rollo tenga
+   * ubicación: sirve tanto para clasificar retroactivamente los que ya
+   * existen (NULL) como para corregir una mal puesta.
+   *
+   * Sin restricciones de estado a propósito, al revés de
+   * `marcarConsumidoFuera()`: la ubicación es un hecho físico presente, no
+   * una corrección de una captura pasada, así que se puede reasignar aunque
+   * el rollo ya esté montado o agotado.
+   */
+  async asignarUbicacion(dto: AsignarUbicacionDto, idUsuarioActor: number) {
+    if (dto.desde > dto.hasta)
+      throw new BadRequestException(
+        'El rango está invertido: "desde" tiene que ser menor o igual que "hasta"',
+      );
+
+    const [factura, ubicacion] = await Promise.all([
+      this.prisma.facturaPapel.findUnique({
+        where: { idFacturaPapel: dto.idFacturaPapel },
+      }),
+      this.prisma.ubicacion.findUnique({
+        where: { idUbicacion: dto.idUbicacion },
+      }),
+    ]);
+    if (!factura) throw new NotFoundException('Factura de papel no encontrada');
+    if (!ubicacion) throw new NotFoundException('Ubicación no encontrada');
+
+    const rollos = await this.prisma.rolloPapel.findMany({
+      where: {
+        idFacturaPapel: dto.idFacturaPapel,
+        secuencia: { gte: dto.desde, lte: dto.hasta },
+      },
+      orderBy: { secuencia: 'asc' },
+    });
+    if (rollos.length === 0)
+      throw new NotFoundException(
+        `La factura ${factura.numeroFactura} no tiene rollos entre el ${dto.desde} y el ${dto.hasta}`,
+      );
+
+    const porReasignar = rollos.filter(
+      (r) => r.idUbicacion !== dto.idUbicacion,
+    );
+
+    if (porReasignar.length > 0) {
+      await this.prisma.rolloPapel.updateMany({
+        where: {
+          idRolloPapel: { in: porReasignar.map((r) => r.idRolloPapel) },
+        },
+        data: { idUbicacion: dto.idUbicacion },
+      });
+
+      await this.auditoria.registrar({
+        idUsuario: idUsuarioActor,
+        entidad: 'costeo.rollo_papel',
+        idEntidad: String(dto.idFacturaPapel),
+        accion: 'UPDATE',
+        datosNuevos: {
+          accion: 'ASIGNAR_UBICACION',
+          numeroFactura: factura.numeroFactura,
+          ubicacion: ubicacion.nombre,
+          desde: dto.desde,
+          hasta: dto.hasta,
+          secuencias: porReasignar.map((r) => r.secuencia),
+        },
+      });
+    }
+
+    return {
+      afectados: porReasignar.length,
+      secuencias: porReasignar.map((r) => r.secuencia),
+      // Los que ya estaban en esa ubicación: no es un error, pero decirlo
+      // evita confundir "no hizo falta tocarlos" con "no se encontraron".
+      sinCambio: rollos.length - porReasignar.length,
     };
   }
 
@@ -1143,7 +1236,7 @@ export class CosteoRollosService {
   async inventario(incluyeCostos: boolean) {
     const [rollos, montajes] = await Promise.all([
       this.prisma.rolloPapel.findMany({
-        include: { tipoPapel: true, facturaPapel: true },
+        include: { tipoPapel: true, facturaPapel: true, ubicacion: true },
         orderBy: [{ idFacturaPapel: 'asc' }, { secuencia: 'asc' }],
       }),
       this.prisma.montajeRollo.findMany({
@@ -1188,6 +1281,9 @@ export class CosteoRollosService {
         secuencia: r.secuencia,
         tipoPapel: r.tipoPapel.nombre,
         tipoPapelCodigo: r.tipoPapel.codigo,
+        // null = todavía sin clasificar — los rollos que ya existían cuando
+        // se agregó esta columna arrancan así, y se asignan aparte por rango.
+        ubicacion: r.ubicacion?.nombre ?? null,
         estado: r.estado,
         yardasIniciales,
         consumidas,
@@ -1259,6 +1355,23 @@ export class CosteoRollosService {
       tipos.set(d.tipoPapelCodigo, t);
     }
 
+    // Por ubicación: sobre TODOS los rollos (no solo bodega), porque la
+    // pregunta es "dónde está parado cada uno", y un rollo montado también
+    // está en algún lado. `SIN_CLASIFICAR` agrupa los que no tienen ubicación
+    // todavía — nunca se reparten entre las conocidas por adivinanza.
+    const SIN_CLASIFICAR = 'Sin clasificar';
+    const ubicaciones = new Map<
+      string,
+      { nombre: string; rollos: number; yardas: number }
+    >();
+    for (const d of detalle) {
+      const nombre = d.ubicacion ?? SIN_CLASIFICAR;
+      const u = ubicaciones.get(nombre) ?? { nombre, rollos: 0, yardas: 0 };
+      u.rollos += 1;
+      u.yardas += d.restante ?? 0;
+      ubicaciones.set(nombre, u);
+    }
+
     // Antigüedad del stock en bodega: papel parado es dinero parado, y el papel
     // se maltrata con el tiempo.
     const ultimo = CORTES_ANTIGUEDAD[CORTES_ANTIGUEDAD.length - 1];
@@ -1326,6 +1439,15 @@ export class CosteoRollosService {
       },
       porTipoPapel: [...tipos.values()].sort((a, b) =>
         a.nombre.localeCompare(b.nombre, 'es'),
+      ),
+      // Sin clasificar siempre al final: es la llamada a la acción, no una
+      // ubicación más — mezclada alfabéticamente se perdería de vista.
+      porUbicacion: [...ubicaciones.values()].sort((a, b) =>
+        a.nombre === SIN_CLASIFICAR
+          ? 1
+          : b.nombre === SIN_CLASIFICAR
+            ? -1
+            : a.nombre.localeCompare(b.nombre, 'es'),
       ),
       enBodega,
       enImpresoras,

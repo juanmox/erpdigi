@@ -11,11 +11,13 @@ import type {
   PanelItem,
   RolloPapel,
   TipoPapel,
+  Ubicacion,
 } from './types'
 
 export const costeoRollosApi = {
   listarImpresoras: () => apiFetch<Impresora[]>('/costeo/rollos/impresoras'),
   listarTiposPapel: () => apiFetch<TipoPapel[]>('/costeo/rollos/tipos-papel'),
+  listarUbicaciones: () => apiFetch<Ubicacion[]>('/costeo/rollos/ubicaciones'),
   panel: () => apiFetch<PanelItem[]>('/costeo/rollos/panel'),
   /** Lo cargado a bodega, agrupado por número de factura. */
   historialIngresos: (q: { texto?: string; desde?: string; hasta?: string } = {}) => {
@@ -33,6 +35,7 @@ export const costeoRollosApi = {
     fecha: string
     totalRollos: number
     idTipoPapel: number
+    idUbicacion: number
     yardasPorRollo?: number
     costoUnitario?: number
   }) =>
@@ -96,6 +99,13 @@ export const costeoRollosApi = {
   }) =>
     apiFetch<{ afectados: number; secuencias: number[]; sinCambio: number }>(
       '/costeo/rollos/marcar-consumido-fuera',
+      { method: 'PATCH', body: JSON.stringify(body) },
+    ),
+
+  /** Ubica un rango de rollos de una factura, sin importar su estado. */
+  asignarUbicacion: (body: { idFacturaPapel: number; desde: number; hasta: number; idUbicacion: number }) =>
+    apiFetch<{ afectados: number; secuencias: number[]; sinCambio: number }>(
+      '/costeo/rollos/asignar-ubicacion',
       { method: 'PATCH', body: JSON.stringify(body) },
     ),
 

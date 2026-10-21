@@ -16,6 +16,7 @@ import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CosteoRollosService } from './costeo-rollos.service';
 import { AplicarImportarIngresosDto } from './dto/aplicar-importar-ingresos.dto';
+import { AsignarUbicacionDto } from './dto/asignar-ubicacion.dto';
 import { DesmontarMontajeDto } from './dto/desmontar-montaje.dto';
 import { EditarIngresoDto } from './dto/editar-ingreso.dto';
 import { IngresoFacturaPapelDto } from './dto/ingreso-factura-papel.dto';
@@ -38,6 +39,12 @@ export class CosteoRollosController {
   @Get('tipos-papel')
   listarTiposPapel() {
     return this.service.listarTiposPapel();
+  }
+
+  @RequirePermissions('costeo.rollo.ver')
+  @Get('ubicaciones')
+  listarUbicaciones() {
+    return this.service.listarUbicaciones();
   }
 
   // Las 3 rutas del import van ANTES de @Get(':id') y @Post(':id/montar):
@@ -187,6 +194,18 @@ export class CosteoRollosController {
     @CurrentUser() usuario: JwtPayload,
   ) {
     return this.service.marcarConsumidoFuera(dto, usuario.sub);
+  }
+
+  // Mismo permiso que el ingreso (`costeo.rollo.ingresar`), a diferencia de
+  // "marcar consumido fuera": ubicar un rollo es una tarea normal de bodega,
+  // no una excepción que mal usada saque rollos buenos de circulación.
+  @RequirePermissions('costeo.rollo.ingresar')
+  @Patch('asignar-ubicacion')
+  asignarUbicacion(
+    @Body() dto: AsignarUbicacionDto,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.asignarUbicacion(dto, usuario.sub);
   }
 
   @RequirePermissions('costeo.rollo.ingresar')
