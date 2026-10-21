@@ -94,6 +94,11 @@ const PERMISOS_COSTEO = [
   'costeo.of.editar',
   'costeo.of.cerrar',
   'costeo.of.reabrir',
+  // Anula la OF entera y libera todas sus OP para otra OF. Igual que
+  // `costeo.rollo.marcar_consumido_fuera`: vive solo acá, así que lo reciben
+  // ADMIN y ADMIN_IT_COSTEO — asignable a otro rol desde /roles sin tocar
+  // código, el día que haga falta.
+  'costeo.of.anular',
   'costeo.insumo.ver',
   'costeo.insumo.administrar',
   'costeo.insumo.editar_costo',
@@ -635,10 +640,11 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
   'costeo.insumo.administrar': 'Administrar el catálogo de insumos de costeo',
   'costeo.insumo.editar_costo': 'Editar el costo unitario de un insumo (versionado)',
   'costeo.of.ver': 'Ver órdenes de facturación',
-  'costeo.of.crear': 'Crear órdenes de facturación',
-  'costeo.of.editar': 'Editar órdenes de facturación',
+  'costeo.of.crear': 'Crear órdenes de facturación (incluye cargarlas por plantilla)',
+  'costeo.of.editar': 'Editar órdenes de facturación (factura, fecha, agregar/quitar OP)',
   'costeo.of.cerrar': 'Cerrar una orden de facturación',
   'costeo.of.reabrir': 'Reabrir una orden de facturación cerrada',
+  'costeo.of.anular': 'Anular una orden de facturación entera (libera sus OP)',
   'costeo.dashboard.ver': 'Ver los tableros de Costeo',
   'costeo.dashboard.ver_financiero': 'Ver las cifras financieras de los tableros',
 }

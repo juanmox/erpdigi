@@ -35,27 +35,67 @@ const DIA = /^\d{4}-\d{2}-\d{2}$/;
  * ver el servicio): abarca el día pedido entero sin depender de la precisión
  * del timestamp.
  */
+/**
+ * ¿Trae algún filtro de OF/factura? El rango de fecha de IMPRESIÓN deja de
+ * ser obligatorio cuando sí — costear una OF completa exige TODO su consumo,
+ * aunque se haya impreso meses antes. Sin ningún filtro de OF, el rango
+ * sigue siendo obligatorio: no tiene sentido un reporte sin ningún límite.
+ */
+function tieneFiltroOf(q: Record<string, string | undefined>): boolean {
+  return !!(
+    q.ofs ||
+    q.ofDesde ||
+    q.ofHasta ||
+    q.numeroFactura ||
+    q.fechaOfDesde ||
+    q.fechaOfHasta ||
+    q.fechaFacturaDesde ||
+    q.fechaFacturaHasta
+  );
+}
+
+/** `fecha`/`fechaFactura` de la OF son columnas `date` (sin hora ni zona) —
+ * a diferencia de `consumo_papel.fecha` (timestamptz), un `date` no tiene
+ * concepto de zona horaria, así que `new Date(texto)` directo es exacto, sin
+ * el anclaje a UTC-6 que sí hace falta para los timestamptz. */
+function fechaOfQuery(v: string | undefined, nombre: string): Date | undefined {
+  if (!v) return undefined;
+  if (!DIA.test(v))
+    throw new BadRequestException(`"${nombre}" no tiene el formato yyyy-mm-dd`);
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime()))
+    throw new BadRequestException(`"${nombre}" no existe en el calendario`);
+  return d;
+}
+
 function filtros(q: Record<string, string | undefined>): FiltrosConsumo {
-  if (!q.desde || !DIA.test(q.desde))
-    throw new BadRequestException(
-      'Falta "desde" o no tiene el formato yyyy-mm-dd',
-    );
-  if (!q.hasta || !DIA.test(q.hasta))
-    throw new BadRequestException(
-      'Falta "hasta" o no tiene el formato yyyy-mm-dd',
-    );
+  const conFiltroOf = tieneFiltroOf(q);
 
-  const desde = inicioDelDiaGT(q.desde);
-  const inicioHasta = inicioDelDiaGT(q.hasta);
-  if (Number.isNaN(desde.getTime()) || Number.isNaN(inicioHasta.getTime()))
-    throw new BadRequestException(
-      'Alguna de las fechas no existe en el calendario',
-    );
-  if (inicioHasta < desde)
-    throw new BadRequestException('"hasta" no puede ser anterior a "desde"');
-
-  const hastaExclusivo = new Date(inicioHasta);
-  hastaExclusivo.setUTCDate(hastaExclusivo.getUTCDate() + 1);
+  let desde: Date | undefined;
+  let hastaExclusivo: Date | undefined;
+  // Sin filtro de OF: desde/hasta son obligatorios, como siempre fueron. Con
+  // filtro de OF: son opcionales, pero si se manda uno de los dos se exige el
+  // otro — un rango a medias no tiene sentido en ningún caso.
+  if (!conFiltroOf || q.desde || q.hasta) {
+    if (!q.desde || !DIA.test(q.desde))
+      throw new BadRequestException(
+        'Falta "desde" o no tiene el formato yyyy-mm-dd',
+      );
+    if (!q.hasta || !DIA.test(q.hasta))
+      throw new BadRequestException(
+        'Falta "hasta" o no tiene el formato yyyy-mm-dd',
+      );
+    desde = inicioDelDiaGT(q.desde);
+    const inicioHasta = inicioDelDiaGT(q.hasta);
+    if (Number.isNaN(desde.getTime()) || Number.isNaN(inicioHasta.getTime()))
+      throw new BadRequestException(
+        'Alguna de las fechas no existe en el calendario',
+      );
+    if (inicioHasta < desde)
+      throw new BadRequestException('"hasta" no puede ser anterior a "desde"');
+    hastaExclusivo = new Date(inicioHasta);
+    hastaExclusivo.setUTCDate(hastaExclusivo.getUTCDate() + 1);
+  }
 
   const num = (v: string | undefined) => {
     const n = v ? Number(v) : NaN;
@@ -73,6 +113,19 @@ function filtros(q: Record<string, string | undefined>): FiltrosConsumo {
     idCliente: num(q.idCliente),
     idImpresora: num(q.idImpresora),
     idSubcliente: num(q.idSubcliente),
+    ofs: q.ofs
+      ? q.ofs
+          .split(',')
+          .map((c) => c.trim().toUpperCase())
+          .filter(Boolean)
+      : undefined,
+    ofDesde: q.ofDesde?.trim().toUpperCase() || undefined,
+    ofHasta: q.ofHasta?.trim().toUpperCase() || undefined,
+    numeroFactura: q.numeroFactura?.trim() || undefined,
+    fechaOfDesde: fechaOfQuery(q.fechaOfDesde, 'fechaOfDesde'),
+    fechaOfHasta: fechaOfQuery(q.fechaOfHasta, 'fechaOfHasta'),
+    fechaFacturaDesde: fechaOfQuery(q.fechaFacturaDesde, 'fechaFacturaDesde'),
+    fechaFacturaHasta: fechaOfQuery(q.fechaFacturaHasta, 'fechaFacturaHasta'),
   };
 }
 
@@ -103,7 +156,13 @@ export class CosteoReportesController {
     const buffer = await this.service.consumoPorOrdenExcel(idEmpresa, f);
     // Los días pedidos, no los instantes: `hastaExclusivo` es el día siguiente
     // y pondría una fecha que el usuario nunca eligió en el nombre del archivo.
-    const nombre = `consumo_por_op_${f.desdeTexto}_a_${f.hastaTexto}.xlsx`;
+    // Sin rango de fecha (filtrando solo por OF) no hay "desde"/"hasta" que
+    // nombrar — se usa el código de OF si lo trae, o un nombre genérico.
+    const rango =
+      f.desdeTexto && f.hastaTexto
+        ? `${f.desdeTexto}_a_${f.hastaTexto}`
+        : (f.ofs?.join('_') ?? 'ordenes_de_facturacion');
+    const nombre = `consumo_por_op_${rango}.xlsx`;
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

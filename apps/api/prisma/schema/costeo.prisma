@@ -234,16 +234,29 @@ model TipoServicio {
   @@schema("costeo")
 }
 
+/// Orden de Facturación (OF): agrupa OP para facturar. Mientras no exista el
+/// módulo de facturación, se carga por plantilla de Excel (ver
+/// `costeo-facturacion`) — `origen` deja trazado cuáles vinieron de ahí.
 model OrdenFacturacion {
   idOrdenFacturacion Int       @id @default(autoincrement()) @map("id_orden_facturacion")
+  // + SQL: FK hacia core.empresas. Sin @relation, mismo criterio que
+  // OrdenProduccion.idEmpresa: no ensuciar core.Empresa con arrays inversos.
+  idEmpresa          Int       @map("id_empresa")
   anio               Int       @db.SmallInt
   correlativo        Int
-  // GENERATED ALWAYS AS ... STORED — ver nota en OrdenProduccion.codigo.
-  codigo             String    @default(dbgenerated()) @unique @db.VarChar(20)
+  // GENERATED ALWAYS AS ... STORED — mismo criterio que OrdenProduccion.codigo:
+  // nunca tuvo @unique real en la base (idx_of_codigo es un btree común), así
+  // que declararlo sería una mentira. La unicidad es por empresa.
+  codigo             String    @default(dbgenerated()) @db.VarChar(20)
   fecha              DateTime  @db.Date
   numeroFactura      String?   @map("numero_factura") @db.VarChar(30)
+  /// La fecha de la factura — SIEMPRE junto con `numeroFactura`, nunca sola
+  /// (CHECK en la base). La OF se emite primero; la factura puede asignarse
+  /// días después, desde la pantalla, no por plantilla.
+  fechaFactura       DateTime? @map("fecha_factura") @db.Date
   idCliente          Int       @map("id_cliente")
-  idTipoServicio     Int       @map("id_tipo_servicio")
+  /// Opcional: la plantilla no lo trae, lo completará F5 o el módulo.
+  idTipoServicio     Int?      @map("id_tipo_servicio")
   cantidadFacturada  Int?      @map("cantidad_facturada")
   ventaTotal         Decimal?  @map("venta_total") @db.Decimal(14, 4)
   // ⚠️ S6 confirmado: capturados, no calculados. MOD ya tiene fórmula en
@@ -253,27 +266,57 @@ model OrdenFacturacion {
   gfValor            Decimal?  @map("gf_valor") @db.Decimal(14, 4)
   fijosValor         Decimal?  @map("fijos_valor") @db.Decimal(14, 4)
   cerradaEn          DateTime? @map("cerrada_en") @db.Timestamptz(3)
+  /// Anular la OF entera libera todas sus OP vigentes en la misma transacción
+  /// (confirmado con el usuario) — quedan disponibles para otra OF. El motivo
+  /// obligatorio lo exige el servicio, no un CHECK (mismo criterio que
+  /// `Reposicion.anuladoEn`, no el más estricto de `RolloPapel.estado`).
+  anuladaEn          DateTime? @map("anulada_en") @db.Timestamptz(3)
+  anuladaPor         Int?      @map("anulada_por")
+  motivoAnulacion    String?   @map("motivo_anulacion")
+  /// `PLANTILLA` (hoy) o `MODULO` (cuando exista facturación real).
+  origen             String    @default("PLANTILLA") @db.VarChar(20)
   creadoEn           DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
   creadoPor          Int       @map("creado_por")
 
-  cliente      Cliente      @relation(fields: [idCliente], references: [idCliente])
-  tipoServicio TipoServicio @relation(fields: [idTipoServicio], references: [idTipoServicio])
+  cliente      Cliente       @relation(fields: [idCliente], references: [idCliente])
+  tipoServicio TipoServicio? @relation(fields: [idTipoServicio], references: [idTipoServicio])
   ofOp         OfOp[]
   ofInsumo     OfInsumo[]
 
-  @@unique([anio, correlativo])
+  @@unique([idEmpresa, anio, correlativo])
+  @@index([idEmpresa])
+  @@index([numeroFactura])
   @@map("orden_facturacion")
   @@schema("costeo")
 }
 
+/// Una fila = UNA ASIGNACIÓN de una OP a una OF, con historia — no un simple
+/// par N:M. El PK original (idOrdenFacturacion, idOrdenProduccion) permitía
+/// la misma OP en dos OF a la vez y borraba el rastro al quitarla; acá se
+/// ANULA (igual que una reposición), nunca se borra.
+///
+/// + SQL: dos FKs COMPUESTAS (con idEmpresa) hacia orden_facturacion y hacia
+/// orden_produccion, que Prisma no expresa — mismo patrón que
+/// LineaProduccion.idEmpresa. Es lo que impide en la base que una OF de
+/// Digitexsa tenga una OP de Digitalpro.
+///
+/// + SQL: índice único PARCIAL `(id_orden_produccion) WHERE anulado_en IS
+/// NULL` — una OP solo puede estar en UNA OF vigente. Al anularla (o al
+/// anular la OF entera), vuelve a estar disponible para otra.
 model OfOp {
-  idOrdenFacturacion Int @map("id_orden_facturacion")
-  idOrdenProduccion  Int @map("id_orden_produccion")
+  idOfOp             Int       @id @default(autoincrement()) @map("id_of_op")
+  idOrdenFacturacion Int       @map("id_orden_facturacion")
+  idOrdenProduccion  Int       @map("id_orden_produccion")
+  idEmpresa          Int       @map("id_empresa")
+  asignadoEn         DateTime  @default(now()) @map("asignado_en") @db.Timestamptz(3)
+  asignadoPor        Int       @map("asignado_por")
+  anuladoEn          DateTime? @map("anulado_en") @db.Timestamptz(3)
+  anuladoPor         Int?      @map("anulado_por")
+  motivoAnulacion    String?   @map("motivo_anulacion")
 
-  ordenFacturacion OrdenFacturacion @relation(fields: [idOrdenFacturacion], references: [idOrdenFacturacion], onDelete: Cascade)
+  ordenFacturacion OrdenFacturacion @relation(fields: [idOrdenFacturacion], references: [idOrdenFacturacion])
   ordenProduccion  OrdenProduccion  @relation(fields: [idOrdenProduccion], references: [idOrdenProduccion])
 
-  @@id([idOrdenFacturacion, idOrdenProduccion])
   @@map("of_op")
   @@schema("costeo")
 }

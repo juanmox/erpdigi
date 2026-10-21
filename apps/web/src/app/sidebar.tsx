@@ -79,6 +79,7 @@ export function Sidebar() {
     // — dos ítems del mismo sidebar quedarían indistinguibles. `RP`, el otro
     // candidato, es el del tile "Reportes" del roadmap.
     ...(tienePermiso('costeo.dashboard.ver') ? [{ to: '/costeo/reportes', codigo: 'RS', etiqueta: 'Reportes de Costeo' }] : []),
+    ...(tienePermiso('costeo.of.ver') ? [{ to: '/costeo/facturacion', codigo: 'OF', etiqueta: 'Órdenes de Facturación' }] : []),
   ]
 
   const proximamente = MODULOS.filter((m) => !m.activo)

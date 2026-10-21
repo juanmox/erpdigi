@@ -12,6 +12,7 @@ import { ReposicionesPage } from '@/features/costeo-reposiciones/reposiciones-pa
 import { RollosPage } from '@/features/costeo-rollos/rollos-page'
 import { InicioPage } from '@/features/inicio/inicio-page'
 import { CotizacionPage } from '@/features/recetas/cotizacion-page'
+import { OrdenesFacturacionPage } from '@/features/costeo-facturacion/ordenes-facturacion-page'
 import { ReportesPage } from '@/features/costeo-reportes/reportes-page'
 import { BitacoraPage } from '@/features/auditoria/bitacora-page'
 import { RolesPage } from '@/features/roles/roles-page'
@@ -141,6 +142,14 @@ function App() {
               element={
                 <RutaConPermiso permisos={['costeo.dashboard.ver']}>
                   <ReportesPage />
+                </RutaConPermiso>
+              }
+            />
+            <Route
+              path="costeo/facturacion"
+              element={
+                <RutaConPermiso permisos={['costeo.of.ver']}>
+                  <OrdenesFacturacionPage />
                 </RutaConPermiso>
               }
             />

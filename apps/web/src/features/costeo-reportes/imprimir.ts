@@ -50,10 +50,27 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       (r) => `<tr>
       <td class="mono">${esc(r.codigo)}</td>
       <td>${esc(r.cliente)}</td>
+      <td class="mono">${esc(r.of)}</td>
+      <td class="mono">${esc(r.numeroFactura)}</td>
       <td class="n">${yd(r.impresionYd)}</td>
       <td class="n">${yd(r.enguiamientoYd)}</td>
       <td class="n">${yd(r.enBlancoYd)}</td>
       <td class="n">${yd(r.reposicionYd)}</td>
+      <td class="n b">${yd(r.totalPapelYd)}</td>
+      <td class="n">${yd(r.telaYd)}</td>
+    </tr>`,
+    )
+    .join('')
+
+  const filasPorOf = d.resumenPorOf
+    .map(
+      (r) => `<tr>
+      <td class="mono">${esc(r.of)}</td>
+      <td>${r.fechaOf ? dia(r.fechaOf) : ''}</td>
+      <td>${esc(r.cliente)}</td>
+      <td class="mono">${esc(r.numeroFactura)}</td>
+      <td>${r.fechaFactura ? dia(r.fechaFactura) : ''}</td>
+      <td class="n">${r.cantidadOps}</td>
       <td class="n b">${yd(r.totalPapelYd)}</td>
       <td class="n">${yd(r.telaYd)}</td>
     </tr>`,
@@ -120,17 +137,20 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
 </style></head><body>
   <div class="marca">${encabezadoMarcaHTML(marca, 48)}</div>
   <h1>Consumo por orden de producción</h1>
-  <div class="sub">${esc(marca.nombre)} · del ${dia(d.filtros.desde)} al ${dia(d.filtros.hasta)}</div>
+  <div class="sub">${esc(marca.nombre)}
+    ${d.filtros.desde && d.filtros.hasta ? `· del ${dia(d.filtros.desde)} al ${dia(d.filtros.hasta)}` : ''}
+    ${d.filtros.ofs?.length ? `· OF: ${esc(d.filtros.ofs.join(', '))}` : ''}
+    ${d.filtros.numeroFactura ? `· Factura: ${esc(d.filtros.numeroFactura)}` : ''}</div>
 
   <h2>Resumen por orden</h2>
   <table>
     <thead><tr>
-      <th>OP</th><th>Cliente</th><th class="n">Impresión</th><th class="n">Enguiamiento</th>
+      <th>OP</th><th>Cliente</th><th>OF</th><th>Factura</th><th class="n">Impresión</th><th class="n">Enguiamiento</th>
       <th class="n">En blanco</th><th class="n">Reposiciones</th><th class="n">Total papel</th><th class="n">Tela</th>
     </tr></thead>
-    <tbody>${filasResumen || '<tr><td colspan="8">Sin consumo en el rango.</td></tr>'}${avisoTope(d.resumen.length, 8)}</tbody>
+    <tbody>${filasResumen || '<tr><td colspan="10">Sin consumo en el rango.</td></tr>'}${avisoTope(d.resumen.length, 10)}</tbody>
     <tfoot><tr>
-      <td colspan="2">TOTAL</td>
+      <td colspan="4">TOTAL</td>
       <td class="n">${yd(d.totales.impresionYd)}</td>
       <td class="n">${yd(d.totales.enguiamientoYd)}</td>
       <td class="n">${yd(d.totales.enBlancoYd)}</td>
@@ -138,6 +158,15 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <td class="n">${yd(d.totales.totalPapelYd)}</td>
       <td class="n">${yd(d.totales.telaYd)}</td>
     </tr></tfoot>
+  </table>
+
+  <h2>Resumen por OF</h2>
+  <table>
+    <thead><tr>
+      <th>OF</th><th>Fecha OF</th><th>Cliente</th><th>Factura</th><th>Fecha factura</th>
+      <th class="n">OP</th><th class="n">Total papel</th><th class="n">Tela</th>
+    </tr></thead>
+    <tbody>${filasPorOf || '<tr><td colspan="8">Sin OF en el rango.</td></tr>'}</tbody>
   </table>
 
   <h2>Detalle de impresión</h2>

@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
 import { CosteoConsumoPapelModule } from './modules/costeo-consumo-papel/costeo-consumo-papel.module';
 import { CosteoEstandarModule } from './modules/costeo-estandar/costeo-estandar.module';
+import { CosteoFacturacionModule } from './modules/costeo-facturacion/costeo-facturacion.module';
 import { CosteoOrdenesModule } from './modules/costeo-ordenes/costeo-ordenes.module';
 import { CosteoReposicionesModule } from './modules/costeo-reposiciones/costeo-reposiciones.module';
 import { CosteoRollosModule } from './modules/costeo-rollos/costeo-rollos.module';
@@ -54,6 +55,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CosteoReposicionesModule,
     CosteoConsumoPapelModule,
     CosteoEstandarModule,
+    CosteoFacturacionModule,
   ],
   controllers: [AppController],
   providers: [

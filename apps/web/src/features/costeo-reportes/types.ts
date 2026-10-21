@@ -8,6 +8,22 @@ export interface ResumenOrdenConsumo {
   /** Suma de los cuatro conceptos de PAPEL. La tela va aparte, no suma acá. */
   totalPapelYd: number
   telaYd: number
+  /** La OF vigente de esta OP, si tiene una asignada. null = sin asignar. */
+  of: string | null
+  fechaOf: string | null
+  numeroFactura: string | null
+  fechaFactura: string | null
+}
+
+export interface ResumenPorOf {
+  of: string
+  fechaOf: string | null
+  cliente: string | null
+  numeroFactura: string | null
+  fechaFactura: string | null
+  cantidadOps: number
+  totalPapelYd: number
+  telaYd: number
 }
 
 export interface TotalesConsumo {
@@ -72,11 +88,13 @@ export interface ReporteConsumo {
     subclientes: { idSubcliente: number; nombre: string }[]
   }
   filtros: {
-    desde: string
-    hasta: string
+    desde: string | null
+    hasta: string | null
     idCliente: number | null
     idImpresora: number | null
     idSubcliente: number | null
+    ofs: string[] | null
+    numeroFactura: string | null
   }
   /**
    * Con el filtro de subcliente puesto: las reposiciones que tocan ese
@@ -90,15 +108,30 @@ export interface ReporteConsumo {
     telaYd: number
   } | null
   resumen: ResumenOrdenConsumo[]
+  resumenPorOf: ResumenPorOf[]
   totales: TotalesConsumo
   detalleImpresion: DetalleImpresion[]
   detalleReposiciones: DetalleReposicion[]
 }
 
 export interface FiltrosConsumo {
-  desde: string
-  hasta: string
+  /**
+   * Obligatorios salvo que haya algún filtro de OF/factura puesto — ver la
+   * nota del backend: costear una OF completa exige TODO su consumo, aunque
+   * se haya impreso meses antes del rango.
+   */
+  desde?: string
+  hasta?: string
   idCliente?: string
   idImpresora?: string
   idSubcliente?: string
+  /** Códigos de OF separados por coma, ya normalizados. */
+  ofs?: string
+  ofDesde?: string
+  ofHasta?: string
+  numeroFactura?: string
+  fechaOfDesde?: string
+  fechaOfHasta?: string
+  fechaFacturaDesde?: string
+  fechaFacturaHasta?: string
 }

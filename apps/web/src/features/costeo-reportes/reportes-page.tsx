@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,7 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { resumirMateriales } from '@/lib/materiales'
 import { useMarcaEmpresa } from '@/app/marca-empresa'
+import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
+import { normalizarCodigoCosteo } from '@/lib/codigos-costeo'
 import { costeoReportesApi } from './api'
 import { imprimirReporteConsumo } from './imprimir'
 import type { FiltrosConsumo } from './types'
@@ -79,10 +82,24 @@ function mesActual() {
  */
 export function ReportesPage() {
   const marca = useMarcaEmpresa()
+  const { tienePermiso } = useAuth()
   const [filtros, setFiltros] = useState<FiltrosConsumo>(mesActual())
   const [aplicados, setAplicados] = useState<FiltrosConsumo>(mesActual())
   const [descargando, setDescargando] = useState(false)
   const [errorExport, setErrorExport] = useState<string | null>(null)
+  // Texto libre — se normaliza (atajo de correlativo corto) recién al
+  // aplicar, igual que el buscador de OP de Reposiciones/Impresión de OPs.
+  const [ofsTexto, setOfsTexto] = useState('')
+
+  function aplicar() {
+    const ofs = ofsTexto
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean)
+      .map((c) => normalizarCodigoCosteo(c, 'OF'))
+      .join(',')
+    setAplicados({ ...filtros, ofs: ofs || undefined })
+  }
 
   const { data, isFetching, error } = useQuery({
     queryKey: ['costeo-reportes', 'consumo', aplicados],
@@ -105,28 +122,36 @@ export function ReportesPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-4 lg:p-6">
-      <h1 className="text-xl font-semibold text-ink">Consumo por orden de producción</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold text-ink">Consumo por orden de producción</h1>
+        {tienePermiso('costeo.of.ver') && (
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/costeo/facturacion">Órdenes de Facturación</Link>
+          </Button>
+        )}
+      </div>
 
       {/* Los filtros se aplican al presionar "Ver": con fechas, recargar en cada
           tecla dispara consultas contra rangos a medio escribir. */}
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-border p-3">
+      <div className="space-y-3 rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-end gap-3">
         <div>
-          <Label htmlFor="desde" className="mb-1 block text-xs">Desde</Label>
+          <Label htmlFor="desde" className="mb-1 block text-xs">Desde (fecha de impresión)</Label>
           <Input
             id="desde"
             type="date"
-            value={filtros.desde}
-            onChange={(e) => setFiltros((f) => ({ ...f, desde: e.target.value }))}
+            value={filtros.desde ?? ''}
+            onChange={(e) => setFiltros((f) => ({ ...f, desde: e.target.value || undefined }))}
             className="w-40"
           />
         </div>
         <div>
-          <Label htmlFor="hasta" className="mb-1 block text-xs">Hasta</Label>
+          <Label htmlFor="hasta" className="mb-1 block text-xs">Hasta (fecha de impresión)</Label>
           <Input
             id="hasta"
             type="date"
-            value={filtros.hasta}
-            onChange={(e) => setFiltros((f) => ({ ...f, hasta: e.target.value }))}
+            value={filtros.hasta ?? ''}
+            onChange={(e) => setFiltros((f) => ({ ...f, hasta: e.target.value || undefined }))}
             className="w-40"
           />
         </div>
@@ -187,7 +212,69 @@ export function ReportesPage() {
             </Select>
           </div>
         )}
-        <Button onClick={() => setAplicados(filtros)} disabled={isFetching}>
+      </div>
+
+      {/* Filtros por OF/factura: el rango de fecha de impresión de arriba deja
+          de ser obligatorio en cuanto se pone alguno de estos — costear una OF
+          completa exige TODO su consumo, aunque se haya impreso meses antes. */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <Label className="mb-1 block text-xs">OF (una o varias, separadas por coma)</Label>
+          <Input
+            placeholder="159, 26OF000200…"
+            value={ofsTexto}
+            onChange={(e) => setOfsTexto(e.target.value)}
+            className="w-56 font-mono"
+          />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs">No. de factura</Label>
+          <Input
+            value={filtros.numeroFactura ?? ''}
+            onChange={(e) => setFiltros((f) => ({ ...f, numeroFactura: e.target.value || undefined }))}
+            className="w-32"
+          />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs">Fecha OF desde</Label>
+          <Input
+            type="date"
+            value={filtros.fechaOfDesde ?? ''}
+            onChange={(e) => setFiltros((f) => ({ ...f, fechaOfDesde: e.target.value || undefined }))}
+            className="w-40"
+          />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs">Fecha OF hasta</Label>
+          <Input
+            type="date"
+            value={filtros.fechaOfHasta ?? ''}
+            onChange={(e) => setFiltros((f) => ({ ...f, fechaOfHasta: e.target.value || undefined }))}
+            className="w-40"
+          />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs">Fecha factura desde</Label>
+          <Input
+            type="date"
+            value={filtros.fechaFacturaDesde ?? ''}
+            onChange={(e) => setFiltros((f) => ({ ...f, fechaFacturaDesde: e.target.value || undefined }))}
+            className="w-40"
+          />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs">Fecha factura hasta</Label>
+          <Input
+            type="date"
+            value={filtros.fechaFacturaHasta ?? ''}
+            onChange={(e) => setFiltros((f) => ({ ...f, fechaFacturaHasta: e.target.value || undefined }))}
+            className="w-40"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={aplicar} disabled={isFetching}>
           {isFetching ? 'Cargando…' : 'Ver'}
         </Button>
         <div className="ml-auto flex flex-wrap gap-2">
@@ -202,6 +289,7 @@ export function ReportesPage() {
             PDF
           </Button>
         </div>
+      </div>
       </div>
 
       {error && (
@@ -233,10 +321,18 @@ export function ReportesPage() {
 
       {data && !hayDatos && !isFetching && (
         <p className="text-muted-foreground rounded-md border border-border p-4 text-center text-sm">
-          No hay consumo registrado entre {dia(data.filtros.desde)} y {dia(data.filtros.hasta)}
-          {data.filtros.idCliente || data.filtros.idImpresora || data.filtros.idSubcliente
+          No hay consumo registrado
+          {data.filtros.desde && data.filtros.hasta
+            ? ` entre ${dia(data.filtros.desde)} y ${dia(data.filtros.hasta)}`
+            : ''}
+          {data.filtros.idCliente ||
+          data.filtros.idImpresora ||
+          data.filtros.idSubcliente ||
+          data.filtros.ofs?.length ||
+          data.filtros.numeroFactura
             ? ' con esos filtros'
-            : ''}.
+            : ''}
+          .
         </p>
       )}
 
@@ -247,11 +343,13 @@ export function ReportesPage() {
               Resumen por orden <ConteoFilas total={data.resumen.length} />
             </h2>
             <div className="overflow-x-auto rounded-md border border-border">
-              <Table className="min-w-[860px]">
+              <Table className="min-w-[1000px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>OP</TableHead>
                     <TableHead>Cliente</TableHead>
+                    <TableHead>OF</TableHead>
+                    <TableHead>Factura</TableHead>
                     <TableHead className="text-right">Impresión</TableHead>
                     <TableHead className="text-right">Enguiamiento</TableHead>
                     <TableHead className="text-right">En blanco</TableHead>
@@ -266,6 +364,8 @@ export function ReportesPage() {
                     <TableRow key={r.codigo}>
                       <TableCell className="font-mono">{r.codigo}</TableCell>
                       <TableCell className="break-words whitespace-normal">{r.cliente ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.of ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.numeroFactura ?? '—'}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(r.impresionYd)}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(r.enguiamientoYd)}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(r.enBlancoYd)}</TableCell>
@@ -275,7 +375,7 @@ export function ReportesPage() {
                     </TableRow>
                   ))}
                   <TableRow className="bg-black/[0.04] dark:bg-white/[0.05]">
-                    <TableCell colSpan={2} className="font-semibold">TOTAL</TableCell>
+                    <TableCell colSpan={4} className="font-semibold">TOTAL</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.impresionYd)}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.enguiamientoYd)}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.enBlancoYd)}</TableCell>
@@ -283,6 +383,42 @@ export function ReportesPage() {
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.totalPapelYd)}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.telaYd)}</TableCell>
                   </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="text-base font-semibold text-ink">
+              Resumen por OF <ConteoFilas total={data.resumenPorOf.length} />
+            </h2>
+            <div className="overflow-x-auto rounded-md border border-border">
+              <Table className="min-w-[760px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>OF</TableHead>
+                    <TableHead>Fecha OF</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Factura</TableHead>
+                    <TableHead>Fecha factura</TableHead>
+                    <TableHead className="text-right">OP</TableHead>
+                    <TableHead className="text-right">Total papel</TableHead>
+                    <TableHead className="text-right">Tela</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.resumenPorOf.map((r) => (
+                    <TableRow key={r.of}>
+                      <TableCell className="font-mono">{r.of}</TableCell>
+                      <TableCell>{r.fechaOf ? dia(r.fechaOf) : '—'}</TableCell>
+                      <TableCell className="break-words whitespace-normal">{r.cliente ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.numeroFactura ?? '—'}</TableCell>
+                      <TableCell>{r.fechaFactura ? dia(r.fechaFactura) : '—'}</TableCell>
+                      <TableCell className="text-right tabular-nums">{r.cantidadOps}</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">{yd(r.totalPapelYd)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{yd(r.telaYd)}</TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>

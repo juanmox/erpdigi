@@ -3,17 +3,22 @@ import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface FiltrosConsumo {
-  /** Inicio del día `desdeTexto` en Guatemala. Inclusivo. */
-  desde: Date;
+  /**
+   * Inicio del día `desdeTexto` en Guatemala. Inclusivo. `undefined` cuando
+   * hay algún filtro de OF/factura y no se pidió rango de fecha de impresión
+   * — costear una OF completa exige TODO su consumo, aunque se haya impreso
+   * meses antes.
+   */
+  desde?: Date;
   /**
    * Inicio del día SIGUIENTE a `hastaTexto` en Guatemala. **Exclusivo** — se
    * compara con `lt`, no con `lte`, para abarcar el último día entero. Lo
    * arma el controlador; ver el comentario de `filtros()` allá.
    */
-  hastaExclusivo: Date;
+  hastaExclusivo?: Date;
   /** Los días calendario tal como se pidieron (`yyyy-mm-dd`), para mostrarlos. */
-  desdeTexto: string;
-  hastaTexto: string;
+  desdeTexto?: string;
+  hastaTexto?: string;
   idCliente?: number;
   idImpresora?: number;
   /**
@@ -22,10 +27,30 @@ export interface FiltrosConsumo {
    * mezclan prendas de subcliente con prendas directas del mismo cliente.
    */
   idSubcliente?: number;
+  /** Códigos completos de OF (`26OF000159`). */
+  ofs?: string[];
+  /** Rango de código de OF — comparación de STRING, válida porque el código
+   * es ancho fijo (`lpad`) y ordena igual que el número. */
+  ofDesde?: string;
+  ofHasta?: string;
+  numeroFactura?: string;
+  /** `date` de la OF (sin hora ni zona) — ver nota de `fechaOfQuery` en el controlador. */
+  fechaOfDesde?: Date;
+  fechaOfHasta?: Date;
+  fechaFacturaDesde?: Date;
+  fechaFacturaHasta?: Date;
 }
 
 /** `2026-09-30` -> `30/09/2026`, sin pasar por `Date` ni por zonas horarias. */
 const diaLegible = (dia: string) => dia.split('-').reverse().join('/');
+
+/**
+ * Un valor de columna `date` (sin hora ni zona) a `yyyy-mm-dd`. Postgres
+ * guarda solo el día calendario, así que Prisma lo trae como un `Date` a
+ * medianoche UTC de ESE día — `toISOString()` recupera el mismo día sin
+ * ningún desfase, a diferencia de un `timestamptz` (ver `dia-guatemala.ts`).
+ */
+const diaISO = (d: Date) => d.toISOString().slice(0, 10);
 
 /** Una fila del resumen: el consolidado de una OP. */
 export interface ResumenOrden {
@@ -36,6 +61,23 @@ export interface ResumenOrden {
   enBlancoYd: number;
   reposicionYd: number;
   /** Suma de los cuatro conceptos de PAPEL. La tela va aparte. */
+  totalPapelYd: number;
+  telaYd: number;
+  /** La OF vigente de esta OP, si tiene una asignada. null = sin asignar. */
+  of: string | null;
+  fechaOf: string | null;
+  numeroFactura: string | null;
+  fechaFactura: string | null;
+}
+
+/** Fila agregada de la tabla "Resumen por OF". */
+export interface ResumenPorOf {
+  of: string;
+  fechaOf: string | null;
+  cliente: string | null;
+  numeroFactura: string | null;
+  fechaFactura: string | null;
+  cantidadOps: number;
   totalPapelYd: number;
   telaYd: number;
 }
@@ -123,7 +165,7 @@ export class CosteoReportesService {
    */
   private async reposicionesAmbiguas(
     ops: { mezcladas: number[] } | null,
-    rangoFecha: { gte: Date; lt: Date },
+    rangoFecha: { gte: Date; lt: Date } | undefined,
     idImpresora?: number,
   ) {
     if (!ops || ops.mezcladas.length === 0) return null;
@@ -146,10 +188,89 @@ export class CosteoReportesService {
 
   async consumoPorOrden(idEmpresa: number, f: FiltrosConsumo) {
     // `lt` y no `lte`: el límite superior es el arranque del día siguiente.
-    const rangoFecha = { gte: f.desde, lt: f.hastaExclusivo };
+    // `undefined` cuando se filtra solo por OF/factura sin rango de fecha de
+    // impresión — Prisma OMITE el filtro entero cuando el valor es
+    // `undefined`, así que esto alcanza para "sin límite de fecha".
+    const rangoFecha =
+      f.desde && f.hastaExclusivo
+        ? { gte: f.desde, lt: f.hastaExclusivo }
+        : undefined;
+
+    // ── Filtro por OF/factura: resuelve a un conjunto de OP ────────────
+    // Se resuelve ANTES y se agrega como `idOrdenProduccion: { in: [...] }`
+    // a `ordenDeLaEmpresa`, que ya filtran consumos y reposiciones. Si no se
+    // pidió ningún filtro de OF, esto no toca nada (undefined = sin filtro).
+    const hayFiltroOf = !!(
+      f.ofs?.length ||
+      f.ofDesde ||
+      f.ofHasta ||
+      f.numeroFactura ||
+      f.fechaOfDesde ||
+      f.fechaOfHasta ||
+      f.fechaFacturaDesde ||
+      f.fechaFacturaHasta
+    );
+    let opsDeLaOf: number[] | undefined;
+    if (hayFiltroOf) {
+      const asignaciones = await this.prisma.ofOp.findMany({
+        where: {
+          idEmpresa,
+          anuladoEn: null,
+          ordenFacturacion: {
+            idEmpresa,
+            ...(f.ofs?.length ? { codigo: { in: f.ofs } } : {}),
+            ...(f.ofDesde || f.ofHasta
+              ? {
+                  codigo: {
+                    ...(f.ofs?.length ? { in: f.ofs } : {}),
+                    ...(f.ofDesde ? { gte: f.ofDesde } : {}),
+                    ...(f.ofHasta ? { lte: f.ofHasta } : {}),
+                  },
+                }
+              : {}),
+            ...(f.numeroFactura
+              ? {
+                  numeroFactura: {
+                    contains: f.numeroFactura,
+                    mode: 'insensitive',
+                  },
+                }
+              : {}),
+            ...(f.fechaOfDesde || f.fechaOfHasta
+              ? {
+                  fecha: {
+                    ...(f.fechaOfDesde ? { gte: f.fechaOfDesde } : {}),
+                    ...(f.fechaOfHasta ? { lte: f.fechaOfHasta } : {}),
+                  },
+                }
+              : {}),
+            ...(f.fechaFacturaDesde || f.fechaFacturaHasta
+              ? {
+                  fechaFactura: {
+                    ...(f.fechaFacturaDesde
+                      ? { gte: f.fechaFacturaDesde }
+                      : {}),
+                    ...(f.fechaFacturaHasta
+                      ? { lte: f.fechaFacturaHasta }
+                      : {}),
+                  },
+                }
+              : {}),
+          },
+        },
+        select: { idOrdenProduccion: true },
+      });
+      // [] y no "sin filtro" cuando no hay coincidencias: si se dejara sin
+      // filtro, un código de OF que no existe traería TODO el consumo de la
+      // empresa en vez de nada — el resultado correcto para "esa OF no tiene
+      // nada" es una lista vacía.
+      opsDeLaOf = [...new Set(asignaciones.map((a) => a.idOrdenProduccion))];
+    }
+
     const ordenDeLaEmpresa = {
       idEmpresa,
       ...(f.idCliente ? { idCliente: f.idCliente } : {}),
+      ...(opsDeLaOf ? { idOrdenProduccion: { in: opsDeLaOf } } : {}),
     };
 
     // ATENCION: una reposicion se vincula a la ORDEN, nunca a una linea ni a
@@ -307,6 +428,10 @@ export class CosteoReportesService {
     const vacia = (codigo: string, cliente: string | null): ResumenOrden => ({
       codigo,
       cliente,
+      of: null,
+      fechaOf: null,
+      numeroFactura: null,
+      fechaFactura: null,
       impresionYd: 0,
       enguiamientoYd: 0,
       enBlancoYd: 0,
@@ -352,19 +477,89 @@ export class CosteoReportesService {
       r.telaYd += Number(rp.yardasTela);
     }
 
+    // La OF vigente de cada OP, resuelta EN LOTE (no una consulta por fila
+    // del resumen) — mismo criterio que `nombresDeUsuarios` en otros módulos.
+    const ofPorCodigoOp = new Map<
+      string,
+      {
+        codigo: string;
+        fecha: Date;
+        numeroFactura: string | null;
+        fechaFactura: Date | null;
+      }
+    >();
+    if (porOrden.size > 0) {
+      const asignaciones = await this.prisma.ofOp.findMany({
+        where: {
+          idEmpresa,
+          anuladoEn: null,
+          ordenProduccion: { codigo: { in: [...porOrden.keys()] } },
+        },
+        select: {
+          ordenProduccion: { select: { codigo: true } },
+          ordenFacturacion: {
+            select: {
+              codigo: true,
+              fecha: true,
+              numeroFactura: true,
+              fechaFactura: true,
+            },
+          },
+        },
+      });
+      for (const a of asignaciones)
+        ofPorCodigoOp.set(a.ordenProduccion.codigo, a.ordenFacturacion);
+    }
+
     const resumen = [...porOrden.values()]
-      .map((r) => ({
-        ...r,
-        impresionYd: F4(r.impresionYd),
-        enguiamientoYd: F4(r.enguiamientoYd),
-        enBlancoYd: F4(r.enBlancoYd),
-        reposicionYd: F4(r.reposicionYd),
-        totalPapelYd: F4(
-          r.impresionYd + r.enguiamientoYd + r.enBlancoYd + r.reposicionYd,
-        ),
-        telaYd: F4(r.telaYd),
-      }))
+      .map((r) => {
+        const of = ofPorCodigoOp.get(r.codigo);
+        return {
+          ...r,
+          of: of?.codigo ?? null,
+          fechaOf: of ? diaISO(of.fecha) : null,
+          numeroFactura: of?.numeroFactura ?? null,
+          fechaFactura: of?.fechaFactura ? diaISO(of.fechaFactura) : null,
+          impresionYd: F4(r.impresionYd),
+          enguiamientoYd: F4(r.enguiamientoYd),
+          enBlancoYd: F4(r.enBlancoYd),
+          reposicionYd: F4(r.reposicionYd),
+          totalPapelYd: F4(
+            r.impresionYd + r.enguiamientoYd + r.enBlancoYd + r.reposicionYd,
+          ),
+          telaYd: F4(r.telaYd),
+        };
+      })
       .sort((a, b) => b.codigo.localeCompare(a.codigo));
+
+    // ── Resumen por OF ───────────────────────────────────────────────────
+    // Agrupa las filas del resumen (ya calculadas) por su OF vigente. "Sin
+    // OF" junta las que todavía no tienen una asignada — no se descartan.
+    const SIN_OF = 'Sin OF asignada';
+    const porOf = new Map<string, ResumenPorOf>();
+    for (const r of resumen) {
+      const clave = r.of ?? SIN_OF;
+      const existente = porOf.get(clave);
+      if (existente) {
+        existente.cantidadOps += 1;
+        existente.totalPapelYd = F4(existente.totalPapelYd + r.totalPapelYd);
+        existente.telaYd = F4(existente.telaYd + r.telaYd);
+      } else {
+        porOf.set(clave, {
+          of: clave,
+          fechaOf: r.fechaOf,
+          cliente: r.cliente,
+          numeroFactura: r.numeroFactura,
+          fechaFactura: r.fechaFactura,
+          cantidadOps: 1,
+          totalPapelYd: r.totalPapelYd,
+          telaYd: r.telaYd,
+        });
+      }
+    }
+    const resumenPorOf = [...porOf.values()].sort((a, b) =>
+      a.of === SIN_OF ? 1 : b.of === SIN_OF ? -1 : b.of.localeCompare(a.of),
+    );
 
     const totales = resumen.reduce(
       (acc, r) => ({
@@ -461,11 +656,13 @@ export class CosteoReportesService {
       // `Date` obliga al frontend a re-derivar el día calendario, que es de
       // donde salía el corrimiento de un día al mostrarlos.
       filtros: {
-        desde: f.desdeTexto,
-        hasta: f.hastaTexto,
+        desde: f.desdeTexto ?? null,
+        hasta: f.hastaTexto ?? null,
         idCliente: f.idCliente ?? null,
         idImpresora: f.idImpresora ?? null,
         idSubcliente: f.idSubcliente ?? null,
+        ofs: f.ofs ?? null,
+        numeroFactura: f.numeroFactura ?? null,
       },
       // Lo que el filtro de subcliente NO pudo atribuir. Se informa en vez
       // de callarlo: con el filtro puesto, el total de reposiciones queda
@@ -476,6 +673,7 @@ export class CosteoReportesService {
         f.idImpresora,
       ),
       resumen,
+      resumenPorOf,
       totales,
       detalleImpresion,
       detalleReposiciones,
@@ -496,12 +694,16 @@ export class CosteoReportesService {
       size: 14,
     };
     resumen.addRow([
-      `Del ${diaLegible(f.desdeTexto)} al ${diaLegible(f.hastaTexto)}`,
+      f.desdeTexto && f.hastaTexto
+        ? `Del ${diaLegible(f.desdeTexto)} al ${diaLegible(f.hastaTexto)}`
+        : `Filtrado por OF${f.ofs?.length ? `: ${f.ofs.join(', ')}` : ''} — sin límite de fecha de impresión`,
     ]);
     resumen.addRow([]);
     const encR = resumen.addRow([
       'OP',
       'Cliente',
+      'OF',
+      'Factura',
       'Impresión (yd)',
       'Enguiamiento (yd)',
       'En blanco (yd)',
@@ -514,6 +716,8 @@ export class CosteoReportesService {
       resumen.addRow([
         r.codigo,
         r.cliente ?? '',
+        r.of ?? '',
+        r.numeroFactura ?? '',
         r.impresionYd,
         r.enguiamientoYd,
         r.enBlancoYd,
@@ -524,6 +728,8 @@ export class CosteoReportesService {
     const totalRow = resumen.addRow([
       'TOTAL',
       '',
+      '',
+      '',
       d.totales.impresionYd,
       d.totales.enguiamientoYd,
       d.totales.enBlancoYd,
@@ -533,6 +739,38 @@ export class CosteoReportesService {
     ]);
     totalRow.eachCell((c) => Object.assign(c, negrita));
     resumen.columns.forEach((c, i) => (c.width = i < 2 ? 22 : 16));
+
+    // Hoja "Resumen por OF": las mismas filas de arriba, agrupadas. "Sin OF
+    // asignada" junta las OP que todavía no se cargaron a ninguna OF.
+    const porOfWs = wb.addWorksheet('Resumen por OF');
+    porOfWs.addRow(['Resumen por Orden de Facturación']).font = {
+      bold: true,
+      size: 14,
+    };
+    porOfWs.addRow([]);
+    const encOf = porOfWs.addRow([
+      'OF',
+      'Fecha OF',
+      'Cliente',
+      'Factura',
+      'Fecha factura',
+      'OP',
+      'Total papel (yd)',
+      'Tela (yd)',
+    ]);
+    encOf.eachCell((c) => Object.assign(c, negrita));
+    for (const r of d.resumenPorOf)
+      porOfWs.addRow([
+        r.of,
+        r.fechaOf ? diaLegible(r.fechaOf) : '',
+        r.cliente ?? '',
+        r.numeroFactura ?? '',
+        r.fechaFactura ? diaLegible(r.fechaFactura) : '',
+        r.cantidadOps,
+        r.totalPapelYd,
+        r.telaYd,
+      ]);
+    porOfWs.columns.forEach((c, i) => (c.width = i < 3 ? 20 : 14));
 
     // Hoja consolidada: TODO el consumo en una sola lista, una fila por
     // registro. Existe porque las dos hojas de detalle tienen columnas
@@ -574,13 +812,23 @@ export class CosteoReportesService {
       'Material',
       'Cantidad material',
       'Unidad',
+      // Al final, para no correr ninguna columna de un archivo ya armado con
+      // la hoja anterior (misma regla que ya se aplicó con "En blanco" en la
+      // plantilla de Órdenes).
+      'OF',
+      'Factura',
     ]);
     encC.eachCell((c) => Object.assign(c, negrita));
 
-    // El cliente vive en el resumen (es de la orden, no de cada fila), así que
-    // se resuelve por código de OP en vez de repetir la consulta.
+    // El cliente, la OF y la factura viven en el resumen (son de la orden, no
+    // de cada fila), así que se resuelven por código de OP en vez de repetir
+    // la consulta.
     const clientePorOp = new Map(
       d.resumen.map((r) => [r.codigo, r.cliente ?? '']),
+    );
+    const ofPorOp = new Map(d.resumen.map((r) => [r.codigo, r.of ?? '']));
+    const facturaPorOp = new Map(
+      d.resumen.map((r) => [r.codigo, r.numeroFactura ?? '']),
     );
 
     type FilaConsolidada = { fecha: Date; celdas: (string | number)[] };
@@ -610,8 +858,20 @@ export class CosteoReportesService {
           x.consumoYd,
           x.enguiamientoYd,
           x.totalYd,
-          '',
-          '',
+          '', // Tela
+          '', // Tela (yd)
+          // ⚠️ Faltaban estos 3 vacíos (Material, Cantidad material, Unidad):
+          // sin ellos, OF y Factura caían exactamente en esas dos primeras
+          // columnas en vez de en las suyas — bug real que el usuario
+          // encontró probando (una fila de Impresión mostraba el código de
+          // OF en "Material" y el número de factura en "Cantidad material").
+          // Antes no hacía falta: sin columnas después de "Tela (yd)", un
+          // array más corto simplemente dejaba el resto en blanco.
+          '', // Material
+          '', // Cantidad material
+          '', // Unidad
+          ofPorOp.get(x.orden) ?? '',
+          facturaPorOp.get(x.orden) ?? '',
         ],
       });
 
@@ -655,6 +915,8 @@ export class CosteoReportesService {
               `${m.codigo} ${m.descripcion}`,
               m.cantidad,
               m.unidad,
+              ofPorOp.get(x.orden) ?? '',
+              facturaPorOp.get(x.orden) ?? '',
             ],
           });
         continue;
@@ -675,6 +937,8 @@ export class CosteoReportesService {
           '',
           '',
           '',
+          ofPorOp.get(x.orden) ?? '',
+          facturaPorOp.get(x.orden) ?? '',
         ],
       });
     }
