@@ -157,7 +157,18 @@ export function ModalDetalleOf({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      {/* `max-h` + `overflow-hidden` en el DialogContent, con el cuerpo en su
+          propio `overflow-y-auto`: sin esto el DialogContent de shadcn no
+          tiene techo de altura — con pocas OP no se nota, pero una OF real
+          con 100+ (caso encontrado por el usuario en producción) hacía crecer
+          el modal entero más allá de la pantalla, hacia arriba y hacia abajo
+          (se centra con `transform`), y como el scroll de la página queda
+          bloqueado mientras el modal está abierto, no había forma de llegar a
+          Factura ni a Anular. Mismo recurso ya usado en ImportPreviewDialog,
+          con el encabezado y el pie SIEMPRE visibles y solo el cuerpo
+          scrolleando. */}
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-hidden">
+        <div className="flex max-h-[80vh] flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span className="font-mono">{of?.codigo ?? codigo}</span>
@@ -169,7 +180,9 @@ export function ModalDetalleOf({
         </DialogHeader>
 
         {of && (
-          <div className="space-y-4">
+          // `flex-1 min-h-0`: sin min-h-0 un hijo flex no se achica más allá de
+          // su contenido, así que el overflow-y-auto nunca llegaba a activarse.
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-1">
             {of.anuladaEn && (
               <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
                 Anulada el {fechaCorta(of.anuladaEn)} por {of.anuladaPor ?? '—'}.
@@ -217,36 +230,40 @@ export function ModalDetalleOf({
               {of.ops.length === 0 ? (
                 <p className="text-ink-faint text-sm">Ninguna.</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>OP</TableHead>
-                      <TableHead>Estatus</TableHead>
-                      <TableHead>Asignada por</TableHead>
-                      <TableHead />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {of.ops.map((o) => (
-                      <TableRow key={o.idOfOp}>
-                        <TableCell className="font-mono">{o.codigoOp}</TableCell>
-                        <TableCell>{o.estatusOp}</TableCell>
-                        <TableCell className="text-xs text-ink-muted">{o.asignadoPor ?? '—'}</TableCell>
-                        <TableCell>
-                          {puedeEditar && !of.anuladaEn && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setMotivoQuitar({ idOfOp: o.idOfOp, codigoOp: o.codigoOp })}
-                            >
-                              Quitar
-                            </Button>
-                          )}
-                        </TableCell>
+                // Caja con su propio scroll: una OF real puede traer 100+ OP, y sin
+                // esto la tabla empujaba Factura y Anular fuera de la pantalla.
+                <div className="max-h-[320px] overflow-y-auto rounded-md border border-border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="sticky top-0 bg-popover">
+                        <TableHead>OP</TableHead>
+                        <TableHead>Estatus</TableHead>
+                        <TableHead>Asignada por</TableHead>
+                        <TableHead />
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {of.ops.map((o) => (
+                        <TableRow key={o.idOfOp}>
+                          <TableCell className="font-mono">{o.codigoOp}</TableCell>
+                          <TableCell>{o.estatusOp}</TableCell>
+                          <TableCell className="text-xs text-ink-muted">{o.asignadoPor ?? '—'}</TableCell>
+                          <TableCell>
+                            {puedeEditar && !of.anuladaEn && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setMotivoQuitar({ idOfOp: o.idOfOp, codigoOp: o.codigoOp })}
+                              >
+                                Quitar
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
 
               {puedeEditar && !of.anuladaEn && (
@@ -325,6 +342,7 @@ export function ModalDetalleOf({
             Cerrar
           </Button>
         </DialogFooter>
+      </div>
       </DialogContent>
     </Dialog>
 
