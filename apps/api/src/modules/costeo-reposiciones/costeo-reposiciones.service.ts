@@ -192,7 +192,12 @@ export class CosteoReposicionesService {
       if ((dto.yardasPapel ?? 0) <= 0)
         faltan.push('faltan las yardas de papel');
       if (dto.idInsumoTela == null) faltan.push('falta la tela');
-      if ((dto.yardasTela ?? 0) <= 0) faltan.push('faltan las yardas de tela');
+      // A diferencia del papel, 0 es un consumo real y válido de tela (se
+      // usaron retazos) — lo que falta es que no se haya mandado el campo,
+      // no que valga 0. `dto.yardasTela` queda `undefined` solo cuando el
+      // DTO lo omite; `@Min(0)` del DTO ya rechazó cualquier negativo antes
+      // de llegar acá.
+      if (dto.yardasTela == null) faltan.push('faltan las yardas de tela');
     }
     if (faltan.length > 0)
       throw new BadRequestException(

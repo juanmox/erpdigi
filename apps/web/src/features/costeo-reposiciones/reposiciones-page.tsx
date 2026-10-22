@@ -245,7 +245,12 @@ export function ReposicionesPage() {
       faltan.push({ campo: 'yardasPapel', seccion: 'Papel', etiqueta: 'Yardas de papel' })
     if (!campos.idInsumoTela)
       faltan.push({ campo: 'idInsumoTela', seccion: 'Tela', etiqueta: 'Insumo de tela' })
-    if (!(Number(campos.yardasTela) > 0))
+    // A diferencia del papel, 0 es un valor válido acá: a veces se usan
+    // retazos de tela y el consumo real es cero. Lo que falta es que el
+    // campo esté vacío o con algo que no sea un número (negativo incluido),
+    // no que valga 0 — por eso no se puede usar `Number(x) > 0` como con
+    // yardasPapel, que sí exige una cantidad positiva.
+    if (campos.yardasTela.trim() === '' || !(Number(campos.yardasTela) >= 0))
       faltan.push({ campo: 'yardasTela', seccion: 'Tela', etiqueta: 'Yardas de tela' })
     return faltan
   }
