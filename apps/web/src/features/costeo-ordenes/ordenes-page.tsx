@@ -7,14 +7,23 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
+import { avisarExito } from '@/lib/avisos'
 import { normalizarCodigoCosteo } from '@/lib/codigos-costeo'
 import { costeoOrdenesApi } from './api'
+import { ModalConfirmarEliminar } from './components/modal-confirmar-eliminar'
+import { ModalEditarLinea } from './components/modal-editar-linea'
+import { ModalEditarOrden } from './components/modal-editar-orden'
 import { ModalLineasProducto } from './components/modal-lineas-producto'
 import { TablaOrdenes } from './components/tabla-ordenes'
-import type { FilaPreviewLinea, OrdenProduccionDetalle } from './types'
+import type { FilaPreviewLinea, LineaProduccionDetalle, OrdenProduccionDetalle } from './types'
 
 export function OrdenesPage() {
+  const { tienePermiso } = useAuth()
+  const puedeImportar = tienePermiso('costeo.orden.importar')
+  const puedeEditar = tienePermiso('costeo.orden.editar')
+
   const [importAbierto, setImportAbierto] = useState(false)
   const [lineasAbierto, setLineasAbierto] = useState(false)
   const [codigoBuscar, setCodigoBuscar] = useState('')
@@ -22,6 +31,11 @@ export function OrdenesPage() {
   const [buscando, setBuscando] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  const [editarOrdenAbierto, setEditarOrdenAbierto] = useState(false)
+  const [eliminarOrdenAbierto, setEliminarOrdenAbierto] = useState(false)
+  const [lineaEditando, setLineaEditando] = useState<LineaProduccionDetalle | null>(null)
+  const [lineaEliminando, setLineaEliminando] = useState<LineaProduccionDetalle | null>(null)
 
   async function buscar(codigo?: string) {
     const texto = (codigo ?? codigoBuscar).trim()
@@ -40,6 +54,13 @@ export function OrdenesPage() {
     }
   }
 
+  // Tras cualquier edición: recargar la ficha (puede haber cambiado el Item
+  // de todas las líneas) e invalidar el listado, igual que ya hace el import.
+  function recargarTrasEditar() {
+    if (orden) void buscar(orden.codigo)
+    void queryClient.invalidateQueries({ queryKey: ['costeo-ordenes', 'listado'] })
+  }
+
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-4">
       {/* flex-wrap: sin esto los dos botones no bajan de renglón y empujan el
@@ -47,12 +68,14 @@ export function OrdenesPage() {
           Gestión de datos). */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold text-ink">Órdenes de Producción</h1>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setLineasAbierto(true)}>
-            Líneas de producto
-          </Button>
-          <Button onClick={() => setImportAbierto(true)}>Importar Órdenes + ítems</Button>
-        </div>
+        {puedeImportar && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setLineasAbierto(true)}>
+              Líneas de producto
+            </Button>
+            <Button onClick={() => setImportAbierto(true)}>Importar Órdenes + ítems</Button>
+          </div>
+        )}
       </div>
 
       <Card>
@@ -83,36 +106,48 @@ export function OrdenesPage() {
 
           {orden && (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3 rounded-md border border-border p-3 text-sm sm:grid-cols-4">
-                <div>
-                  <div className="text-ink-faint">Cliente</div>
-                  <div className="font-medium text-ink">{orden.cliente?.nombre ?? '—'}</div>
-                  {/* La marca sale de los productos de las líneas, no de la
-                      orden. Se muestra acá para que no parezca perdida: al
-                      fusionar un subcliente en su cliente padre, la orden pasa
-                      a decir el padre y la marca ya no estaría en ningún lado
-                      de esta pantalla. */}
-                  {orden.subclientes.length > 0 && (
-                    <div className="text-ink-faint text-xs">{orden.subclientes.join(' · ')}</div>
-                  )}
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="grid flex-1 grid-cols-2 gap-3 rounded-md border border-border p-3 text-sm sm:grid-cols-4">
+                  <div>
+                    <div className="text-ink-faint">Cliente</div>
+                    <div className="font-medium text-ink">{orden.cliente?.nombre ?? '—'}</div>
+                    {/* La marca sale de los productos de las líneas, no de la
+                        orden. Se muestra acá para que no parezca perdida: al
+                        fusionar un subcliente en su cliente padre, la orden pasa
+                        a decir el padre y la marca ya no estaría en ningún lado
+                        de esta pantalla. */}
+                    {orden.subclientes.length > 0 && (
+                      <div className="text-ink-faint text-xs">{orden.subclientes.join(' · ')}</div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-ink-faint">Línea de producto</div>
+                    <div className="font-medium text-ink">{orden.lineaProducto?.nombre ?? '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-ink-faint">Orden de compra</div>
+                    <div className="font-medium text-ink">{orden.ordenCompra ?? '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-ink-faint">Estatus</div>
+                    <Badge variant="secondary">{orden.estatus}</Badge>
+                  </div>
+                  {/* El papel en blanco NO se muestra acá desde 2026-10-07: se
+                      gestiona solo desde Impresión de OPs, que es donde el
+                      operario decide la cantidad (2-10 yd) al momento de
+                      imprimir. Tenerlo en dos pantallas invitaba a cambiarlo
+                      desde la que no ve el rollo. */}
                 </div>
-                <div>
-                  <div className="text-ink-faint">Línea de producto</div>
-                  <div className="font-medium text-ink">{orden.lineaProducto?.nombre ?? '—'}</div>
-                </div>
-                <div>
-                  <div className="text-ink-faint">Orden de compra</div>
-                  <div className="font-medium text-ink">{orden.ordenCompra ?? '—'}</div>
-                </div>
-                <div>
-                  <div className="text-ink-faint">Estatus</div>
-                  <Badge variant="secondary">{orden.estatus}</Badge>
-                </div>
-                {/* El papel en blanco NO se muestra acá desde 2026-10-07: se
-                    gestiona solo desde Impresión de OPs, que es donde el
-                    operario decide la cantidad (2-10 yd) al momento de
-                    imprimir. Tenerlo en dos pantallas invitaba a cambiarlo
-                    desde la que no ve el rollo. */}
+                {puedeEditar && (
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setEditarOrdenAbierto(true)}>
+                      Editar orden
+                    </Button>
+                    <Button variant="destructive" size="sm" onClick={() => setEliminarOrdenAbierto(true)}>
+                      Eliminar orden
+                    </Button>
+                  </div>
+                )}
               </div>
 
               <Table>
@@ -123,6 +158,7 @@ export function OrdenesPage() {
                     <TableHead>Producto</TableHead>
                     <TableHead>Estatus</TableHead>
                     <TableHead>Tallas</TableHead>
+                    {puedeEditar && <TableHead />}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -135,6 +171,18 @@ export function OrdenesPage() {
                       <TableCell className="whitespace-normal">
                         {l.tallas.map((t) => `${t.talla.nombre}:${t.cantidad}`).join('  ·  ')}
                       </TableCell>
+                      {puedeEditar && (
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => setLineaEditando(l)}>
+                              Editar
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setLineaEliminando(l)}>
+                              Eliminar
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -183,6 +231,52 @@ export function OrdenesPage() {
       />
 
       <ModalLineasProducto open={lineasAbierto} onOpenChange={setLineasAbierto} />
+
+      {orden && (
+        <>
+          <ModalEditarOrden
+            open={editarOrdenAbierto}
+            onOpenChange={setEditarOrdenAbierto}
+            orden={orden}
+            onGuardado={recargarTrasEditar}
+          />
+          <ModalConfirmarEliminar
+            open={eliminarOrdenAbierto}
+            onOpenChange={setEliminarOrdenAbierto}
+            titulo={`Eliminar ${orden.codigo}`}
+            descripcion="Se borra la orden y sus ítems. Solo es posible porque no tiene consumo de papel, reposiciones ni asignaciones de OF."
+            onConfirmar={async () => {
+              await costeoOrdenesApi.eliminarOrden(orden.idOrdenProduccion)
+              avisarExito(`${orden.codigo} eliminada.`)
+              setOrden(null)
+              void queryClient.invalidateQueries({ queryKey: ['costeo-ordenes', 'listado'] })
+            }}
+          />
+        </>
+      )}
+
+      {lineaEditando && (
+        <ModalEditarLinea
+          open={!!lineaEditando}
+          onOpenChange={(v) => !v && setLineaEditando(null)}
+          linea={lineaEditando}
+          onGuardado={recargarTrasEditar}
+        />
+      )}
+
+      {lineaEliminando && (
+        <ModalConfirmarEliminar
+          open={!!lineaEliminando}
+          onOpenChange={(v) => !v && setLineaEliminando(null)}
+          titulo={`Eliminar ítem ${lineaEliminando.codigoLine}`}
+          descripcion="Solo es posible porque no tiene consumo de papel registrado, ni siquiera anulado."
+          onConfirmar={async () => {
+            await costeoOrdenesApi.eliminarLinea(lineaEliminando.idLineaProduccion)
+            avisarExito(`Ítem ${lineaEliminando.codigoLine} eliminado.`)
+            recargarTrasEditar()
+          }}
+        />
+      )}
     </div>
   )
 }

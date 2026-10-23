@@ -39,12 +39,54 @@ export interface LineaProduccionDetalle {
   codigoLine: string
   estatus: string
   enguiamientoYd: string
+  idImpresora: number | null
+  fechaData: string | null
+  fechaCliente: string | null
+  fechaEntregar: string | null
+  prioridad: string | null
   /** Ya tiene consumo de producción vigente. */
   enviada: boolean
   // Desarrollo↔Producto es biunívoco — se lee del producto, nunca se
   // duplica como campo propio de la línea (evita que se desincronicen).
   producto: { idProducto: number; codigo: string; descripcion: string; desarrollo: string | null }
-  tallas: { talla: { nombre: string }; cantidad: number }[]
+  tallas: { talla: { idTalla: number; nombre: string }; cantidad: number }[]
+}
+
+/** Catálogo completo de tallas, para el editor de ítems (ver select-tallas.tsx). */
+export interface TallaCatalogo {
+  idTalla: number
+  nombre: string
+  orden: number
+  grupo: string | null
+  frecuente: boolean
+}
+
+/** Resultado de búsqueda de productos para el autocompletar del editor. */
+export interface ProductoBusqueda {
+  idProducto: number
+  codigo: string
+  descripcion: string
+}
+
+/** Edición del encabezado de una OP — `undefined` deja el campo como está. */
+export interface EditarOrdenPayload {
+  idCliente?: number
+  idLineaProducto?: number | null
+  ordenCompra?: string
+  fechaRecibido?: string | null
+  fechaCompromiso?: string | null
+}
+
+/** Edición de un ítem — `tallas` es el conjunto COMPLETO, no un delta. */
+export interface EditarLineaPayload {
+  idProducto?: number
+  tallas?: { idTalla: number; cantidad: number }[]
+  idImpresora?: number | null
+  fechaData?: string | null
+  fechaCliente?: string | null
+  fechaEntregar?: string | null
+  estatus?: string
+  prioridad?: string | null
 }
 
 export interface ClienteRef {
@@ -69,6 +111,8 @@ export interface OrdenProduccionDetalle {
   anio: number
   correlativo: number
   ordenCompra: string | null
+  fechaRecibido: string | null
+  fechaCompromiso: string | null
   estatus: string
   cliente: { idCliente: number; codigo: string; nombre: string } | null
   /** Marcas presentes en la orden, de los productos de sus líneas. */

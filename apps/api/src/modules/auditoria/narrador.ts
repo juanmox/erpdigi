@@ -277,6 +277,10 @@ function humanizarCampo(k: string): string {
 /** Las entidades cuyo `id_entidad` SÍ es una clave que se puede resolver. */
 export const ENTIDADES_RESOLUBLES = [
   'costeo.orden_produccion',
+  // Solo resuelve cuando `idEntidad` es un id numérico real — el import
+  // histórico sigue guardando el literal 'import' (ver la nota de arriba),
+  // que `resolverCodigos()` ya descarta antes de consultar.
+  'costeo.linea_produccion',
   'costeo.factura_papel',
   'costeo.rollo_papel', // guarda el id de la factura — ver la nota de arriba
   'costeo.montaje_rollo',

@@ -1,11 +1,15 @@
 import { apiFetch, descargarArchivo } from '@/lib/api'
 import type {
   ClienteRef,
+  EditarLineaPayload,
+  EditarOrdenPayload,
   EstadoListadoOrdenes,
   FilaPreviewLinea,
   LineaProductoDetalle,
   ListadoOrdenes,
   OrdenProduccionDetalle,
+  ProductoBusqueda,
+  TallaCatalogo,
 } from './types'
 
 async function subirArchivo<T>(path: string, archivo: File): Promise<T> {
@@ -32,4 +36,21 @@ export const costeoOrdenesApi = {
       method: 'POST',
       body: JSON.stringify(dto),
     }),
+  // ── Edición de órdenes ya cargadas (gateado costeo.orden.editar) ──
+  tallasEdicion: () => apiFetch<TallaCatalogo[]>('/costeo/ordenes/edicion/catalogos'),
+  buscarProductosEdicion: (q: string) =>
+    apiFetch<ProductoBusqueda[]>(`/costeo/ordenes/edicion/productos?q=${encodeURIComponent(q)}`),
+  editarOrden: (id: number, dto: EditarOrdenPayload) =>
+    apiFetch<{ actualizado: true }>(`/costeo/ordenes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(dto),
+    }),
+  eliminarOrden: (id: number) => apiFetch<{ eliminado: true }>(`/costeo/ordenes/${id}`, { method: 'DELETE' }),
+  editarLinea: (idLinea: number, dto: EditarLineaPayload) =>
+    apiFetch<{ actualizado: true }>(`/costeo/ordenes/lineas/${idLinea}`, {
+      method: 'PATCH',
+      body: JSON.stringify(dto),
+    }),
+  eliminarLinea: (idLinea: number) =>
+    apiFetch<{ eliminado: true }>(`/costeo/ordenes/lineas/${idLinea}`, { method: 'DELETE' }),
 }

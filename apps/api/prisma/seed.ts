@@ -71,6 +71,13 @@ const PERMISOS_COSTEO = [
   'costeo.rollo.marcar_consumido_fuera',
   'costeo.orden.ver',
   'costeo.orden.importar',
+  // Editar/eliminar una OP o un ítem ya cargado desde la pantalla de Órdenes
+  // de Producción — hoy la única salida es SQL a mano. Mismo criterio que
+  // `costeo.of.anular`/`costeo.rollo.marcar_consumido_fuera`: vive solo acá,
+  // así que lo reciben ADMIN y ADMIN_IT_COSTEO — asignable a otro rol o
+  // usuario desde /roles sin tocar código, si hace falta dárselo a quien
+  // sube las plantillas.
+  'costeo.orden.editar',
   'costeo.reposicion.ver',
   'costeo.reposicion.crear',
   'costeo.reposicion.anular',
@@ -616,6 +623,8 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
   'costeo.orden.ver': 'Buscar órdenes de producción y ver sus líneas',
   'costeo.orden.importar':
     'Importar órdenes de producción por plantilla y dar de alta líneas de producto',
+  'costeo.orden.editar':
+    'Editar o eliminar una orden de producción o un ítem ya cargado, para corregir una carga mal hecha',
 
   // ── Costeo: reposiciones ──
   'costeo.reposicion.ver': 'Ver las reposiciones de una orden',

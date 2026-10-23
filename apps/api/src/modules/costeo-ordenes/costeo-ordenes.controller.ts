@@ -1,8 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  ParseIntPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -19,6 +22,8 @@ import {
 } from './costeo-ordenes.service';
 import type { FilaPreviewLinea } from './costeo-ordenes.types';
 import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
+import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
+import { EditarOrdenProduccionDto } from './dto/editar-orden-produccion.dto';
 
 @Controller('costeo/ordenes')
 export class CosteoOrdenesController {
@@ -91,6 +96,42 @@ export class CosteoOrdenesController {
     return this.service.crearLineaProducto(dto, usuario.sub);
   }
 
+  // ── Edición de órdenes ya cargadas (solo ADMIN/ADMIN_IT_COSTEO, o a quien
+  // se le asigne el permiso desde /roles). Los catálogos van antes de
+  // ':codigo' por el mismo motivo que 'listado'/'clientes' de arriba.
+  @RequirePermissions('costeo.orden.editar')
+  @Get('edicion/catalogos')
+  catalogosEdicion() {
+    return this.service.listarTallasEdicion();
+  }
+
+  @RequirePermissions('costeo.orden.editar')
+  @Get('edicion/productos')
+  buscarProductosEdicion(@Query('q') q?: string) {
+    return this.service.buscarProductosEdicion(q);
+  }
+
+  @RequirePermissions('costeo.orden.editar')
+  @Patch('lineas/:idLinea')
+  editarLinea(
+    @Param('idLinea', ParseIntPipe) idLinea: number,
+    @Body() dto: EditarLineaProduccionDto,
+    @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.editarLinea(idLinea, dto, idEmpresa, usuario.sub);
+  }
+
+  @RequirePermissions('costeo.orden.editar')
+  @Delete('lineas/:idLinea')
+  eliminarLinea(
+    @Param('idLinea', ParseIntPipe) idLinea: number,
+    @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.eliminarLinea(idLinea, idEmpresa, usuario.sub);
+  }
+
   @RequirePermissions('costeo.orden.ver')
   @Get(':codigo')
   buscarPorCodigo(
@@ -99,5 +140,26 @@ export class CosteoOrdenesController {
     @CurrentUser() usuario: JwtPayload,
   ) {
     return this.service.buscarPorCodigo(codigo, idEmpresa, usuario.sub);
+  }
+
+  @RequirePermissions('costeo.orden.editar')
+  @Patch(':id')
+  editarOrden(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: EditarOrdenProduccionDto,
+    @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.editarOrden(id, dto, idEmpresa, usuario.sub);
+  }
+
+  @RequirePermissions('costeo.orden.editar')
+  @Delete(':id')
+  eliminarOrden(
+    @Param('id', ParseIntPipe) id: number,
+    @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
+  ) {
+    return this.service.eliminarOrden(id, idEmpresa, usuario.sub);
   }
 }

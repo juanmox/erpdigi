@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import { fechaCelda, textoCelda } from '../../common/excel-celda';
 import { parsearCodigoOp } from '../../common/op-codigo';
@@ -16,6 +17,8 @@ import {
   TALLAS_IMPORT_LINEAS,
 } from './costeo-ordenes.types';
 import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
+import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
+import { EditarOrdenProduccionDto } from './dto/editar-orden-produccion.dto';
 
 const AZUL_DIGITEXSA = 'FF203080';
 // La plantilla de plantillaImportarLineas() tiene título (fila 1) +
@@ -1289,5 +1292,472 @@ export class CosteoOrdenesService {
       ]);
 
     return wb.xlsx.writeBuffer();
+  }
+
+  // ========================================================================
+  // Edición de órdenes ya cargadas — gateado `costeo.orden.editar` en el
+  // controller (solo ADMIN/ADMIN_IT_COSTEO, o a quien se le asigne desde
+  // /roles). Hoy la única forma de corregir una OP mal importada es SQL a
+  // mano; esto lo trae a la pantalla.
+  // ========================================================================
+
+  /**
+   * Catálogo de tallas para el editor de ítems. No se reusa `/recetas/tallas`
+   * (gateado `recetas.catalogo.ver`) porque ADMIN_IT_COSTEO no lo tiene —
+   * mismo motivo por el que el reporte de consumo arma sus propios
+   * selectores en vez de llamar a endpoints de otros módulos.
+   */
+  listarTallasEdicion() {
+    return this.prisma.talla.findMany({ orderBy: { orden: 'asc' } });
+  }
+
+  /** Búsqueda de productos activos para el autocompletar del editor de ítems. */
+  async buscarProductosEdicion(q: string | undefined) {
+    const texto = (q ?? '').trim();
+    return this.prisma.producto.findMany({
+      where: {
+        activo: true,
+        ...(texto
+          ? {
+              OR: [
+                { codigo: { contains: texto, mode: 'insensitive' as const } },
+                {
+                  descripcion: {
+                    contains: texto,
+                    mode: 'insensitive' as const,
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
+      select: { idProducto: true, codigo: true, descripcion: true },
+      orderBy: { codigo: 'asc' },
+      take: 50,
+    });
+  }
+
+  /**
+   * Edita el encabezado de una OP ya cargada.
+   *
+   * Cambiar la orden de compra RENOMBRA los Item de todas sus líneas (el
+   * Item es `<OC>-n`, ver `correlativoDeItem`), así que se bloquea en cuanto
+   * alguna línea ya se envió a impresión: ese Item ya viajó a los reportes y
+   * al Google Sheet. Cambiar el cliente se bloquea si la OP está en una OF
+   * vigente (una OF es de un solo cliente).
+   */
+  async editarOrden(
+    id: number,
+    dto: EditarOrdenProduccionDto,
+    idEmpresa: number,
+    idUsuarioActor: number,
+  ) {
+    const anterior = await this.prisma.ordenProduccion.findFirst({
+      where: { idOrdenProduccion: id, idEmpresa },
+      include: {
+        lineasProduccion: {
+          select: {
+            idLineaProduccion: true,
+            codigoLine: true,
+            consumosPapel: {
+              where: { origen: 'PRODUCCION', anuladoEn: null },
+              select: { idConsumoPapel: true },
+              take: 1,
+            },
+          },
+        },
+        ofOp: {
+          where: { anuladoEn: null },
+          select: { ordenFacturacion: { select: { codigo: true } } },
+          take: 1,
+        },
+      },
+    });
+    if (!anterior)
+      throw new NotFoundException('Orden de producción no encontrada');
+
+    const data: Prisma.OrdenProduccionUpdateInput = {};
+
+    if (dto.idCliente !== undefined && dto.idCliente !== anterior.idCliente) {
+      if (anterior.ofOp.length > 0)
+        throw new ConflictException(
+          `Esta orden está asignada a la Orden de Facturación ${anterior.ofOp[0].ordenFacturacion.codigo} ` +
+            '— una OF es de un solo cliente. Quitala de esa OF antes de cambiarle el cliente.',
+        );
+      const cliente = await this.prisma.cliente.findUnique({
+        where: { idCliente: dto.idCliente },
+      });
+      if (!cliente || !cliente.activo)
+        throw new BadRequestException('Cliente no existe o está retirado');
+      data.cliente = { connect: { idCliente: dto.idCliente } };
+    }
+
+    if (dto.idLineaProducto !== undefined) {
+      if (dto.idLineaProducto === null) {
+        data.lineaProducto = { disconnect: true };
+      } else {
+        const linea = await this.prisma.lineaProducto.findUnique({
+          where: { idLineaProducto: dto.idLineaProducto },
+        });
+        if (!linea)
+          throw new BadRequestException('Línea de producto no existe');
+        data.lineaProducto = {
+          connect: { idLineaProducto: dto.idLineaProducto },
+        };
+      }
+    }
+
+    // Renombrado de Item por cambio de orden de compra — se calcula ACÁ,
+    // antes de la transacción, para poder rechazar con un mensaje claro si
+    // alguna línea no encaja en el patrón esperado (no debería pasar nunca,
+    // pero renombrar a ciegas sería peor que frenar).
+    const renombres: { idLineaProduccion: number; codigoLineNuevo: string }[] =
+      [];
+    if (
+      dto.ordenCompra !== undefined &&
+      dto.ordenCompra.trim() !== anterior.ordenCompra
+    ) {
+      const nuevaOc = dto.ordenCompra.trim();
+      const algunaEnviada = anterior.lineasProduccion.some(
+        (l) => l.consumosPapel.length > 0,
+      );
+      if (algunaEnviada)
+        throw new ConflictException(
+          'No se puede cambiar la orden de compra: al menos un ítem ya se envió a impresión y ' +
+            'su Item ya viajó a los reportes y al Google Sheet. Anulá esos envíos primero si de verdad hace falta.',
+        );
+      const ocYaUsada = await this.prisma.ordenProduccion.findFirst({
+        where: {
+          idEmpresa,
+          ordenCompra: nuevaOc,
+          idOrdenProduccion: { not: id },
+        },
+        select: { codigo: true },
+      });
+      if (ocYaUsada)
+        throw new ConflictException(
+          `La orden de compra "${nuevaOc}" ya la usa la OP ${ocYaUsada.codigo} (1 OC = 1 OP).`,
+        );
+      for (const l of anterior.lineasProduccion) {
+        const n = correlativoDeItem(l.codigoLine, anterior.ordenCompra ?? '');
+        if (n === null)
+          throw new ConflictException(
+            `El ítem ${l.codigoLine} no sigue el patrón esperado de la orden de compra actual — no se puede renombrar con seguridad.`,
+          );
+        renombres.push({
+          idLineaProduccion: l.idLineaProduccion,
+          codigoLineNuevo: n === 0 ? nuevaOc : `${nuevaOc}-${n}`,
+        });
+      }
+      data.ordenCompra = nuevaOc;
+    }
+
+    if (dto.fechaRecibido !== undefined)
+      data.fechaRecibido = dto.fechaRecibido
+        ? new Date(dto.fechaRecibido)
+        : null;
+    if (dto.fechaCompromiso !== undefined)
+      data.fechaCompromiso = dto.fechaCompromiso
+        ? new Date(dto.fechaCompromiso)
+        : null;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (Object.keys(data).length > 0)
+          await tx.ordenProduccion.update({
+            where: { idOrdenProduccion: id },
+            data,
+          });
+        for (const r of renombres)
+          await tx.lineaProduccion.update({
+            where: { idLineaProduccion: r.idLineaProduccion },
+            data: { codigoLine: r.codigoLineNuevo },
+          });
+      });
+    } catch (e) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      )
+        throw new ConflictException(
+          'La orden de compra nueva genera un Item que ya existe en otra orden.',
+        );
+      throw e;
+    }
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      idEmpresa,
+      entidad: 'costeo.orden_produccion',
+      idEntidad: String(id),
+      accion: 'UPDATE',
+      datosAnteriores: {
+        idCliente: anterior.idCliente,
+        idLineaProducto: anterior.idLineaProducto,
+        ordenCompra: anterior.ordenCompra,
+        fechaRecibido: anterior.fechaRecibido,
+        fechaCompromiso: anterior.fechaCompromiso,
+      },
+      datosNuevos: {
+        idCliente: dto.idCliente ?? anterior.idCliente,
+        idLineaProducto:
+          dto.idLineaProducto !== undefined
+            ? dto.idLineaProducto
+            : anterior.idLineaProducto,
+        ordenCompra: dto.ordenCompra?.trim() ?? anterior.ordenCompra,
+        fechaRecibido:
+          dto.fechaRecibido !== undefined
+            ? dto.fechaRecibido
+            : anterior.fechaRecibido,
+        fechaCompromiso:
+          dto.fechaCompromiso !== undefined
+            ? dto.fechaCompromiso
+            : anterior.fechaCompromiso,
+      },
+    });
+
+    return { actualizado: true };
+  }
+
+  /**
+   * Edita un ítem (línea) de una OP ya cargada.
+   *
+   * `producto`/`tallas` se rechazan si el ítem ya tiene consumo de
+   * PRODUCCIÓN vigente — se revalida acá, no solo en la pantalla (convención
+   * #1): el consumo ya registrado se calculó con el producto y las
+   * cantidades de ese momento.
+   */
+  async editarLinea(
+    idLinea: number,
+    dto: EditarLineaProduccionDto,
+    idEmpresa: number,
+    idUsuarioActor: number,
+  ) {
+    const anterior = await this.prisma.lineaProduccion.findFirst({
+      where: { idLineaProduccion: idLinea, idEmpresa },
+      include: {
+        producto: { select: { codigo: true } },
+        tallas: { select: { idTalla: true, cantidad: true } },
+        consumosPapel: {
+          where: { origen: 'PRODUCCION', anuladoEn: null },
+          select: { idConsumoPapel: true },
+          take: 1,
+        },
+      },
+    });
+    if (!anterior) throw new NotFoundException('Ítem no encontrado');
+
+    if (
+      anterior.consumosPapel.length > 0 &&
+      (dto.idProducto !== undefined || dto.tallas !== undefined)
+    )
+      throw new ConflictException(
+        'Este ítem ya se envió a impresión: el consumo de papel ya se calculó con su producto y sus tallas. ' +
+          'Anulá ese envío desde Consumo de Papel antes de poder cambiarlos.',
+      );
+
+    const data: Prisma.LineaProduccionUpdateInput = {};
+
+    if (dto.idProducto !== undefined) {
+      const producto = await this.prisma.producto.findUnique({
+        where: { idProducto: dto.idProducto },
+      });
+      if (!producto || !producto.activo)
+        throw new BadRequestException('Producto no existe o está retirado');
+      data.producto = { connect: { idProducto: dto.idProducto } };
+    }
+
+    if (dto.idImpresora !== undefined) {
+      if (dto.idImpresora === null) {
+        data.impresora = { disconnect: true };
+      } else {
+        const impresora = await this.prisma.impresora.findUnique({
+          where: { idImpresora: dto.idImpresora },
+        });
+        if (!impresora) throw new BadRequestException('Impresora no existe');
+        data.impresora = { connect: { idImpresora: dto.idImpresora } };
+      }
+    }
+
+    if (dto.fechaData !== undefined)
+      data.fechaData = dto.fechaData ? new Date(dto.fechaData) : null;
+    if (dto.fechaCliente !== undefined)
+      data.fechaCliente = dto.fechaCliente ? new Date(dto.fechaCliente) : null;
+    if (dto.fechaEntregar !== undefined)
+      data.fechaEntregar = dto.fechaEntregar
+        ? new Date(dto.fechaEntregar)
+        : null;
+    if (dto.estatus !== undefined) data.estatus = dto.estatus;
+    if (dto.prioridad !== undefined) data.prioridad = dto.prioridad;
+
+    // Conjunto COMPLETO, no un delta — se valida ANTES de la transacción
+    // para poder rechazar con un mensaje claro en vez de un 500 de FK.
+    let tallasNuevas: { idTalla: number; cantidad: number }[] | null = null;
+    if (dto.tallas !== undefined) {
+      const ids = dto.tallas.map((t) => t.idTalla);
+      if (new Set(ids).size !== ids.length)
+        throw new BadRequestException(
+          'Hay una talla repetida en la lista — cada talla va una sola vez.',
+        );
+      const existentes = await this.prisma.talla.count({
+        where: { idTalla: { in: ids } },
+      });
+      if (existentes !== ids.length)
+        throw new BadRequestException(
+          'Alguna de las tallas no existe en el catálogo.',
+        );
+      tallasNuevas = dto.tallas;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      if (Object.keys(data).length > 0)
+        await tx.lineaProduccion.update({
+          where: { idLineaProduccion: idLinea },
+          data,
+        });
+      if (tallasNuevas) {
+        await tx.lineaProduccionTalla.deleteMany({
+          where: { idLineaProduccion: idLinea },
+        });
+        await tx.lineaProduccionTalla.createMany({
+          data: tallasNuevas.map((t) => ({
+            idLineaProduccion: idLinea,
+            idTalla: t.idTalla,
+            cantidad: t.cantidad,
+          })),
+        });
+      }
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      idEmpresa,
+      entidad: 'costeo.linea_produccion',
+      idEntidad: String(idLinea),
+      accion: 'UPDATE',
+      datosAnteriores: {
+        producto: anterior.producto.codigo,
+        tallas: anterior.tallas.length,
+        idImpresora: anterior.idImpresora,
+        estatus: anterior.estatus,
+        prioridad: anterior.prioridad,
+      },
+      datosNuevos: {
+        ...(dto.idProducto !== undefined ? { idProducto: dto.idProducto } : {}),
+        ...(tallasNuevas ? { tallas: tallasNuevas.length } : {}),
+        ...(dto.idImpresora !== undefined
+          ? { idImpresora: dto.idImpresora }
+          : {}),
+        ...(dto.estatus !== undefined ? { estatus: dto.estatus } : {}),
+        ...(dto.prioridad !== undefined ? { prioridad: dto.prioridad } : {}),
+      },
+    });
+
+    return { actualizado: true };
+  }
+
+  /**
+   * Elimina un ítem — solo si no tiene NINGÚN consumo de papel, ni siquiera
+   * anulado: si lo tiene es historia real, no un error de carga, y la
+   * convención de este proyecto es no borrar eso físicamente (ver
+   * `costeo-rollos` para el mismo criterio con rollos consumidos fuera).
+   */
+  async eliminarLinea(
+    idLinea: number,
+    idEmpresa: number,
+    idUsuarioActor: number,
+  ) {
+    const linea = await this.prisma.lineaProduccion.findFirst({
+      where: { idLineaProduccion: idLinea, idEmpresa },
+      include: {
+        producto: { select: { codigo: true } },
+        tallas: { select: { idTalla: true } },
+        consumosPapel: { select: { idConsumoPapel: true }, take: 1 },
+      },
+    });
+    if (!linea) throw new NotFoundException('Ítem no encontrado');
+    if (linea.consumosPapel.length > 0)
+      throw new ConflictException(
+        'Este ítem tiene consumo de papel registrado (aunque esté anulado) y no se puede eliminar.',
+      );
+
+    // `linea_produccion_talla` tiene onDelete: Cascade hacia esta tabla —
+    // no hace falta borrarlas antes.
+    await this.prisma.lineaProduccion.delete({
+      where: { idLineaProduccion: idLinea },
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      idEmpresa,
+      entidad: 'costeo.linea_produccion',
+      idEntidad: String(idLinea),
+      accion: 'DELETE',
+      datosAnteriores: {
+        codigoLine: linea.codigoLine,
+        producto: linea.producto.codigo,
+        tallas: linea.tallas.length,
+      },
+    });
+
+    return { eliminado: true };
+  }
+
+  /**
+   * Elimina una OP entera — solo si no tiene consumo de papel, reposiciones
+   * ni asignaciones de OF (ni anuladas). Con cualquiera de esas tres cosas
+   * encima, la orden ya es historia real y la salida es corregirla, no
+   * borrarla.
+   */
+  async eliminarOrden(id: number, idEmpresa: number, idUsuarioActor: number) {
+    const orden = await this.prisma.ordenProduccion.findFirst({
+      where: { idOrdenProduccion: id, idEmpresa },
+      include: {
+        lineasProduccion: { select: { idLineaProduccion: true } },
+        consumosPapel: { select: { idConsumoPapel: true }, take: 1 },
+        reposiciones: { select: { idReposicion: true }, take: 1 },
+        ofOp: { select: { idOfOp: true }, take: 1 },
+      },
+    });
+    if (!orden)
+      throw new NotFoundException('Orden de producción no encontrada');
+    if (orden.consumosPapel.length > 0)
+      throw new ConflictException(
+        'Esta orden tiene consumo de papel registrado (aunque esté anulado) y no se puede eliminar.',
+      );
+    if (orden.reposiciones.length > 0)
+      throw new ConflictException(
+        'Esta orden tiene reposiciones registradas y no se puede eliminar.',
+      );
+    if (orden.ofOp.length > 0)
+      throw new ConflictException(
+        'Esta orden está o estuvo asignada a una Orden de Facturación y no se puede eliminar.',
+      );
+
+    await this.prisma.$transaction(async (tx) => {
+      // onDelete: Cascade cubre linea_produccion_talla; linea_produccion no
+      // tiene cascade hacia orden_produccion (y no debería), así que las
+      // líneas se borran explícitamente antes.
+      await tx.lineaProduccion.deleteMany({
+        where: { idOrdenProduccion: id },
+      });
+      await tx.ordenProduccion.delete({ where: { idOrdenProduccion: id } });
+    });
+
+    await this.auditoria.registrar({
+      idUsuario: idUsuarioActor,
+      idEmpresa,
+      entidad: 'costeo.orden_produccion',
+      idEntidad: String(id),
+      accion: 'DELETE',
+      datosAnteriores: {
+        codigo: orden.codigo,
+        ordenCompra: orden.ordenCompra,
+        idCliente: orden.idCliente,
+        lineas: orden.lineasProduccion.length,
+      },
+    });
+
+    return { eliminado: true };
   }
 }

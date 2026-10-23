@@ -262,6 +262,14 @@ export class AuditoriaService {
           r.forEach((x) => guardar(entidad, x.idOrdenProduccion, x.codigo));
           break;
         }
+        case 'costeo.linea_produccion': {
+          const r = await this.prisma.lineaProduccion.findMany({
+            where: { idLineaProduccion: { in: ids } },
+            select: { idLineaProduccion: true, codigoLine: true },
+          });
+          r.forEach((x) => guardar(entidad, x.idLineaProduccion, x.codigoLine));
+          break;
+        }
         case 'costeo.factura_papel':
         case 'costeo.rollo_papel': {
           const r = await this.prisma.facturaPapel.findMany({
