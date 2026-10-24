@@ -16,7 +16,6 @@ import {
   FilaTallaCantidad,
   TALLAS_IMPORT_LINEAS,
 } from './costeo-ordenes.types';
-import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
 import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
 import { EditarOrdenProduccionDto } from './dto/editar-orden-produccion.dto';
 
@@ -64,24 +63,24 @@ const ENCABEZADO_EN_BLANCO = 'En blanco (SI/NO)';
 const ALIAS_COLUMNAS = {
   op: ['op (ej. 26op014154)', 'op'],
   cliente: ['cliente (codigo)', 'cliente'],
-  // ⚠️ Esta columna NO es el deporte. Es `costeo.linea_producto`, la
-  // agrupación comercial POR CLIENTE heredada del legacy (donde el campo
-  // CLIENTE traía "BSN Basketball", "BSN Jersey"), y por eso contiene también
-  // prendas como Jersey o Short.
+  // ⚠️ IGNORADA desde 2026-10-23. Esta columna era el tipo de prenda (Jersey,
+  // Short…), que ahora se llama ESTILO y es del PRODUCTO, no de la orden: una
+  // OP de uniforme mezcla Jersey y Short y un valor por orden no puede
+  // representarlo. Los archivos ya armados la siguen trayendo; se reconoce para
+  // que no cuente como columna desconocida, y se descarta — mismo trato que
+  // "Código de línea" y "Enguiamiento".
   //
-  // Llegó a llamarse "Deporte" unas horas el 2026-10-07 y se revirtió el mismo
-  // día: el deporte REAL vive en `recetas.productos.deporte`, validado contra
-  // el catálogo `recetas.deportes`. Dos campos llamados igual —uno de ellos
-  // sin catálogo cerrado— eran la receta para que una estadística por deporte
-  // diera números distintos según de dónde se leyera.
-  //
-  // Los cuatro alias se conservan para que cargue cualquier archivo ya armado,
-  // con el nombre de siempre o con el que existió ese rato.
-  lineaProducto: [
+  // Los alias incluyen los nombres con los que existió ("Línea de producto",
+  // y "Deporte" unas horas el 2026-10-07, ver `recetas.productos.deporte`).
+  estiloIgnorado: [
     'linea de producto (nombre, opcional)',
     'linea de producto',
     'deporte (opcional)',
     'deporte',
+    'estilo (opcional)',
+    'estilo',
+    'linea (opcional)',
+    'linea',
   ],
   ordenCompra: ['orden de compra'],
   fechaRecibidoOp: ['fecha recibido (op)', 'fecha recibido'],
@@ -140,6 +139,31 @@ function correlativoDeItem(
   // esto solo acepta lo que queda DESPUÉS del prefijo completo y solo si son
   // dígitos: `...-UA-2` da 2, pero `...-UA-BIS` no es un correlativo.
   return /^\d+$/.test(resto) ? Number(resto) : null;
+}
+
+/**
+ * Los estilos (Jersey, Short…) de una orden, sacados de los PRODUCTOS de sus
+ * líneas. Es una LISTA y no un valor: una OP de uniforme mezcla Jersey y Short,
+ * y un solo valor por orden no puede representarlo (por eso el estilo se movió
+ * al producto el 2026-10-23).
+ *
+ * El estilo que algunas OP viejas traen guardado a nivel de orden (~1,800) es
+ * HISTÓRICO: solo se usa si ninguno de los productos tiene el suyo cargado
+ * todavía, para que esas órdenes no pierdan el dato a la vista.
+ */
+function estilosDeLaOrden(
+  lineas: { producto?: { estilo?: { nombre: string } | null } | null }[],
+  historico: string | null | undefined,
+): string[] {
+  const deProductos = [
+    ...new Set(
+      lineas
+        .map((l) => l.producto?.estilo?.nombre)
+        .filter((n): n is string => !!n),
+    ),
+  ].sort();
+  if (deProductos.length > 0) return deProductos;
+  return historico ? [historico] : [];
 }
 
 /**
@@ -321,13 +345,21 @@ export class CosteoOrdenesService {
       },
       include: {
         cliente: true,
-        lineaProducto: true,
+        // HISTÓRICO: el estilo de la orden ya no se captura (es del producto).
+        // Se trae solo para el caso de una OP vieja cuyos productos aún no lo
+        // tienen cargado — ver `estilosDeLaOrden`.
+        estilo: { select: { nombre: true } },
         lineasProduccion: {
           include: {
             // Con el subcliente, para poder mostrar la marca en la ficha: al
             // fusionar un subcliente en su cliente padre la orden pasa a decir
             // el padre, y sin esto la marca desaparecería de la vista.
-            producto: { include: { subcliente: { select: { nombre: true } } } },
+            producto: {
+              include: {
+                subcliente: { select: { nombre: true } },
+                estilo: { select: { nombre: true } },
+              },
+            },
             tallas: { include: { talla: true } },
             // Solo para saber si la línea ya se envió a imprimir; `take: 1`
             // porque alcanza con que exista uno.
@@ -355,8 +387,13 @@ export class CosteoOrdenesService {
     // la muestra como estado de la línea. Ya NO bloquea nada: el papel en
     // blanco es de la orden y vive en su propia fila de consumo, así que se
     // puede corregir después de enviar sin tocar lo ya capturado.
+    const { estilo: estiloHistorico, ...ordenSinEstilo } = orden;
     return {
-      ...orden,
+      ...ordenSinEstilo,
+      estilos: estilosDeLaOrden(
+        orden.lineasProduccion,
+        estiloHistorico?.nombre,
+      ),
       // Lista y no valor único: una orden puede mezclar prendas de un
       // subcliente con prendas directas del mismo cliente.
       subclientes: [
@@ -437,7 +474,7 @@ export class CosteoOrdenesService {
         where: whereOrden,
         include: {
           cliente: { select: { nombre: true } },
-          lineaProducto: { select: { nombre: true } },
+          estilo: { select: { nombre: true } },
           lineasProduccion: {
             where: estado === 'pendientes' ? lineaPendiente : undefined,
             include: {
@@ -450,6 +487,8 @@ export class CosteoOrdenesService {
                   // "Under Armour" y pasa a decir "BSN SPORTS"; sin esto la
                   // marca desaparece de la vista y parece dato perdido.
                   subcliente: { select: { nombre: true } },
+                  // El estilo es del producto; la orden muestra los de sus líneas.
+                  estilo: { select: { nombre: true } },
                 },
               },
               impresora: { select: { codigo: true } },
@@ -530,7 +569,7 @@ export class CosteoOrdenesService {
                 .filter((n): n is string => !!n),
             ),
           ].sort(),
-          lineaProducto: o.lineaProducto?.nombre ?? null,
+          estilos: estilosDeLaOrden(o.lineasProduccion, o.estilo?.nombre),
           ordenCompra: o.ordenCompra,
           fechaCompromiso: o.fechaCompromiso,
           lineas,
@@ -546,40 +585,6 @@ export class CosteoOrdenesService {
       where: { activo: true },
       orderBy: { nombre: 'asc' },
     });
-  }
-
-  listarLineasProducto() {
-    return this.prisma.lineaProducto.findMany({ orderBy: { nombre: 'asc' } });
-  }
-
-  // Catálogo GLOBAL desde el 2026-10-09: son tipos de prenda (Jersey, Short),
-  // no algo de un cliente. Estuvo por cliente heredado del legacy, donde el
-  // campo CLIENTE traía los dos pegados (ANEXO_A §2.3).
-  //
-  // A diferencia de Producto (que tiene alta en /catalogo con receta y costos),
-  // esto es un catálogo liviano, así que se da de alta directo, sin flujo de
-  // aprobación.
-  async crearLineaProducto(dto: CrearLineaProductoDto, idUsuarioActor: number) {
-    const nombre = dto.nombre.trim();
-    if (!nombre) throw new BadRequestException('El nombre no puede ir vacío');
-
-    const existente = await this.prisma.lineaProducto.findUnique({
-      where: { nombre },
-    });
-    if (existente)
-      throw new ConflictException(`Ya existe la línea "${nombre}"`);
-
-    const linea = await this.prisma.lineaProducto.create({ data: { nombre } });
-
-    await this.auditoria.registrar({
-      idUsuario: idUsuarioActor,
-      entidad: 'costeo.linea_producto',
-      idEntidad: String(linea.idLineaProducto),
-      accion: 'CREATE',
-      datosNuevos: { nombre },
-    });
-
-    return linea;
   }
 
   async previewImportarLineas(
@@ -606,7 +611,6 @@ export class CosteoOrdenesService {
       fila: number;
       op: string;
       cliente: string;
-      lineaProducto: string;
       ordenCompra: string;
       fechaRecibidoOp: Date | null;
       fechaCompromisoOp: Date | null;
@@ -660,7 +664,6 @@ export class CosteoOrdenesService {
             : leerEnBlanco(row.getCell(idx.enBlanco).value),
         op,
         cliente: texto(row, 'cliente'),
-        lineaProducto: texto(row, 'lineaProducto'),
         ordenCompra: texto(row, 'ordenCompra'),
         fechaRecibidoOp: fecha(row, 'fechaRecibidoOp'),
         fechaCompromisoOp: fecha(row, 'fechaCompromisoOp'),
@@ -677,50 +680,41 @@ export class CosteoOrdenesService {
       });
     });
 
-    const [
-      clientes,
-      subclientes,
-      lineasProducto,
-      productos,
-      impresoras,
-      existentesLine,
-    ] = await Promise.all([
-      // Se traen también los inactivos, con su estado: hace falta para que el
-      // mensaje distinga "no existe" de "está retirado", que llevan a arreglos
-      // distintos. Resolver uno retirado sería seguir alimentándolo.
-      this.prisma.cliente.findMany({
-        select: { idCliente: true, codigo: true, activo: true },
-      }),
-      // Un subcliente no se factura aparte, así que su código en la columna
-      // Cliente resuelve al cliente PADRE. Existe para que las plantillas ya
-      // armadas con `411` (Under Armour) sigan cargando sin retipear.
-      this.prisma.subcliente.findMany({
-        where: { activo: true, codigo: { not: null } },
-        select: {
-          codigo: true,
-          nombre: true,
-          idCliente: true,
-          cliente: { select: { codigo: true, nombre: true } },
-        },
-      }),
-      this.prisma.lineaProducto.findMany({
-        select: { idLineaProducto: true, nombre: true },
-      }),
-      this.prisma.producto.findMany({
-        select: { idProducto: true, codigo: true, desarrollo: true },
-      }),
-      this.prisma.impresora.findMany({
-        select: { idImpresora: true, codigo: true },
-      }),
-      // Solo los Item de ESTA empresa — el UNIQUE es
-      // `(id_empresa, codigo_line)`. Se usan para saber por dónde sigue la
-      // numeración de cada orden de compra, no para marcar duplicados: el
-      // Item ya no viene del archivo.
-      this.prisma.lineaProduccion.findMany({
-        where: { idEmpresa },
-        select: { codigoLine: true },
-      }),
-    ]);
+    const [clientes, subclientes, productos, impresoras, existentesLine] =
+      await Promise.all([
+        // Se traen también los inactivos, con su estado: hace falta para que el
+        // mensaje distinga "no existe" de "está retirado", que llevan a arreglos
+        // distintos. Resolver uno retirado sería seguir alimentándolo.
+        this.prisma.cliente.findMany({
+          select: { idCliente: true, codigo: true, activo: true },
+        }),
+        // Un subcliente no se factura aparte, así que su código en la columna
+        // Cliente resuelve al cliente PADRE. Existe para que las plantillas ya
+        // armadas con `411` (Under Armour) sigan cargando sin retipear.
+        this.prisma.subcliente.findMany({
+          where: { activo: true, codigo: { not: null } },
+          select: {
+            codigo: true,
+            nombre: true,
+            idCliente: true,
+            cliente: { select: { codigo: true, nombre: true } },
+          },
+        }),
+        this.prisma.producto.findMany({
+          select: { idProducto: true, codigo: true, desarrollo: true },
+        }),
+        this.prisma.impresora.findMany({
+          select: { idImpresora: true, codigo: true },
+        }),
+        // Solo los Item de ESTA empresa — el UNIQUE es
+        // `(id_empresa, codigo_line)`. Se usan para saber por dónde sigue la
+        // numeración de cada orden de compra, no para marcar duplicados: el
+        // Item ya no viene del archivo.
+        this.prisma.lineaProduccion.findMany({
+          where: { idEmpresa },
+          select: { codigoLine: true },
+        }),
+      ]);
     const clientePorCodigo = new Map(
       clientes
         .filter((c) => c.activo)
@@ -737,11 +731,6 @@ export class CosteoOrdenesService {
       subclientes
         .filter((sc) => !clientePorCodigo.has(sc.codigo!.toLowerCase()))
         .map((sc) => [sc.codigo!.toLowerCase(), sc]),
-    );
-    // Catálogo global desde el 2026-10-09: la línea ya no depende del cliente,
-    // así que alcanza con el nombre.
-    const lineaProductoPorNombre = new Map(
-      lineasProducto.map((l) => [l.nombre.toLowerCase(), l.idLineaProducto]),
     );
     const productoPorCodigo = new Map(
       productos.map((p) => [p.codigo.toLowerCase(), p.idProducto]),
@@ -781,9 +770,6 @@ export class CosteoOrdenesService {
             `la orden se carga a ${sub.cliente.codigo}. La marca sale del producto, no de esta columna.`;
         }
       }
-      const idLineaProducto = r.lineaProducto
-        ? (lineaProductoPorNombre.get(r.lineaProducto.toLowerCase()) ?? null)
-        : null;
       const idProducto = r.producto
         ? (productoPorCodigo.get(r.producto.toLowerCase()) ?? null)
         : null;
@@ -805,8 +791,6 @@ export class CosteoOrdenesService {
         error = clienteInactivoPorCodigo.has(r.cliente.toLowerCase())
           ? `El cliente "${r.cliente}" está retirado, así que no se le pueden cargar órdenes nuevas`
           : `Cliente "${r.cliente}" no reconocido`;
-      else if (r.lineaProducto && idLineaProducto === null)
-        error = `Línea de producto "${r.lineaProducto}" no existe — dar de alta primero desde Órdenes de Producción → "Líneas de producto"`;
       else if (!r.producto) error = 'Producto vacío';
       else if (idProducto === null)
         error = `Producto "${r.producto}" no existe en recetas — dar de alta primero`;
@@ -846,8 +830,6 @@ export class CosteoOrdenesService {
         opCorrelativo: opParsed?.correlativo ?? null,
         clienteCodigo: r.cliente || null,
         idCliente,
-        lineaProductoNombre: r.lineaProducto || null,
-        idLineaProducto,
         ordenCompraOp: r.ordenCompra || null,
         fechaRecibidoOp: r.fechaRecibidoOp?.toISOString() ?? null,
         fechaCompromisoOp: r.fechaCompromisoOp?.toISOString() ?? null,
@@ -1084,7 +1066,6 @@ export class CosteoOrdenesService {
                 anio: f.opAnio,
                 correlativo: f.opCorrelativo,
                 idCliente: f.idCliente,
-                idLineaProducto: f.idLineaProducto,
                 ordenCompra: f.ordenCompraOp,
                 fechaRecibido: f.fechaRecibidoOp
                   ? new Date(f.fechaRecibidoOp)
@@ -1171,28 +1152,22 @@ export class CosteoOrdenesService {
   }
 
   async plantillaImportarLineas(): Promise<ExcelJS.Buffer> {
-    // Los catálogos van EN la plantilla, en hojas aparte: sin ellos hay que
-    // adivinar el código del cliente y el nombre exacto de la línea, que es
-    // justo lo que deja filas pendientes en el preview. Mismo patrón que la
-    // hoja "Tipos de papel" del import de rollos.
-    const [clientes, lineas] = await Promise.all([
-      this.prisma.cliente.findMany({
-        where: { activo: true },
-        select: { codigo: true, nombre: true },
-        orderBy: { nombre: 'asc' },
-      }),
-      this.prisma.lineaProducto.findMany({
-        select: { nombre: true },
-        orderBy: { nombre: 'asc' },
-      }),
-    ]);
+    // El catálogo de clientes va EN la plantilla, en una hoja aparte: sin él hay
+    // que adivinar el código, que es justo lo que deja filas pendientes en el
+    // preview. Mismo patrón que la hoja "Tipos de papel" del import de rollos.
+    // (Ya no hay hoja de líneas de producto: el estilo es del producto.)
+    const clientes = await this.prisma.cliente.findMany({
+      where: { activo: true },
+      select: { codigo: true, nombre: true },
+      orderBy: { nombre: 'asc' },
+    });
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Digitexsa ERP';
     wb.created = new Date();
 
     const ws = wb.addWorksheet('Órdenes e ítems');
-    const totalCols = 15 + TALLAS_IMPORT_LINEAS.length + 1;
+    const totalCols = 14 + TALLAS_IMPORT_LINEAS.length + 1;
     ws.mergeCells(1, 1, 1, totalCols);
     ws.getCell('A1').value =
       'Digital Textil, S.A. (Digitexsa) — Carga de Órdenes de Producción e ítems (consumo de papel)';
@@ -1205,7 +1180,7 @@ export class CosteoOrdenesService {
     ws.getCell('A2').value =
       'Una fila por ítem/línea. Si varias filas comparten la misma OP, los datos de OP se toman de la primera fila donde aparece. ' +
       'Cliente y Producto deben coincidir con códigos ya existentes — un producto que no exista todavía queda pendiente en el preview, no se crea automáticamente. ' +
-      'Línea de producto es opcional, pero si se indica debe existir ya para ese Cliente — ver las hojas "Clientes" y "Líneas de producto". Igual que Producto, si no existe la fila queda pendiente y no se crea automáticamente. ' +
+      'El tipo de prenda (estilo), la línea, el género y la composición son del PRODUCTO y se cargan en Gestión de datos → Productos, no acá. ' +
       'El Item lo asigna el sistema: es la Orden de compra más un correlativo que arranca en 1 (7011883171-1, -2, -3…), en el orden en que van las filas. Por eso la Orden de compra es obligatoria y el orden de las filas importa.';
     ws.getCell('A2').font = { size: 9, color: { argb: 'FF888888' } };
 
@@ -1213,9 +1188,6 @@ export class CosteoOrdenesService {
     headerRow.values = [
       'OP (ej. 26OP014154)',
       'Cliente (código)',
-      // NO es el deporte — ver la nota de ALIAS_COLUMNAS. El parser acepta los
-      // dos nombres, así que cualquier archivo ya armado sigue cargando.
-      'Línea de producto (nombre, opcional)',
       'Orden de compra',
       'Fecha recibido (OP)',
       'Fecha compromiso (OP)',
@@ -1246,7 +1218,6 @@ export class CosteoOrdenesService {
     const anchos = [
       16, // OP
       16, // Cliente
-      22, // Línea de producto
       14, // Orden de compra
       14, // Fecha recibido
       14, // Fecha compromiso
@@ -1270,26 +1241,6 @@ export class CosteoOrdenesService {
     encClientes.eachCell(estiloEncabezado);
     [14, 46].forEach((w, i) => (wsClientes.getColumn(i + 1).width = w));
     clientes.forEach((c) => wsClientes.addRow([c.codigo, c.nombre]));
-
-    // --- Hoja "Líneas de producto": el valor válido depende del CLIENTE ---
-    //
-    // Por eso lleva las dos columnas y no solo el nombre: la misma línea de dos
-    // clientes son dos registros distintos, así que una lista suelta de nombres
-    // haría elegir una que no existe para ese cliente.
-    const wsLineas = wb.addWorksheet('Líneas de producto');
-    const encLineas = wsLineas.getRow(1);
-    // Sin columna de cliente: el catálogo es global, cualquier línea sirve para
-    // cualquier cliente.
-    encLineas.values = ['Línea de producto'];
-    encLineas.eachCell(estiloEncabezado);
-    wsLineas.getColumn(1).width = 34;
-    lineas.forEach((l) => wsLineas.addRow([l.nombre]));
-    if (lineas.length === 0)
-      wsLineas.addRow([
-        '',
-        '',
-        'Todavía no hay líneas dadas de alta — se crean desde Órdenes de Producción → "Líneas de producto".',
-      ]);
 
     return wb.xlsx.writeBuffer();
   }
@@ -1392,21 +1343,6 @@ export class CosteoOrdenesService {
       data.cliente = { connect: { idCliente: dto.idCliente } };
     }
 
-    if (dto.idLineaProducto !== undefined) {
-      if (dto.idLineaProducto === null) {
-        data.lineaProducto = { disconnect: true };
-      } else {
-        const linea = await this.prisma.lineaProducto.findUnique({
-          where: { idLineaProducto: dto.idLineaProducto },
-        });
-        if (!linea)
-          throw new BadRequestException('Línea de producto no existe');
-        data.lineaProducto = {
-          connect: { idLineaProducto: dto.idLineaProducto },
-        };
-      }
-    }
-
     // Renombrado de Item por cambio de orden de compra — se calcula ACÁ,
     // antes de la transacción, para poder rechazar con un mensaje claro si
     // alguna línea no encaja en el patrón esperado (no debería pasar nunca,
@@ -1493,17 +1429,12 @@ export class CosteoOrdenesService {
       accion: 'UPDATE',
       datosAnteriores: {
         idCliente: anterior.idCliente,
-        idLineaProducto: anterior.idLineaProducto,
         ordenCompra: anterior.ordenCompra,
         fechaRecibido: anterior.fechaRecibido,
         fechaCompromiso: anterior.fechaCompromiso,
       },
       datosNuevos: {
         idCliente: dto.idCliente ?? anterior.idCliente,
-        idLineaProducto:
-          dto.idLineaProducto !== undefined
-            ? dto.idLineaProducto
-            : anterior.idLineaProducto,
         ordenCompra: dto.ordenCompra?.trim() ?? anterior.ordenCompra,
         fechaRecibido:
           dto.fechaRecibido !== undefined

@@ -34,7 +34,11 @@ function etiquetaEntidad(entidad: string): string {
     'costeo.factura_papel': 'Facturas de papel',
     'costeo.reposicion': 'Reposiciones',
     'costeo.consumo_estandar': 'Consumo estándar',
-    'costeo.linea_producto': 'Líneas de producto',
+    'costeo.linea_producto': 'Estilos (antes líneas de producto)',
+    'recetas.estilos': 'Estilos',
+    'recetas.lineas': 'Líneas de producto',
+    'recetas.generos': 'Géneros',
+    'recetas.composiciones': 'Composiciones',
     usuarios: 'Usuarios',
     usuario_empresa_rol: 'Roles de usuario',
     roles: 'Roles',
@@ -313,12 +317,40 @@ export class AuditoriaService {
           r.forEach((x) => guardar(entidad, x.idReposicion, x.codigoRepo));
           break;
         }
-        case 'costeo.linea_producto': {
-          const r = await this.prisma.lineaProducto.findMany({
-            where: { idLineaProducto: { in: ids } },
-            select: { idLineaProducto: true, nombre: true },
+        // Los registros viejos se escribieron como `costeo.linea_producto` antes
+        // de que el catálogo pasara a `recetas.estilos` (2026-10-23); el id es
+        // el mismo, así que resuelven igual.
+        case 'costeo.linea_producto':
+        case 'recetas.estilos': {
+          const r = await this.prisma.estilo.findMany({
+            where: { idEstilo: { in: ids } },
+            select: { idEstilo: true, nombre: true },
           });
-          r.forEach((x) => guardar(entidad, x.idLineaProducto, x.nombre));
+          r.forEach((x) => guardar(entidad, x.idEstilo, x.nombre));
+          break;
+        }
+        case 'recetas.lineas': {
+          const r = await this.prisma.linea.findMany({
+            where: { idLinea: { in: ids } },
+            select: { idLinea: true, nombre: true },
+          });
+          r.forEach((x) => guardar(entidad, x.idLinea, x.nombre));
+          break;
+        }
+        case 'recetas.generos': {
+          const r = await this.prisma.genero.findMany({
+            where: { idGenero: { in: ids } },
+            select: { idGenero: true, nombre: true },
+          });
+          r.forEach((x) => guardar(entidad, x.idGenero, x.nombre));
+          break;
+        }
+        case 'recetas.composiciones': {
+          const r = await this.prisma.composicion.findMany({
+            where: { idComposicion: { in: ids } },
+            select: { idComposicion: true, nombre: true },
+          });
+          r.forEach((x) => guardar(entidad, x.idComposicion, x.nombre));
           break;
         }
         case 'usuarios':

@@ -75,6 +75,15 @@ export interface ProductoCatalogo {
   activo: boolean
   clienteNombre: string | null
   subclienteNombre: string | null
+  /** Atributos para la estadística de producción (catálogos de recetas). */
+  idEstilo: number | null
+  idLinea: number | null
+  idGenero: number | null
+  idComposicion: number | null
+  estiloNombre: string | null
+  lineaNombre: string | null
+  generoNombre: string | null
+  composicionNombre: string | null
   costoUnitario: number
   /// Estado del desarrollo asignado (null si no tiene).
   estadoDesarrollo: string | null
@@ -173,7 +182,26 @@ export interface FilaPreviewAltaProducto {
   tamano: string | null
   deporte: string | null
   precioVenta: number | null
+  estilo: string | null
+  idEstilo: number | null
+  linea: string | null
+  idLinea: number | null
+  genero: string | null
+  idGenero: number | null
+  composicion: string | null
+  idComposicion: number | null
   error: string | null
+}
+
+/** Los cuatro catálogos que describen al producto. */
+export type TipoCatalogoProducto = 'estilos' | 'lineas' | 'generos' | 'composiciones'
+
+export interface ValorCatalogoProducto {
+  id: number
+  nombre: string
+  activo: boolean
+  /** Cuántos productos lo usan. */
+  productos: number
 }
 
 // Preview del import de desarrollos (dos hojas: cabecera + receta). Reemplaza

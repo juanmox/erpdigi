@@ -11,9 +11,9 @@ import {
  * Edición del encabezado de una OP ya cargada — gateado `costeo.orden.editar`
  * (solo ADMIN/ADMIN_IT_COSTEO).
  *
- * `undefined` deja el campo como está (mismo criterio que EditarProductoDto);
- * `idLineaProducto` acepta `null` para quitarla (es opcional de verdad). El
- * código de OP, el estatus y el papel en blanco NO se editan acá: el código
+ * `undefined` deja el campo como está (mismo criterio que EditarProductoDto).
+ * El estilo/línea ya no se edita acá (es del producto). El código de OP, el
+ * estatus y el papel en blanco NO se editan acá: el código
  * no se corrige (se elimina y se reimporta) y el papel en blanco sigue
  * viviendo en Impresión de OPs.
  */
@@ -22,11 +22,6 @@ export class EditarOrdenProduccionDto {
   @Type(() => Number)
   @IsInt()
   idCliente?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  idLineaProducto?: number | null;
 
   // El Item de cada línea se deriva de esta columna (`<OC>-n`), así que
   // cambiarla renombra los Item — ver costeo-ordenes.service.ts. Por eso es

@@ -55,7 +55,7 @@ export interface ReposicionInsumo {
 export interface SiguienteNumero {
   siguienteNumero: number
   cliente: string | null
-  lineaProducto: string | null
+  estilos: string[]
 }
 
 export interface Reposicion {
@@ -83,6 +83,5 @@ export interface Reposicion {
   ordenProduccion: {
     codigo: string
     cliente: { nombre: string } | null
-    lineaProducto: { nombre: string } | null
   }
 }

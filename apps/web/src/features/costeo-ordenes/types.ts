@@ -10,8 +10,6 @@ export interface FilaPreviewLinea {
   opCorrelativo: number | null
   clienteCodigo: string | null
   idCliente: number | null
-  lineaProductoNombre: string | null
-  idLineaProducto: number | null
   ordenCompraOp: string | null
   fechaRecibidoOp: string | null
   fechaCompromisoOp: string | null
@@ -71,7 +69,6 @@ export interface ProductoBusqueda {
 /** Edición del encabezado de una OP — `undefined` deja el campo como está. */
 export interface EditarOrdenPayload {
   idCliente?: number
-  idLineaProducto?: number | null
   ordenCompra?: string
   fechaRecibido?: string | null
   fechaCompromiso?: string | null
@@ -95,13 +92,6 @@ export interface ClienteRef {
   nombre: string
 }
 
-/** Catálogo global de tipos de prenda. Sin cliente desde el 2026-10-09. */
-export interface LineaProductoDetalle {
-  idLineaProducto: number
-  nombre: string
-  activo: boolean
-}
-
 export interface OrdenProduccionDetalle {
   /** El papel en blanco es por ORDEN: yardas fijas, no por prenda. */
   consumoEnBlanco: boolean
@@ -117,7 +107,12 @@ export interface OrdenProduccionDetalle {
   cliente: { idCliente: number; codigo: string; nombre: string } | null
   /** Marcas presentes en la orden, de los productos de sus líneas. */
   subclientes: string[]
-  lineaProducto: { idLineaProducto: number; nombre: string } | null
+  /**
+   * Estilos (Jersey, Short…) de la orden, sacados de los PRODUCTOS de sus líneas:
+   * una lista, porque una OP de uniforme mezcla varios. El estilo ya no se
+   * captura en la orden (2026-10-23).
+   */
+  estilos: string[]
   lineasProduccion: LineaProduccionDetalle[]
 }
 
@@ -142,7 +137,7 @@ export interface OrdenPendiente {
   codigo: string
   cliente: string | null
   subclientes: string[]
-  lineaProducto: string | null
+  estilos: string[]
   ordenCompra: string | null
   fechaCompromiso: string | null
   lineas: LineaPendienteOrden[]

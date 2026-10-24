@@ -54,8 +54,6 @@ export interface FilaPreviewLinea {
   opCorrelativo: number | null;
   clienteCodigo: string | null;
   idCliente: number | null;
-  lineaProductoNombre: string | null;
-  idLineaProducto: number | null;
   ordenCompraOp: string | null;
   fechaRecibidoOp: string | null;
   fechaCompromisoOp: string | null;

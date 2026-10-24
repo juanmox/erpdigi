@@ -356,7 +356,12 @@ function ResumenOrden({
           {sc}
         </Badge>
       ))}
-      {orden.lineaProducto && <Badge variant="secondary">{orden.lineaProducto}</Badge>}
+      {/* Estilos de los productos de la orden: una lista, no un valor. */}
+      {orden.estilos.map((e) => (
+        <Badge key={e} variant="secondary">
+          {e}
+        </Badge>
+      ))}
       <span className="text-ink-faint text-xs">
         OC: {orden.ordenCompra ?? '—'} · Compromiso: {fechaCorta(orden.fechaCompromiso)} ·{' '}
         {orden.lineas.length} línea(s)

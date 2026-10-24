@@ -29,6 +29,10 @@ interface AltaProductoBody {
   tamano?: string | null;
   deporte?: string | null;
   precioVenta?: number;
+  idEstilo?: number | null;
+  idLinea?: number | null;
+  idGenero?: number | null;
+  idComposicion?: number | null;
 }
 
 @Controller('recetas')

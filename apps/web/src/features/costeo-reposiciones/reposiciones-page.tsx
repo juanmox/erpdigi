@@ -75,7 +75,7 @@ export function ReposicionesPage() {
   const [opBuscada, setOpBuscada] = useState<string | null>(null)
   const [buscandoOp, setBuscandoOp] = useState(false)
   const [errorOp, setErrorOp] = useState<string | null>(null)
-  const [ordenInfo, setOrdenInfo] = useState<{ idOrdenProduccion: number; cliente: string | null; lineaProducto: string | null } | null>(null)
+  const [ordenInfo, setOrdenInfo] = useState<{ idOrdenProduccion: number; cliente: string | null; estilos: string[] } | null>(null)
 
   const [campos, setCampos] = useState(campoVacio())
   // REIMPRESION (papel + tela) o MATERIALES (N insumos). Son excluyentes: el
@@ -183,7 +183,7 @@ export function ReposicionesPage() {
       setOrdenInfo({
         idOrdenProduccion: orden.idOrdenProduccion,
         cliente: orden.cliente?.nombre ?? null,
-        lineaProducto: orden.lineaProducto?.nombre ?? null,
+        estilos: orden.estilos,
       })
       setOpBuscada(orden.codigo)
       limpiarFormulario()
@@ -357,8 +357,8 @@ export function ReposicionesPage() {
                 <div className="font-medium text-ink">{ordenInfo.cliente ?? '—'}</div>
               </div>
               <div>
-                <div className="text-ink-faint">Línea de producto</div>
-                <div className="font-medium text-ink">{ordenInfo.lineaProducto ?? '—'}</div>
+                <div className="text-ink-faint">Estilo</div>
+                <div className="font-medium text-ink">{ordenInfo.estilos.length > 0 ? ordenInfo.estilos.join(' · ') : '—'}</div>
               </div>
               {siguienteNumero && (
                 <div className="col-span-2 text-xs text-ink-faint">

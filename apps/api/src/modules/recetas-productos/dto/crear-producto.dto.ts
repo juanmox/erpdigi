@@ -28,6 +28,30 @@ export class CrearProductoDto {
   @IsInt()
   idSubcliente?: number | null;
 
+  /**
+   * Atributos para la estadística de producción (2026-10-23). Cada uno apunta
+   * a su catálogo en `recetas`; el servicio revisa que exista y esté activo.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  idEstilo?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  idLinea?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  idGenero?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  idComposicion?: number | null;
+
   @IsOptional()
   @IsString()
   desarrollo?: string | null;

@@ -8,10 +8,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ContenidoSelectTallas } from '@/components/shared/select-tallas'
+import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
 import { formatGTQ } from '@digitexsa-erp/shared-utils'
 import { catalogoApi } from '../api'
 import type { Desarrollo, ProductoCatalogo } from '../types'
+import { SelectCatalogoProducto } from './select-catalogo-producto'
 
 const SIN_VALOR = '__ninguno__'
 
@@ -24,6 +26,8 @@ interface ModalProductoProps {
 
 export function ModalProducto({ producto, open, onOpenChange, onGuardado }: ModalProductoProps) {
   const esEdicion = !!producto
+  const { tienePermiso } = useAuth()
+  const puedeAgregarAtributos = tienePermiso('recetas.productos.editar')
 
   const { data: clientes } = useQuery({ queryKey: ['catalogo', 'clientes'], queryFn: () => catalogoApi.clientes() })
   const { data: subclientes } = useQuery({ queryKey: ['catalogo', 'subclientes'], queryFn: () => catalogoApi.subclientes() })
@@ -48,6 +52,11 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
   const [tamano, setTamano] = useState('')
   const [deporte, setDeporte] = useState('')
   const [precioVenta, setPrecioVenta] = useState('0')
+  // Atributos para la estadística de producción: id como texto, '' = sin valor.
+  const [idEstilo, setIdEstilo] = useState('')
+  const [idLinea, setIdLinea] = useState('')
+  const [idGenero, setIdGenero] = useState('')
+  const [idComposicion, setIdComposicion] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -63,6 +72,10 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
       setTamano(producto?.tamano ?? '')
       setDeporte(producto?.deporte ?? '')
       setPrecioVenta(producto ? String(producto.precioVenta) : '0')
+      setIdEstilo(producto?.idEstilo ? String(producto.idEstilo) : '')
+      setIdLinea(producto?.idLinea ? String(producto.idLinea) : '')
+      setIdGenero(producto?.idGenero ? String(producto.idGenero) : '')
+      setIdComposicion(producto?.idComposicion ? String(producto.idComposicion) : '')
       setError(null)
     }
   }, [open, producto])
@@ -115,6 +128,10 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
       tamano: tamano || null,
       deporte: deporte || null,
       precioVenta: Number(precioVenta) || 0,
+      idEstilo: idEstilo ? Number(idEstilo) : null,
+      idLinea: idLinea ? Number(idLinea) : null,
+      idGenero: idGenero ? Number(idGenero) : null,
+      idComposicion: idComposicion ? Number(idComposicion) : null,
     }
     try {
       if (esEdicion) {
@@ -285,6 +302,45 @@ export function ModalProducto({ producto, open, onOpenChange, onGuardado }: Moda
             <Label className="mb-1 block text-xs">Precio venta (US$)</Label>
             <Input type="number" step="0.01" min={0} value={precioVenta} onChange={(e) => setPrecioVenta(e.target.value)} />
           </div>
+
+          <div className="col-span-2 border-t border-border pt-3">
+            <p className="text-ink-muted text-xs font-medium">Atributos de producción</p>
+            <p className="text-ink-faint text-[11px]">
+              Describen la prenda para la estadística. Se eligen de un catálogo; si falta uno, se agrega desde acá.
+            </p>
+          </div>
+          <SelectCatalogoProducto
+            tipo="estilos"
+            etiqueta="Estilo"
+            articulo="el"
+            valor={idEstilo}
+            onChange={setIdEstilo}
+            puedeAgregar={puedeAgregarAtributos}
+          />
+          <SelectCatalogoProducto
+            tipo="lineas"
+            etiqueta="Línea"
+            articulo="la"
+            valor={idLinea}
+            onChange={setIdLinea}
+            puedeAgregar={puedeAgregarAtributos}
+          />
+          <SelectCatalogoProducto
+            tipo="generos"
+            etiqueta="Género"
+            articulo="el"
+            valor={idGenero}
+            onChange={setIdGenero}
+            puedeAgregar={puedeAgregarAtributos}
+          />
+          <SelectCatalogoProducto
+            tipo="composiciones"
+            etiqueta="Composición"
+            articulo="la"
+            valor={idComposicion}
+            onChange={setIdComposicion}
+            puedeAgregar={puedeAgregarAtributos}
+          />
         </div>
 
         <DialogFooter>

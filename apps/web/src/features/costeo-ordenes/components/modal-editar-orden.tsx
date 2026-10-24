@@ -10,8 +10,6 @@ import { avisarError, avisarExito } from '@/lib/avisos'
 import { costeoOrdenesApi } from '../api'
 import type { OrdenProduccionDetalle } from '../types'
 
-const SIN_LINEA = '__sin_linea__'
-
 /**
  * Edita el encabezado de una OP ya cargada — gateado `costeo.orden.editar`
  * en el padre. El código de OP no se edita acá (si se subió con el número
@@ -33,14 +31,8 @@ export function ModalEditarOrden({
     queryFn: () => costeoOrdenesApi.clientes(),
     enabled: open,
   })
-  const { data: lineasProducto } = useQuery({
-    queryKey: ['costeo-ordenes', 'lineas-producto'],
-    queryFn: () => costeoOrdenesApi.lineasProducto(),
-    enabled: open,
-  })
 
   const [idCliente, setIdCliente] = useState('')
-  const [idLineaProducto, setIdLineaProducto] = useState(SIN_LINEA)
   const [ordenCompra, setOrdenCompra] = useState('')
   const [fechaRecibido, setFechaRecibido] = useState('')
   const [fechaCompromiso, setFechaCompromiso] = useState('')
@@ -58,7 +50,6 @@ export function ModalEditarOrden({
     if (sincronizado.current) return
     sincronizado.current = true
     setIdCliente(orden.cliente ? String(orden.cliente.idCliente) : '')
-    setIdLineaProducto(orden.lineaProducto ? String(orden.lineaProducto.idLineaProducto) : SIN_LINEA)
     setOrdenCompra(orden.ordenCompra ?? '')
     setFechaRecibido(orden.fechaRecibido ? orden.fechaRecibido.slice(0, 10) : '')
     setFechaCompromiso(orden.fechaCompromiso ? orden.fechaCompromiso.slice(0, 10) : '')
@@ -76,9 +67,6 @@ export function ModalEditarOrden({
       const payload: Parameters<typeof costeoOrdenesApi.editarOrden>[1] = {}
       if (idCliente && (!orden.cliente || Number(idCliente) !== orden.cliente.idCliente))
         payload.idCliente = Number(idCliente)
-      const idLineaActual = orden.lineaProducto?.idLineaProducto ?? null
-      const idLineaNueva = idLineaProducto === SIN_LINEA ? null : Number(idLineaProducto)
-      if (idLineaNueva !== idLineaActual) payload.idLineaProducto = idLineaNueva
       if (ordenCompra.trim() && ordenCompra.trim() !== (orden.ordenCompra ?? ''))
         payload.ordenCompra = ordenCompra.trim()
       const fechaRecibidoActual = orden.fechaRecibido ? orden.fechaRecibido.slice(0, 10) : ''
@@ -126,23 +114,6 @@ export function ModalEditarOrden({
                   {clientes?.map((c) => (
                     <SelectItem key={c.idCliente} value={String(c.idCliente)}>
                       {c.codigo} — {c.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label className="mb-1 block text-xs">Línea de producto</Label>
-              <Select value={idLineaProducto} onValueChange={setIdLineaProducto}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={SIN_LINEA}>Sin asignar</SelectItem>
-                  {lineasProducto?.map((l) => (
-                    <SelectItem key={l.idLineaProducto} value={String(l.idLineaProducto)}>
-                      {l.nombre}
                     </SelectItem>
                   ))}
                 </SelectContent>

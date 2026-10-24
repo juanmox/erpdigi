@@ -15,7 +15,6 @@ import { costeoOrdenesApi } from './api'
 import { ModalConfirmarEliminar } from './components/modal-confirmar-eliminar'
 import { ModalEditarLinea } from './components/modal-editar-linea'
 import { ModalEditarOrden } from './components/modal-editar-orden'
-import { ModalLineasProducto } from './components/modal-lineas-producto'
 import { TablaOrdenes } from './components/tabla-ordenes'
 import type { FilaPreviewLinea, LineaProduccionDetalle, OrdenProduccionDetalle } from './types'
 
@@ -25,7 +24,6 @@ export function OrdenesPage() {
   const puedeEditar = tienePermiso('costeo.orden.editar')
 
   const [importAbierto, setImportAbierto] = useState(false)
-  const [lineasAbierto, setLineasAbierto] = useState(false)
   const [codigoBuscar, setCodigoBuscar] = useState('')
   const [orden, setOrden] = useState<OrdenProduccionDetalle | null>(null)
   const [buscando, setBuscando] = useState(false)
@@ -70,9 +68,6 @@ export function OrdenesPage() {
         <h1 className="text-xl font-semibold text-ink">Órdenes de Producción</h1>
         {puedeImportar && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setLineasAbierto(true)}>
-              Líneas de producto
-            </Button>
             <Button onClick={() => setImportAbierto(true)}>Importar Órdenes + ítems</Button>
           </div>
         )}
@@ -121,8 +116,10 @@ export function OrdenesPage() {
                     )}
                   </div>
                   <div>
-                    <div className="text-ink-faint">Línea de producto</div>
-                    <div className="font-medium text-ink">{orden.lineaProducto?.nombre ?? '—'}</div>
+                    <div className="text-ink-faint">Estilo</div>
+                    {/* Salen de los productos de las líneas: una orden puede mezclar
+                        varios (Jersey y Short), y el estilo es del producto. */}
+                    <div className="font-medium text-ink">{orden.estilos.length > 0 ? orden.estilos.join(' · ') : '—'}</div>
                   </div>
                   <div>
                     <div className="text-ink-faint">Orden de compra</div>
@@ -208,7 +205,6 @@ export function OrdenesPage() {
           { key: 'linea', header: 'Item', render: (f) => f.codigoLine ?? '—' },
           { key: 'producto', header: 'Producto', render: (f) => f.productoCodigo ?? '—' },
           { key: 'cliente', header: 'Cliente', render: (f) => f.clienteCodigo ?? '—' },
-          { key: 'lineaProducto', header: 'Línea de producto', render: (f) => f.lineaProductoNombre ?? '—' },
           { key: 'total', header: 'Piezas', className: 'text-right', render: (f) => f.totalPiezas },
           {
             key: 'estado',
@@ -229,8 +225,6 @@ export function OrdenesPage() {
           return `${r.ordenesCreadas} OP nuevas, ${r.lineasCreadas} líneas creadas.`
         }}
       />
-
-      <ModalLineasProducto open={lineasAbierto} onOpenChange={setLineasAbierto} />
 
       {orden && (
         <>

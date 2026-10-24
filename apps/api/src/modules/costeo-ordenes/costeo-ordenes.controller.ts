@@ -21,7 +21,6 @@ import {
   type EstadoListadoOrdenes,
 } from './costeo-ordenes.service';
 import type { FilaPreviewLinea } from './costeo-ordenes.types';
-import { CrearLineaProductoDto } from './dto/crear-linea-producto.dto';
 import { EditarLineaProduccionDto } from './dto/editar-linea-produccion.dto';
 import { EditarOrdenProduccionDto } from './dto/editar-orden-produccion.dto';
 
@@ -79,21 +78,6 @@ export class CosteoOrdenesController {
   @Get('clientes')
   listarClientes() {
     return this.service.listarClientes();
-  }
-
-  @RequirePermissions('costeo.orden.importar')
-  @Get('lineas-producto')
-  listarLineasProducto() {
-    return this.service.listarLineasProducto();
-  }
-
-  @RequirePermissions('costeo.orden.importar')
-  @Post('lineas-producto')
-  crearLineaProducto(
-    @Body() dto: CrearLineaProductoDto,
-    @CurrentUser() usuario: JwtPayload,
-  ) {
-    return this.service.crearLineaProducto(dto, usuario.sub);
   }
 
   // ── Edición de órdenes ya cargadas (solo ADMIN/ADMIN_IT_COSTEO, o a quien

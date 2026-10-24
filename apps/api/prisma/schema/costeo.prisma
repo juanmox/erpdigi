@@ -19,28 +19,8 @@
 // falta a este modelo respecto a la tabla real.
 // ============================================================
 
-// ── Catálogo nuevo: línea de producto por cliente ──────────────────────
-/// Catálogo GLOBAL de líneas de producto (tipos de prenda: Jersey, Short…).
-///
-/// Fue por cliente hasta el 2026-10-09, heredado del legacy donde el campo
-/// CLIENTE traía cliente y línea pegados ("BSN Jersey" — ANEXO_A §2.3). Se hizo
-/// global porque son tipos de prenda, no algo de un cliente: por cliente, con
-/// 100 clientes habría 100 "Jersey" y una estadística por línea tendría que
-/// agrupar por texto. Mismo criterio que el `deporte`, que vive en el producto.
-///
-/// Si en F5 un mismo tipo de prenda llevara insumos distintos según el cliente,
-/// el cliente va en `PlantillaInsumo`, donde ocurre la variación — no acá.
-model LineaProducto {
-  idLineaProducto Int     @id @default(autoincrement()) @map("id_linea_producto")
-  nombre          String  @unique @db.VarChar(80)
-  activo          Boolean @default(true)
-
-  ordenesProduccion OrdenProduccion[]
-  plantillasInsumo  PlantillaInsumo[]
-
-  @@map("linea_producto")
-  @@schema("costeo")
-}
+// El catálogo de estilos (antes `costeo.LineaProducto`) vive en recetas.prisma
+// desde 2026-10-23: describe al producto, y costeo depende de recetas.
 
 // ── Equipos ──────────────────────────────────────────────────────────
 model Impresora {
@@ -190,7 +170,10 @@ model OrdenProduccion {
   // usa para nada y ensuciaría core.Empresa con arrays por cada tabla.
   idEmpresa         Int       @map("id_empresa")
   idCliente         Int?      @map("id_cliente")
-  idLineaProducto   Int?      @map("id_linea_producto")
+  /// HISTÓRICO desde 2026-10-23: el estilo es del PRODUCTO. Las ~1,800 OP que ya
+  /// lo traían lo conservan, pero ya no se captura ni se edita en la orden; la
+  /// ficha muestra los estilos de los productos de sus líneas.
+  idEstilo          Int?      @map("id_estilo")
   ordenCompra       String?   @map("orden_compra") @db.VarChar(40)
   /// Si la orden lleva papel en blanco. Genera UNA fila en `consumo_papel`
   /// con `origen = EN_BLANCO`, no un cálculo dentro de la captura por talla:
@@ -210,7 +193,7 @@ model OrdenProduccion {
   /// cinco FK hacia clientes que lo era—, así que borrar un cliente no
   /// fallaba: le vaciaba el cliente a todas sus órdenes, en silencio.
   cliente          Cliente?          @relation(fields: [idCliente], references: [idCliente], onDelete: Restrict, onUpdate: Cascade)
-  lineaProducto    LineaProducto?    @relation(fields: [idLineaProducto], references: [idLineaProducto])
+  estilo           Estilo?           @relation(fields: [idEstilo], references: [idEstilo], onDelete: Restrict, onUpdate: Cascade)
   ofOp             OfOp[]
   lineasProduccion LineaProduccion[]
   consumosPapel    ConsumoPapel[]
@@ -671,11 +654,11 @@ model PlantillaInsumo {
   idPlantillaInsumo Int     @id @default(autoincrement()) @map("id_plantilla_insumo")
   nombre            String  @db.VarChar(100)
   idTipoServicio    Int?    @map("id_tipo_servicio")
-  idLineaProducto   Int?    @map("id_linea_producto")
+  idEstilo          Int?    @map("id_estilo")
   activa            Boolean @default(true)
 
   tipoServicio  TipoServicio?             @relation(fields: [idTipoServicio], references: [idTipoServicio])
-  lineaProducto LineaProducto?            @relation(fields: [idLineaProducto], references: [idLineaProducto])
+  estilo        Estilo?                   @relation(fields: [idEstilo], references: [idEstilo], onDelete: Restrict, onUpdate: Cascade)
   detalle       PlantillaInsumoDetalle[]
 
   @@map("plantilla_insumo")

@@ -12,6 +12,7 @@ import { ApiError } from '@/lib/api'
 import { formatGTQ, formatUSD } from '@digitexsa-erp/shared-utils'
 import { catalogoApi } from '../api'
 import type { Desarrollo, FilaPreviewAltaProducto, ProductoCatalogo } from '../types'
+import { ModalCatalogosProducto } from './modal-catalogos-producto'
 import { ModalProducto } from './modal-producto'
 import { ModalRecetaDesarrollo } from './modal-receta-desarrollo'
 
@@ -38,6 +39,7 @@ export function TabProductos() {
   const [cliente, setCliente] = useState(TODOS)
   const [deporte, setDeporte] = useState(TODOS)
   const [talla, setTalla] = useState(TODOS)
+  const [estilo, setEstilo] = useState(TODOS)
 
   // Las opciones salen de los productos ya cargados, no de un endpoint nuevo:
   // así solo se ofrecen valores que de verdad filtran algo (mismo criterio que
@@ -49,6 +51,7 @@ export function TabProductos() {
       clientes: uniq(todosLosProductos.map((p) => p.clienteNombre)),
       deportes: uniq(todosLosProductos.map((p) => p.deporte)),
       tallas: uniq(todosLosProductos.map((p) => p.tamano)),
+      estilos: uniq(todosLosProductos.map((p) => p.estiloNombre)),
     }
   }, [todosLosProductos])
 
@@ -60,15 +63,18 @@ export function TabProductos() {
       if (cliente !== TODOS && p.clienteNombre !== cliente) return false
       if (deporte !== TODOS && p.deporte !== deporte) return false
       if (talla !== TODOS && p.tamano !== talla) return false
+      if (estilo !== TODOS && p.estiloNombre !== estilo) return false
       return true
     })
-  }, [todosLosProductos, busqueda, cliente, deporte, talla])
+  }, [todosLosProductos, busqueda, cliente, deporte, talla, estilo])
 
-  const hayFiltros = busqueda.trim() !== '' || cliente !== TODOS || deporte !== TODOS || talla !== TODOS
+  const hayFiltros =
+    busqueda.trim() !== '' || cliente !== TODOS || deporte !== TODOS || talla !== TODOS || estilo !== TODOS
 
   const [modalProductoAbierto, setModalProductoAbierto] = useState(false)
   const [productoEditando, setProductoEditando] = useState<ProductoCatalogo | null>(null)
   const [importAltasAbierto, setImportAltasAbierto] = useState(false)
+  const [catalogosAbierto, setCatalogosAbierto] = useState(false)
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
   const [recetaAbierta, setRecetaAbierta] = useState(false)
   const [recetaDe, setRecetaDe] = useState<Desarrollo | null>(null)
@@ -157,6 +163,9 @@ export function TabProductos() {
               </Button>
             </>
           )}
+          <Button variant="outline" size="sm" onClick={() => setCatalogosAbierto(true)}>
+            Catálogos de producto
+          </Button>
           {puedeCrear && (
             <Button size="sm" onClick={abrirCrear}>
               Nuevo producto
@@ -211,6 +220,19 @@ export function TabProductos() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={estilo} onValueChange={setEstilo}>
+          <SelectTrigger size="sm" className="w-40">
+            <SelectValue placeholder="Estilo" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={TODOS}>Todos los estilos</SelectItem>
+            {opciones.estilos.map((e) => (
+              <SelectItem key={e} value={e}>
+                {e}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {hayFiltros && (
           <Button
             variant="ghost"
@@ -220,6 +242,7 @@ export function TabProductos() {
               setCliente(TODOS)
               setDeporte(TODOS)
               setTalla(TODOS)
+              setEstilo(TODOS)
             }}
           >
             Limpiar filtros
@@ -239,25 +262,26 @@ export function TabProductos() {
           siempre entra en el ancho disponible y el texto crece hacia abajo.
           min-w evita que a anchos muy chicos quede ilegible: ahí sí scrollea. */}
       <div className="overflow-x-auto rounded-md border">
-        <Table className="w-full table-fixed min-w-[860px]">
+        <Table className="w-full table-fixed min-w-[940px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[8%]">Código</TableHead>
-              <TableHead className="w-[20%]">Descripción</TableHead>
+              <TableHead className="w-[16%]">Descripción</TableHead>
               <TableHead className="w-[10%]">Desarrollo</TableHead>
-              <TableHead className="w-[13%]">Cliente</TableHead>
+              <TableHead className="w-[12%]">Cliente</TableHead>
               <TableHead className="w-[4%]">Talla</TableHead>
               <TableHead className="w-[7%]">Deporte</TableHead>
+              <TableHead className="w-[7%]">Estilo</TableHead>
               <TableHead className="w-[7%] text-right">Costo</TableHead>
               <TableHead className="w-[8%] text-right">Precio</TableHead>
-              <TableHead className="w-[7%]">Estado</TableHead>
-              <TableHead className="w-[16%] text-right">Acciones</TableHead>
+              <TableHead className="w-[6%]">Estado</TableHead>
+              <TableHead className="w-[15%] text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading && (
               <TableRow>
-                <TableCell colSpan={10} className="text-muted-foreground text-center">
+                <TableCell colSpan={11} className="text-muted-foreground text-center">
                   Cargando…
                 </TableCell>
               </TableRow>
@@ -288,6 +312,7 @@ export function TabProductos() {
                 <TableCell className="break-words whitespace-normal">{p.clienteNombre ?? '—'}</TableCell>
                 <TableCell>{p.tamano ?? '—'}</TableCell>
                 <TableCell className="whitespace-normal">{p.deporte ?? '—'}</TableCell>
+                <TableCell className="whitespace-normal break-words">{p.estiloNombre ?? '—'}</TableCell>
                 <TableCell className="text-right tabular-nums">{formatGTQ(p.costoUnitario)}</TableCell>
                 <TableCell className="text-right tabular-nums">{formatUSD(p.precioVenta)}</TableCell>
                 <TableCell>
@@ -313,6 +338,8 @@ export function TabProductos() {
         </Table>
       </div>
 
+      <ModalCatalogosProducto open={catalogosAbierto} onOpenChange={setCatalogosAbierto} puedeEditar={puedeEditar} />
+
       <ModalProducto producto={productoEditando} open={modalProductoAbierto} onOpenChange={setModalProductoAbierto} onGuardado={invalidar} />
 
       <ImportPreviewDialog<FilaPreviewAltaProducto>
@@ -332,6 +359,10 @@ export function TabProductos() {
           { key: 'cliente', header: 'Cliente', render: (f) => f.clienteCodigo ?? '—' },
           { key: 'talla', header: 'Talla', render: (f) => f.tamano ?? '—' },
           { key: 'deporte', header: 'Deporte', render: (f) => f.deporte ?? '—' },
+          { key: 'estilo', header: 'Estilo', render: (f) => f.estilo ?? '—' },
+          { key: 'linea', header: 'Línea', render: (f) => f.linea ?? '—' },
+          { key: 'genero', header: 'Género', render: (f) => f.genero ?? '—' },
+          { key: 'composicion', header: 'Composición', render: (f) => f.composicion ?? '—' },
           {
             key: 'precio',
             header: 'Precio venta',
@@ -352,6 +383,10 @@ export function TabProductos() {
               tamano: f.tamano,
               deporte: f.deporte,
               precioVenta: f.precioVenta,
+              idEstilo: f.idEstilo,
+              idLinea: f.idLinea,
+              idGenero: f.idGenero,
+              idComposicion: f.idComposicion,
             })),
           )
           return `${resultado.creados} producto(s) creado(s)`

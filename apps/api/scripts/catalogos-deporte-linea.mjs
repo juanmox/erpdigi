@@ -1,4 +1,9 @@
 /**
+ * ⚠️ ARCHIVADO (2026-10-23). Corrió una sola vez, el 2026-10-15. Desde que el
+ * catálogo `costeo.linea_producto` pasó a `recetas.estilos` y la línea de la OP
+ * dejó de capturarse, la parte 2 ya no corre (`tx.lineaProducto` no existe).
+ * El Estilo del producto se carga con `cargar-estilo-productos.mjs`.
+ *
  * Carga DEPORTE y LINEA desde el libro "Recetas" del Google Sheets legacy
  * hacia los CATÁLOGOS del ERP. Pedido del usuario (2026-10-15):
  *

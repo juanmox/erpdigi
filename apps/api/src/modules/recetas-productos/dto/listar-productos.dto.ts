@@ -12,6 +12,11 @@ export class ListarProductosDto {
   deporte?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  estilo?: number;
+
+  @IsOptional()
   @IsString()
   talla?: string;
 

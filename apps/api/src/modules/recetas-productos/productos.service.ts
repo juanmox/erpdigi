@@ -17,6 +17,7 @@ import { ListarProductosDto } from './dto/listar-productos.dto';
 interface FiltrosInput {
   cliente?: number;
   deporte?: string;
+  estilo?: number;
   talla?: string;
   patron?: string;
   desarrollo?: string;
@@ -33,6 +34,8 @@ function condiciones(
     cond.push(Prisma.sql`p.id_cliente = ${filtros.cliente}`);
   if (filtros.deporte && excluir !== 'deporte')
     cond.push(Prisma.sql`lower(p.deporte) = lower(${filtros.deporte})`);
+  if (filtros.estilo && excluir !== 'estilo')
+    cond.push(Prisma.sql`p.id_estilo = ${filtros.estilo}`);
   if (filtros.talla && excluir !== 'talla')
     cond.push(Prisma.sql`p.tamano = ${filtros.talla}`);
   if (filtros.patron && excluir !== 'patron')
@@ -85,9 +88,17 @@ interface ProductoFila {
   costo_mo_minuto: Prisma.Decimal;
   id_cliente: number | null;
   id_subcliente: number | null;
+  id_estilo: number | null;
+  id_linea: number | null;
+  id_genero: number | null;
+  id_composicion: number | null;
   activo: boolean;
   cliente_nombre: string | null;
   subcliente_nombre: string | null;
+  estilo_nombre: string | null;
+  linea_nombre: string | null;
+  genero_nombre: string | null;
+  composicion_nombre: string | null;
   costo_unitario: Prisma.Decimal;
   /// Estado del desarrollo asignado (NULL si el producto no tiene uno).
   estado_desarrollo: string | null;
@@ -122,6 +133,16 @@ export interface FilaPreviewAltaProducto {
   tamano: string | null;
   deporte: string | null;
   precioVenta: number | null;
+  // Atributos de estadística (columnas 11-14 de la plantilla, al final para no
+  // mover las existentes). Lo que se escribió y a qué id resolvió.
+  estilo: string | null;
+  idEstilo: number | null;
+  linea: string | null;
+  idLinea: number | null;
+  genero: string | null;
+  idGenero: number | null;
+  composicion: string | null;
+  idComposicion: number | null;
   error: string | null;
 }
 
@@ -134,6 +155,10 @@ interface AltaProductoInput {
   tamano?: string | null;
   deporte?: string | null;
   precioVenta?: number;
+  idEstilo?: number | null;
+  idLinea?: number | null;
+  idGenero?: number | null;
+  idComposicion?: number | null;
 }
 
 @Injectable()
@@ -168,13 +193,20 @@ export class ProductosService {
              COALESCE(d.costo_mo_minuto, 0) AS costo_mo_minuto,
              d.estado AS estado_desarrollo,
              p.id_cliente, p.id_subcliente, p.activo,
+             p.id_estilo, p.id_linea, p.id_genero, p.id_composicion,
              c.nombre AS cliente_nombre,
              sc.nombre AS subcliente_nombre,
+             es.nombre AS estilo_nombre, li.nombre AS linea_nombre,
+             ge.nombre AS genero_nombre, co.nombre AS composicion_nombre,
              round(v.costo_unitario, 4) AS costo_unitario
       FROM recetas.productos p
       JOIN recetas.v_producto_costo v ON v.id_producto = p.id_producto
       LEFT JOIN recetas.clientes c ON c.id_cliente = p.id_cliente
       LEFT JOIN recetas.subclientes sc ON sc.id_subcliente = p.id_subcliente
+      LEFT JOIN recetas.estilos es ON es.id_estilo = p.id_estilo
+      LEFT JOIN recetas.lineas li ON li.id_linea = p.id_linea
+      LEFT JOIN recetas.generos ge ON ge.id_genero = p.id_genero
+      LEFT JOIN recetas.composiciones co ON co.id_composicion = p.id_composicion
       LEFT JOIN recetas.desarrollos d ON d.codigo = p.desarrollo
       WHERE ${where}
       ORDER BY p.codigo
@@ -201,6 +233,14 @@ export class ProductosService {
         activo: p.activo,
         clienteNombre: p.cliente_nombre,
         subclienteNombre: p.subcliente_nombre,
+        idEstilo: p.id_estilo,
+        idLinea: p.id_linea,
+        idGenero: p.id_genero,
+        idComposicion: p.id_composicion,
+        estiloNombre: p.estilo_nombre,
+        lineaNombre: p.linea_nombre,
+        generoNombre: p.genero_nombre,
+        composicionNombre: p.composicion_nombre,
         costoUnitario: p.costo_unitario.toNumber(),
         estadoDesarrollo: p.estado_desarrollo,
       })),
@@ -391,14 +431,24 @@ export class ProductosService {
         desarrollo: string | null;
         precio_venta: Prisma.Decimal;
         costo_unitario: Prisma.Decimal;
+        estilo: string | null;
+        linea: string | null;
+        genero: string | null;
+        composicion: string | null;
       }[]
     >`
       SELECT p.codigo, p.descripcion, c.nombre AS cliente, p.deporte, p.tamano,
              p.patron, p.desarrollo, p.precio_venta,
-             round(v.costo_unitario, 4) AS costo_unitario
+             round(v.costo_unitario, 4) AS costo_unitario,
+             es.nombre AS estilo, li.nombre AS linea,
+             ge.nombre AS genero, co.nombre AS composicion
       FROM recetas.productos p
       JOIN recetas.v_producto_costo v ON v.id_producto = p.id_producto
       LEFT JOIN recetas.clientes c ON c.id_cliente = p.id_cliente
+      LEFT JOIN recetas.estilos es ON es.id_estilo = p.id_estilo
+      LEFT JOIN recetas.lineas li ON li.id_linea = p.id_linea
+      LEFT JOIN recetas.generos ge ON ge.id_genero = p.id_genero
+      LEFT JOIN recetas.composiciones co ON co.id_composicion = p.id_composicion
       WHERE ${where}
       ORDER BY p.codigo
     `;
@@ -408,7 +458,7 @@ export class ProductosService {
     wb.created = new Date();
     const ws = wb.addWorksheet('Productos');
 
-    ws.mergeCells('A1:I1');
+    ws.mergeCells('A1:M1');
     ws.getCell('A1').value =
       'Digital Textil, S.A. (Digitexsa) — Listado de productos';
     ws.getCell('A1').font = {
@@ -416,7 +466,7 @@ export class ProductosService {
       size: 14,
       color: { argb: AZUL_DIGITEXSA },
     };
-    ws.mergeCells('A2:I2');
+    ws.mergeCells('A2:M2');
     ws.getCell('A2').value =
       `Generado: ${new Date().toLocaleString('es-GT')}   |   Total: ${rows.length}`;
     ws.getCell('A2').font = { size: 9, color: { argb: 'FF888888' } };
@@ -432,6 +482,11 @@ export class ProductosService {
       'Desarrollo',
       'Precio venta (USD)',
       'Costo unitario (GTQ)',
+      // Al final para no mover ninguna columna que alguien ya use.
+      'Estilo',
+      'Línea',
+      'Género',
+      'Composición',
     ];
     headerRow.eachCell(estiloEncabezado);
 
@@ -446,15 +501,19 @@ export class ProductosService {
         r.desarrollo,
         r.precio_venta.toNumber(),
         r.costo_unitario.toNumber(),
+        r.estilo,
+        r.linea,
+        r.genero,
+        r.composicion,
       ]);
     }
 
-    const anchos = [16, 48, 18, 14, 10, 20, 14, 16, 18];
+    const anchos = [16, 48, 18, 14, 10, 20, 14, 16, 18, 14, 22, 14, 22];
     anchos.forEach((w, i) => (ws.getColumn(i + 1).width = w));
     ws.getColumn(8).numFmt = '#,##0.00';
     ws.getColumn(9).numFmt = '#,##0.0000';
     ws.views = [{ state: 'frozen', ySplit: 4 }];
-    ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 9 } };
+    ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 13 } };
 
     return wb.xlsx.writeBuffer();
   }
@@ -535,6 +594,75 @@ export class ProductosService {
       );
   }
 
+  /**
+   * Valida los cuatro atributos de estadística (estilo, línea, género,
+   * composición): que existan y estén activos.
+   *
+   * Al editar solo se revisan los que CAMBIAN: un producto que ya apunta a un
+   * valor retirado no puede quedar imposible de editar por eso. Retirar un
+   * valor lo saca de los selectores, no invalida a quien ya lo usa.
+   */
+  private async exigirAtributos(
+    nuevos: {
+      idEstilo?: number | null;
+      idLinea?: number | null;
+      idGenero?: number | null;
+      idComposicion?: number | null;
+    },
+    actuales?: {
+      idEstilo: number | null;
+      idLinea: number | null;
+      idGenero: number | null;
+      idComposicion: number | null;
+    },
+  ) {
+    const cambia = (
+      n: number | null | undefined,
+      a: number | null | undefined,
+    ) => n != null && n !== (a ?? null);
+    const p = this.prisma;
+    const revisiones: [
+      string,
+      string,
+      () => Promise<{ nombre: string; activo: boolean } | null>,
+    ][] = [];
+    if (cambia(nuevos.idEstilo, actuales?.idEstilo))
+      revisiones.push([
+        'El estilo',
+        'retirado',
+        () => p.estilo.findUnique({ where: { idEstilo: nuevos.idEstilo! } }),
+      ]);
+    if (cambia(nuevos.idLinea, actuales?.idLinea))
+      revisiones.push([
+        'La línea',
+        'retirada',
+        () => p.linea.findUnique({ where: { idLinea: nuevos.idLinea! } }),
+      ]);
+    if (cambia(nuevos.idGenero, actuales?.idGenero))
+      revisiones.push([
+        'El género',
+        'retirado',
+        () => p.genero.findUnique({ where: { idGenero: nuevos.idGenero! } }),
+      ]);
+    if (cambia(nuevos.idComposicion, actuales?.idComposicion))
+      revisiones.push([
+        'La composición',
+        'retirada',
+        () =>
+          p.composicion.findUnique({
+            where: { idComposicion: nuevos.idComposicion! },
+          }),
+      ]);
+    for (const [etiqueta, retirado, buscar] of revisiones) {
+      const x = await buscar();
+      if (!x) throw new BadRequestException(`${etiqueta} elegido no existe`);
+      if (!x.activo)
+        throw new BadRequestException(
+          `${etiqueta} "${x.nombre}" está ${retirado}: elegí otro`,
+        );
+    }
+  }
+
   async crear(dto: CrearProductoDto, idUsuarioActor: number) {
     if (!(await this.referencias.deporteEsValido(dto.deporte))) {
       throw new BadRequestException(`Deporte "${dto.deporte}" no reconocido`);
@@ -548,6 +676,7 @@ export class ProductosService {
       );
     await this.exigirDesarrolloAsignable(desarrollo);
     await this.exigirSubclienteDelCliente(dto.idSubcliente, dto.idCliente);
+    await this.exigirAtributos(dto);
 
     try {
       const producto = await this.prisma.producto.create({
@@ -556,6 +685,10 @@ export class ProductosService {
           descripcion: dto.descripcion.trim(),
           idCliente: dto.idCliente ?? null,
           idSubcliente: dto.idSubcliente ?? null,
+          idEstilo: dto.idEstilo ?? null,
+          idLinea: dto.idLinea ?? null,
+          idGenero: dto.idGenero ?? null,
+          idComposicion: dto.idComposicion ?? null,
           desarrollo,
           patron: dto.patron?.trim() || null,
           tamano: dto.tamano?.trim() || null,
@@ -633,6 +766,25 @@ export class ProductosService {
         dto.idCliente,
       );
     }
+
+    // Atributos de estadística. `undefined` = no tocar, `null` = quitar.
+    await this.exigirAtributos(dto, anterior);
+    if (dto.idEstilo !== undefined)
+      data.estilo = dto.idEstilo
+        ? { connect: { idEstilo: dto.idEstilo } }
+        : { disconnect: true };
+    if (dto.idLinea !== undefined)
+      data.linea = dto.idLinea
+        ? { connect: { idLinea: dto.idLinea } }
+        : { disconnect: true };
+    if (dto.idGenero !== undefined)
+      data.genero = dto.idGenero
+        ? { connect: { idGenero: dto.idGenero } }
+        : { disconnect: true };
+    if (dto.idComposicion !== undefined)
+      data.composicion = dto.idComposicion
+        ? { connect: { idComposicion: dto.idComposicion } }
+        : { disconnect: true };
 
     if (dto.desarrollo !== undefined) {
       const nuevo = dto.desarrollo?.trim() || null;
@@ -722,6 +874,10 @@ export class ProductosService {
       precioCell: unknown;
       minutosCell: unknown;
       costoMoCell: unknown;
+      estilo: string;
+      linea: string;
+      genero: string;
+      composicion: string;
     }[] = [];
     ws.eachRow((row, rowNumber) => {
       if (rowNumber < FILA_INICIO_DATOS) return;
@@ -737,21 +893,53 @@ export class ProductosService {
         precioCell: row.getCell(8).value,
         minutosCell: row.getCell(9).value,
         costoMoCell: row.getCell(10).value,
+        estilo: textoCelda(row.getCell(11).value).trim(),
+        linea: textoCelda(row.getCell(12).value).trim(),
+        genero: textoCelda(row.getCell(13).value).trim(),
+        composicion: textoCelda(row.getCell(14).value).trim(),
       });
     });
 
-    const [clientes, tallas, deportes, existentes, desarrollos] =
-      await Promise.all([
-        this.prisma.cliente.findMany(),
-        this.prisma.talla.findMany(),
-        this.prisma.deporte.findMany(),
-        this.prisma.producto.findMany({
-          select: { codigo: true, desarrollo: true },
-        }),
-        this.prisma.desarrollo.findMany({
-          select: { codigo: true, estado: true, activo: true },
-        }),
-      ]);
+    const [
+      clientes,
+      tallas,
+      deportes,
+      existentes,
+      desarrollos,
+      estilos,
+      lineas,
+      generos,
+      composiciones,
+    ] = await Promise.all([
+      this.prisma.cliente.findMany(),
+      this.prisma.talla.findMany(),
+      this.prisma.deporte.findMany(),
+      this.prisma.producto.findMany({
+        select: { codigo: true, desarrollo: true },
+      }),
+      this.prisma.desarrollo.findMany({
+        select: { codigo: true, estado: true, activo: true },
+      }),
+      // Todos, con su estado: hace falta para decir "está retirado" y no
+      // "no existe", que llevan a arreglos distintos.
+      this.prisma.estilo.findMany(),
+      this.prisma.linea.findMany(),
+      this.prisma.genero.findMany(),
+      this.prisma.composicion.findMany(),
+    ]);
+    // Por nombre y sin distinguir mayúsculas: es lo que escribe la gente.
+    const estiloPorNombre = new Map(
+      estilos.map((x) => [x.nombre.toLowerCase(), x]),
+    );
+    const lineaPorNombre = new Map(
+      lineas.map((x) => [x.nombre.toLowerCase(), x]),
+    );
+    const generoPorNombre = new Map(
+      generos.map((x) => [x.nombre.toLowerCase(), x]),
+    );
+    const composicionPorNombre = new Map(
+      composiciones.map((x) => [x.nombre.toLowerCase(), x]),
+    );
     const clientePorCodigo = new Map(
       clientes.map((c) => [c.codigo.toLowerCase(), c.idCliente]),
     );
@@ -816,6 +1004,25 @@ export class ProductosService {
         error = `Deporte "${r.deporte}" no reconocido`;
       else if (!Number.isFinite(precio) || precio < 0)
         error = 'Precio de venta inválido';
+      else if (r.estilo && !estiloPorNombre.get(r.estilo.toLowerCase())?.activo)
+        error = estiloPorNombre.has(r.estilo.toLowerCase())
+          ? `El estilo "${r.estilo}" está retirado`
+          : `Estilo "${r.estilo}" no existe — darlo de alta en Catálogos de producto`;
+      else if (r.linea && !lineaPorNombre.get(r.linea.toLowerCase())?.activo)
+        error = lineaPorNombre.has(r.linea.toLowerCase())
+          ? `La línea "${r.linea}" está retirada`
+          : `Línea "${r.linea}" no existe — darla de alta en Catálogos de producto`;
+      else if (r.genero && !generoPorNombre.get(r.genero.toLowerCase())?.activo)
+        error = generoPorNombre.has(r.genero.toLowerCase())
+          ? `El género "${r.genero}" está retirado`
+          : `Género "${r.genero}" no existe — darlo de alta en Catálogos de producto`;
+      else if (
+        r.composicion &&
+        !composicionPorNombre.get(r.composicion.toLowerCase())?.activo
+      )
+        error = composicionPorNombre.has(r.composicion.toLowerCase())
+          ? `La composición "${r.composicion}" está retirada`
+          : `Composición "${r.composicion}" no existe — darla de alta en Catálogos de producto`;
       if (r.codigo) vistos.add(r.codigo);
       if (r.desarrollo) vistosDesarrollo.add(r.desarrollo.trim().toLowerCase());
 
@@ -832,6 +1039,23 @@ export class ProductosService {
         tamano: r.talla || null,
         deporte: r.deporte || null,
         precioVenta: Number.isFinite(precio) ? precio : null,
+        estilo: r.estilo || null,
+        idEstilo: r.estilo
+          ? (estiloPorNombre.get(r.estilo.toLowerCase())?.idEstilo ?? null)
+          : null,
+        linea: r.linea || null,
+        idLinea: r.linea
+          ? (lineaPorNombre.get(r.linea.toLowerCase())?.idLinea ?? null)
+          : null,
+        genero: r.genero || null,
+        idGenero: r.genero
+          ? (generoPorNombre.get(r.genero.toLowerCase())?.idGenero ?? null)
+          : null,
+        composicion: r.composicion || null,
+        idComposicion: r.composicion
+          ? (composicionPorNombre.get(r.composicion.toLowerCase())
+              ?.idComposicion ?? null)
+          : null,
         error,
       };
     });
@@ -871,6 +1095,44 @@ export class ProductosService {
           .join(', ')}${noAsignables.length > 10 ? '…' : ''}`,
       );
 
+    // Los ids de estilo/línea/género/composición también viajan por el
+    // navegador: se revalidan contra los catálogos, activos, igual que el resto.
+    const [estilosOk, lineasOk, generosOk, composicionesOk] = await Promise.all(
+      [
+        this.prisma.estilo.findMany({
+          where: { activo: true },
+          select: { idEstilo: true },
+        }),
+        this.prisma.linea.findMany({
+          where: { activo: true },
+          select: { idLinea: true },
+        }),
+        this.prisma.genero.findMany({
+          where: { activo: true },
+          select: { idGenero: true },
+        }),
+        this.prisma.composicion.findMany({
+          where: { activo: true },
+          select: { idComposicion: true },
+        }),
+      ],
+    );
+    const okEstilo = new Set(estilosOk.map((x) => x.idEstilo));
+    const okLinea = new Set(lineasOk.map((x) => x.idLinea));
+    const okGenero = new Set(generosOk.map((x) => x.idGenero));
+    const okComposicion = new Set(composicionesOk.map((x) => x.idComposicion));
+    const atributoInvalido = altas.find(
+      (a) =>
+        (a.idEstilo != null && !okEstilo.has(a.idEstilo)) ||
+        (a.idLinea != null && !okLinea.has(a.idLinea)) ||
+        (a.idGenero != null && !okGenero.has(a.idGenero)) ||
+        (a.idComposicion != null && !okComposicion.has(a.idComposicion)),
+    );
+    if (atributoInvalido)
+      throw new BadRequestException(
+        `El producto ${atributoInvalido.codigo} trae un estilo, línea, género o composición que no existe o está retirado`,
+      );
+
     return this.prisma.$transaction(async (tx) => {
       const errores: { codigo: string; motivo: string }[] = [];
       let creados = 0;
@@ -881,6 +1143,10 @@ export class ProductosService {
               codigo: a.codigo,
               descripcion: a.descripcion,
               idCliente: a.idCliente ?? null,
+              idEstilo: a.idEstilo ?? null,
+              idLinea: a.idLinea ?? null,
+              idGenero: a.idGenero ?? null,
+              idComposicion: a.idComposicion ?? null,
               // El código canónico sale del catálogo, no del Excel: así una
               // diferencia de mayúsculas no crea un desarrollo "distinto".
               desarrollo: asignables.get(a.desarrollo!.trim().toLowerCase())!,
@@ -924,10 +1190,34 @@ export class ProductosService {
   }
 
   async plantillaAlta(): Promise<ExcelJS.Buffer> {
-    const [clientes, tallas, deportes] = await Promise.all([
+    const [
+      clientes,
+      tallas,
+      deportes,
+      estilos,
+      lineas,
+      generos,
+      composiciones,
+    ] = await Promise.all([
       this.prisma.cliente.findMany({ orderBy: { nombre: 'asc' } }),
       this.prisma.talla.findMany({ orderBy: { orden: 'asc' } }),
       this.prisma.deporte.findMany({ orderBy: { nombre: 'asc' } }),
+      this.prisma.estilo.findMany({
+        where: { activo: true },
+        orderBy: { nombre: 'asc' },
+      }),
+      this.prisma.linea.findMany({
+        where: { activo: true },
+        orderBy: { nombre: 'asc' },
+      }),
+      this.prisma.genero.findMany({
+        where: { activo: true },
+        orderBy: { nombre: 'asc' },
+      }),
+      this.prisma.composicion.findMany({
+        where: { activo: true },
+        orderBy: { nombre: 'asc' },
+      }),
     ]);
 
     const wb = new ExcelJS.Workbook();
@@ -935,7 +1225,7 @@ export class ProductosService {
     wb.created = new Date();
 
     const ws = wb.addWorksheet('Altas de productos');
-    ws.mergeCells('A1:J1');
+    ws.mergeCells('A1:N1');
     ws.getCell('A1').value =
       'Digital Textil, S.A. (Digitexsa) — Alta masiva de productos';
     ws.getCell('A1').font = {
@@ -943,11 +1233,13 @@ export class ProductosService {
       size: 14,
       color: { argb: AZUL_DIGITEXSA },
     };
-    ws.mergeCells('A2:J2');
+    ws.mergeCells('A2:N2');
     ws.getCell('A2').value =
       'Completar una fila por producto nuevo. Desarrollo es OBLIGATORIO y debe existir ya aprobado ' +
       '(pestaña Desarrollos). Cliente (código), Talla y Deporte son opcionales, pero si se llenan deben ' +
-      'coincidir con la hoja "Clientes y tallas válidas".';
+      'coincidir con la hoja "Clientes y tallas válidas". Estilo, Línea, Género y Composición (últimas ' +
+      'cuatro columnas) son opcionales y deben existir en la hoja "Atributos válidos"; para agregar uno ' +
+      'nuevo, darlo de alta antes en Catálogos de producto.';
     ws.getCell('A2').font = { size: 9, color: { argb: 'FF888888' } };
     const headerRow = ws.getRow(4);
     headerRow.values = [
@@ -963,9 +1255,15 @@ export class ProductosService {
       // cargando) pero se ignoran: la mano de obra vive en el desarrollo.
       'Minutos MO (ignorado)',
       'Costo MO/min (ignorado)',
+      // Al final: agregar columnas en el medio correría las siguientes y un
+      // archivo armado con la plantilla anterior cargaría datos corridos.
+      'Estilo (opcional)',
+      'Línea (opcional)',
+      'Género (opcional)',
+      'Composición (opcional)',
     ];
     headerRow.eachCell(estiloEncabezado);
-    const anchos = [16, 40, 16, 14, 16, 10, 14, 14, 18, 18];
+    const anchos = [16, 40, 16, 14, 16, 10, 14, 14, 18, 18, 18, 22, 16, 24];
     anchos.forEach((w, i) => (ws.getColumn(i + 1).width = w));
     ws.getColumn(8).numFmt = '#,##0.00';
     ws.getColumn(10).numFmt = '#,##0.0000';
@@ -990,6 +1288,25 @@ export class ProductosService {
     wsRef.getColumn(2).width = 28;
     wsRef.getColumn(3).width = 10;
     wsRef.getColumn(4).width = 14;
+
+    // Los valores válidos de los cuatro atributos, para no tener que adivinar
+    // cómo está escrito cada uno.
+    const wsAtr = wb.addWorksheet('Atributos válidos');
+    wsAtr.getRow(1).values = ['Estilo', 'Línea', 'Género', 'Composición'];
+    wsAtr.getRow(1).font = { bold: true };
+    const maxAtr = Math.max(
+      estilos.length,
+      lineas.length,
+      generos.length,
+      composiciones.length,
+    );
+    for (let i = 0; i < maxAtr; i++) {
+      wsAtr.getRow(i + 2).getCell(1).value = estilos[i]?.nombre ?? '';
+      wsAtr.getRow(i + 2).getCell(2).value = lineas[i]?.nombre ?? '';
+      wsAtr.getRow(i + 2).getCell(3).value = generos[i]?.nombre ?? '';
+      wsAtr.getRow(i + 2).getCell(4).value = composiciones[i]?.nombre ?? '';
+    }
+    [18, 26, 18, 30].forEach((w, i) => (wsAtr.getColumn(i + 1).width = w));
 
     return wb.xlsx.writeBuffer();
   }

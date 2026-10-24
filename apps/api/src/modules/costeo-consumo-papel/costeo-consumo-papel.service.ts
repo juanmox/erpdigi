@@ -10,6 +10,7 @@ import {
   formatearFechaSheets,
   GoogleSheetsService,
 } from '../../common/google-sheets/google-sheets.service';
+import { estilosDeOrden } from '../../common/estilos-orden';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -197,7 +198,7 @@ export class CosteoConsumoPapelService {
           correlativo: parsed.correlativo,
         },
       },
-      include: { cliente: true, lineaProducto: true },
+      include: { cliente: true, estilo: { select: { nombre: true } } },
     });
     if (!orden)
       throw new NotFoundException(
@@ -359,7 +360,11 @@ export class CosteoConsumoPapelService {
         codigo: orden.codigo,
         ordenCompra: orden.ordenCompra,
         cliente: orden.cliente,
-        lineaProducto: orden.lineaProducto,
+        estilos: await estilosDeOrden(
+          this.prisma,
+          orden.idOrdenProduccion,
+          orden.estilo?.nombre,
+        ),
         // El papel en blanco se gestiona SOLO desde esta pantalla desde
         // 2026-10-07 (antes el checkbox vivía en Órdenes de Producción). Hace
         // falta acá y no solo en la cola de pendientes: una orden ya impresa

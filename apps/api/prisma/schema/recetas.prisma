@@ -46,7 +46,7 @@ model Cliente {
 /// cliente (411) por no tener dónde más ir.
 ///
 /// ⚠️ Es por cliente (@@unique([idCliente, nombre])) y no global, al revés que
-/// costeo.LineaProducto: un tipo de prenda es universal, una división pertenece
+/// `Estilo`: un tipo de prenda es universal, una división pertenece
 /// a su casa matriz.
 ///
 /// `codigo` es lo que permite que la plantilla de Órdenes siga aceptando el
@@ -141,6 +141,74 @@ model Deporte {
   @@schema("recetas")
 }
 
+/// Tipo de prenda (Jersey, Short, T-Shirt, Pants…). Antes `costeo.LineaProducto`:
+/// se movió acá y se renombró el 2026-10-23, porque en el archivo de campos la
+/// LÍNEA es otra cosa (la línea comercial, ver `Linea`). Mismos ids, así que
+/// las órdenes que ya lo traían siguen apuntando.
+///
+/// Catálogo GLOBAL, no por cliente: un Jersey es un Jersey para cualquiera.
+/// Vive en el PRODUCTO; el de la orden (`OrdenProduccion.idEstilo`) es histórico.
+/// + SQL: UNIQUE (lower(nombre)) y CHECK de nombre no vacío — Prisma no los
+/// expresa; el `@unique` de acá solo cubre la forma exacta.
+model Estilo {
+  idEstilo Int      @id @default(autoincrement()) @map("id_estilo")
+  nombre   String   @unique @db.VarChar(80)
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now()) @map("creado_en") @db.Timestamptz(6)
+
+  productos Producto[]
+
+  /// Relaciones inversas del módulo Costeo Real (costeo.prisma).
+  ordenesProduccionCosteo OrdenProduccion[]
+  plantillasInsumoCosteo  PlantillaInsumo[]
+
+  @@map("estilos")
+  @@schema("recetas")
+}
+
+/// Línea comercial del producto (Hail Mary, Mesh Crew Neck, V-Neck…). No es el
+/// estilo. + SQL: UNIQUE (lower(nombre)) y CHECK de nombre no vacío.
+model Linea {
+  idLinea  Int      @id @default(autoincrement()) @map("id_linea")
+  nombre   String   @unique @db.VarChar(80)
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now()) @map("creado_en") @db.Timestamptz(6)
+
+  productos Producto[]
+
+  @@map("lineas")
+  @@schema("recetas")
+}
+
+/// Género/público del producto. Nace VACÍO a propósito: las ~80 variantes del
+/// legacy ("ADULTO", "MENS", "CABALLERO"…) se mapean a mano antes de cargar.
+/// + SQL: UNIQUE (lower(nombre)) y CHECK de nombre no vacío.
+model Genero {
+  idGenero Int      @id @default(autoincrement()) @map("id_genero")
+  nombre   String   @unique @db.VarChar(80)
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now()) @map("creado_en") @db.Timestamptz(6)
+
+  productos Producto[]
+
+  @@map("generos")
+  @@schema("recetas")
+}
+
+/// Composición de la tela del producto (100% Polyester…).
+/// + SQL: UNIQUE (lower(nombre)) y CHECK de nombre no vacío.
+model Composicion {
+  idComposicion Int      @id @default(autoincrement()) @map("id_composicion")
+  nombre        String   @unique @db.VarChar(120)
+  activo        Boolean  @default(true)
+  creadoEn      DateTime @default(now()) @map("creado_en") @db.Timestamptz(6)
+
+  productos Producto[]
+
+  @@map("composiciones")
+  @@schema("recetas")
+}
+
 model Insumo {
   idInsumo        Int              @id @default(autoincrement()) @map("id_insumo")
   codigo          String           @unique @db.VarChar(30)
@@ -204,6 +272,13 @@ model Producto {
   /// (ver Subcliente). Va acá y no en la orden porque 38 órdenes mezclan
   /// prendas de subcliente con prendas directas del mismo cliente.
   idSubcliente        Int?                @map("id_subcliente")
+  /// Atributos para la estadística de producción (archivo "DESGLOSE DE CAMPOS",
+  /// 2026-10-23). Catálogos con FK y no texto: el legacy escribía ~80 formas de
+  /// 8 géneros. Todos nulos al nacer; ningún producto existente cambió.
+  idEstilo            Int?                @map("id_estilo")
+  idLinea             Int?                @map("id_linea")
+  idGenero            Int?                @map("id_genero")
+  idComposicion       Int?                @map("id_composicion")
   precioVenta         Decimal             @default(0) @map("precio_venta") @db.Decimal(12, 2)
   /// ⚠️ LEGACY — no son autoritativos: la mano de obra vive en
   /// Desarrollo.minutosMo / .costoMoMinuto desde 2026-08-26, y nada las lee ni
@@ -216,6 +291,10 @@ model Producto {
   detalleCotizaciones CotizacionDetalle[]
   cliente             Cliente?            @relation(fields: [idCliente], references: [idCliente], onDelete: NoAction, onUpdate: NoAction)
   subcliente          Subcliente?         @relation(fields: [idSubcliente], references: [idSubcliente], onDelete: SetNull, onUpdate: Cascade)
+  estilo              Estilo?             @relation(fields: [idEstilo], references: [idEstilo], onDelete: Restrict, onUpdate: Cascade)
+  linea               Linea?              @relation(fields: [idLinea], references: [idLinea], onDelete: Restrict, onUpdate: Cascade)
+  genero              Genero?             @relation(fields: [idGenero], references: [idGenero], onDelete: Restrict, onUpdate: Cascade)
+  composicion         Composicion?        @relation(fields: [idComposicion], references: [idComposicion], onDelete: Restrict, onUpdate: Cascade)
 
   /// Relaciones inversas del módulo Costeo Real (costeo.prisma).
   consumosEstandarCosteo  ConsumoEstandar[]

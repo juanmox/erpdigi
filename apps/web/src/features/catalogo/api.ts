@@ -16,7 +16,9 @@ import type {
   ProductoCatalogo,
   Subcliente,
   Talla,
+  TipoCatalogoProducto,
   UnidadMedida,
+  ValorCatalogoProducto,
 } from './types'
 
 type Estado = 'activos' | 'inactivos' | 'todos'
@@ -32,6 +34,10 @@ export interface AltaProductoBody {
   precioVenta?: number | null
   minutosMo?: number | null
   costoMoMinuto?: number | null
+  idEstilo?: number | null
+  idLinea?: number | null
+  idGenero?: number | null
+  idComposicion?: number | null
 }
 
 async function subirArchivo<T>(path: string, archivo: File): Promise<T> {
@@ -47,6 +53,25 @@ export const catalogoApi = {
   subclientes: () => apiFetch<Subcliente[]>('/recetas/subclientes'),
   tallas: () => apiFetch<Talla[]>('/recetas/tallas'),
   deportes: () => apiFetch<Deporte[]>('/recetas/deportes'),
+  // Catálogos que describen al producto (estilos, líneas, géneros, composiciones).
+  // Devuelve TODOS con su `activo`: los selectores filtran, la pantalla de
+  // catálogos necesita ver también los retirados para poder reactivarlos.
+  catalogoProducto: (tipo: TipoCatalogoProducto) =>
+    apiFetch<ValorCatalogoProducto[]>(`/recetas/catalogos-producto/${tipo}`),
+  crearCatalogoProducto: (tipo: TipoCatalogoProducto, nombre: string) =>
+    apiFetch<ValorCatalogoProducto>(`/recetas/catalogos-producto/${tipo}`, {
+      method: 'POST',
+      body: JSON.stringify({ nombre }),
+    }),
+  editarCatalogoProducto: (
+    tipo: TipoCatalogoProducto,
+    id: number,
+    body: { nombre?: string; activo?: boolean },
+  ) =>
+    apiFetch<ValorCatalogoProducto>(`/recetas/catalogos-producto/${tipo}/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
 
   // insumos
   listarInsumos: (estado: Estado = 'activos') => apiFetch<InsumoCatalogo[]>(`/recetas/insumos?estado=${estado}`),

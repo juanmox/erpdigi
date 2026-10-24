@@ -8,6 +8,7 @@ import {
   formatearFechaSheets,
   GoogleSheetsService,
 } from '../../common/google-sheets/google-sheets.service';
+import { estilosDeOrden } from '../../common/estilos-orden';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -39,7 +40,7 @@ const INCLUDE_REPOSICION = {
     },
     orderBy: { idReposicionInsumo: 'asc' },
   },
-  ordenProduccion: { include: { cliente: true, lineaProducto: true } },
+  ordenProduccion: { include: { cliente: true } },
 } as const;
 
 @Injectable()
@@ -89,7 +90,7 @@ export class CosteoReposicionesService {
           correlativo: parsed.correlativo,
         },
       },
-      include: { cliente: true, lineaProducto: true },
+      include: { cliente: true, estilo: { select: { nombre: true } } },
     });
     if (!orden)
       throw new NotFoundException(
@@ -117,7 +118,11 @@ export class CosteoReposicionesService {
     return {
       siguienteNumero: (agg._max.numeroRepo ?? 0) + 1,
       cliente: orden.cliente?.nombre ?? null,
-      lineaProducto: orden.lineaProducto?.nombre ?? null,
+      estilos: await estilosDeOrden(
+        this.prisma,
+        orden.idOrdenProduccion,
+        orden.estilo?.nombre,
+      ),
     };
   }
 

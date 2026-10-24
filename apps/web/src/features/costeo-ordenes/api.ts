@@ -5,7 +5,6 @@ import type {
   EditarOrdenPayload,
   EstadoListadoOrdenes,
   FilaPreviewLinea,
-  LineaProductoDetalle,
   ListadoOrdenes,
   OrdenProduccionDetalle,
   ProductoBusqueda,
@@ -29,13 +28,6 @@ export const costeoOrdenesApi = {
     }),
   plantillaImportar: () => descargarArchivo('/costeo/ordenes/plantilla-importar', 'plantilla_ordenes_items.xlsx'),
   clientes: () => apiFetch<ClienteRef[]>('/costeo/ordenes/clientes'),
-  lineasProducto: () => apiFetch<LineaProductoDetalle[]>('/costeo/ordenes/lineas-producto'),
-  // Catálogo global desde el 2026-10-09: sin cliente.
-  crearLineaProducto: (dto: { nombre: string }) =>
-    apiFetch<LineaProductoDetalle>('/costeo/ordenes/lineas-producto', {
-      method: 'POST',
-      body: JSON.stringify(dto),
-    }),
   // ── Edición de órdenes ya cargadas (gateado costeo.orden.editar) ──
   tallasEdicion: () => apiFetch<TallaCatalogo[]>('/costeo/ordenes/edicion/catalogos'),
   buscarProductosEdicion: (q: string) =>

@@ -40,7 +40,8 @@ export interface OrdenConsumo {
     codigo: string
     ordenCompra: string | null
     cliente: { idCliente: number; codigo: string; nombre: string } | null
-    lineaProducto: { idLineaProducto: number; nombre: string } | null
+    /** Estilos de los productos de la orden (el estilo es del producto). */
+    estilos: string[]
     /** Papel en blanco de la orden; se gestiona solo desde esta pantalla. */
     consumoEnBlanco: boolean
     enBlancoYd: number
