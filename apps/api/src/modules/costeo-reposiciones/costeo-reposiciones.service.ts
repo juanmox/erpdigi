@@ -8,6 +8,7 @@ import {
   formatearFechaSheets,
   GoogleSheetsService,
 } from '../../common/google-sheets/google-sheets.service';
+import { textoClienteSheetsDeOrden } from '../../common/cliente-sheets';
 import { estilosDeOrden } from '../../common/estilos-orden';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
@@ -396,7 +397,12 @@ export class CosteoReposicionesService {
   ) {
     const fechaTexto = formatearFechaSheets(detalle.fecha);
     const responsable = detalle.empleado?.nombres ?? 'Sin responsable';
-    const cliente = detalle.ordenProduccion.cliente?.nombre ?? '';
+    // "<subcliente o cliente> - <deporte>" de los productos de la ORDEN: la
+    // reposición todavía es de toda la OP. Ver common/cliente-sheets.ts.
+    const cliente = await textoClienteSheetsDeOrden(
+      this.prisma,
+      detalle.idOrdenProduccion,
+    );
     const yardasPapel = Number(detalle.yardasPapel);
     const yardasTela = Number(detalle.yardasTela);
     const tipoPapel = detalle.tipoPapel?.nombre ?? '';

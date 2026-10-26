@@ -10,6 +10,10 @@ import {
   formatearFechaSheets,
   GoogleSheetsService,
 } from '../../common/google-sheets/google-sheets.service';
+import {
+  textoClienteSheets,
+  textoClienteSheetsDeOrden,
+} from '../../common/cliente-sheets';
 import { estilosDeOrden } from '../../common/estilos-orden';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
@@ -1020,7 +1024,11 @@ export class CosteoConsumoPapelService {
         this.filaSheetsEnBlanco({
           fecha: fila.fecha,
           codigoOp: fila.ordenProduccion.codigo,
-          cliente: fila.ordenProduccion.cliente?.nombre ?? '',
+          // Consumo de la ORDEN: texto armado con todos sus productos.
+          cliente: await textoClienteSheetsDeOrden(
+            this.prisma,
+            fila.idOrdenProduccion,
+          ),
           impresora: fila.impresora.codigo,
           tipoPapel: fila.tipoPapel.nombre,
           yardas: Number(fila.enBlancoYd),
@@ -1213,7 +1221,8 @@ export class CosteoConsumoPapelService {
       where: { idLineaProduccion, idEmpresa },
       include: {
         tallas: { include: { talla: true } },
-        producto: true,
+        // El subcliente solo para el texto CLIENTE del espejo a Google Sheets.
+        producto: { include: { subcliente: { select: { nombre: true } } } },
         // Solo para el espejo a Google Sheets: la hoja "Datos" lleva el
         // cliente y el código de OP en cada fila.
         ordenProduccion: { include: { cliente: true } },
@@ -1356,7 +1365,17 @@ export class CosteoConsumoPapelService {
       // (que en los datos reales se queda en "Buscando..." muy seguido).
       const nrolloTexto = `${montaje.rolloPapel.facturaPapel.numeroFactura}-${montaje.rolloPapel.facturaPapel.totalRollos}-${montaje.rolloPapel.secuencia}`;
       const fechaTexto = formatearFechaSheets(fecha);
-      const clienteNombre = linea.ordenProduccion.cliente?.nombre ?? '';
+      // Columna CLIENTE de la hoja: "<subcliente o cliente> - <deporte>" del
+      // producto de ESTA línea (ver common/cliente-sheets.ts).
+      const clienteNombre = textoClienteSheets(
+        linea.ordenProduccion.cliente?.nombre,
+        [
+          {
+            subcliente: linea.producto.subcliente?.nombre,
+            deporte: linea.producto.deporte,
+          },
+        ],
+      );
       const impresoraCodigo = montaje.impresora.codigo;
       const tipoPapelNombre = montaje.rolloPapel.tipoPapel.nombre;
 
@@ -1456,7 +1475,12 @@ export class CosteoConsumoPapelService {
             this.filaSheetsEnBlanco({
               fecha,
               codigoOp: linea.ordenProduccion.codigo,
-              cliente: clienteNombre,
+              // El papel en blanco es de la ORDEN, no de esta línea: el texto
+              // se arma con los productos de todos sus ítems.
+              cliente: await textoClienteSheetsDeOrden(
+                this.prisma,
+                linea.idOrdenProduccion,
+              ),
               impresora: impresoraCodigo,
               tipoPapel: tipoPapelNombre,
               yardas: yardasEnBlanco,
