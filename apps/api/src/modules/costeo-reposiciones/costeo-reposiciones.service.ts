@@ -10,6 +10,7 @@ import {
 } from '../../common/google-sheets/google-sheets.service';
 import { textoClienteSheetsDeOrden } from '../../common/cliente-sheets';
 import { estilosDeOrden } from '../../common/estilos-orden';
+import { comentarioParaSheets } from '../../common/prendas-texto';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -41,8 +42,33 @@ const INCLUDE_REPOSICION = {
     },
     orderBy: { idReposicionInsumo: 'asc' },
   },
+  // Las prendas repuestas, con producto (y su estilo) y talla resueltos.
+  prendas: {
+    include: {
+      producto: {
+        select: {
+          idProducto: true,
+          codigo: true,
+          descripcion: true,
+          estilo: { select: { nombre: true } },
+        },
+      },
+      talla: { select: { idTalla: true, nombre: true, orden: true } },
+      pieza: { select: { idPieza: true, nombre: true } },
+    },
+    orderBy: { idReposicionPrenda: 'asc' },
+  },
   ordenProduccion: { include: { cliente: true } },
 } as const;
+
+/** Un producto de la orden con sus tallas, tal como se ofrece al elegir prendas. */
+export interface PrendaDisponible {
+  idProducto: number;
+  codigo: string;
+  descripcion: string | null;
+  estilo: string | null;
+  tallas: { idTalla: number; nombre: string; cantidadPedida: number }[];
+}
 
 @Injectable()
 export class CosteoReposicionesService {
@@ -62,6 +88,15 @@ export class CosteoReposicionesService {
   listarDefectos() {
     return this.prisma.defecto.findMany({
       where: { activo: true },
+      orderBy: { nombre: 'asc' },
+    });
+  }
+
+  /** Las piezas que se pueden elegir al registrar (las retiradas no se ofrecen). */
+  listarPiezas() {
+    return this.prisma.pieza.findMany({
+      where: { activo: true },
+      select: { idPieza: true, nombre: true },
       orderBy: { nombre: 'asc' },
     });
   }
@@ -106,12 +141,103 @@ export class CosteoReposicionesService {
     return orden;
   }
 
+  /**
+   * Los productos de los ÍTEMS de la orden, con sus tallas: es lo único que se
+   * puede elegir como prenda repuesta.
+   *
+   * Agrupa por PRODUCTO y no por ítem: el mismo producto aparece en varios
+   * ítems de una orden (la misma prenda pedida tres veces entra como tres
+   * ítems), y es el producto el que trae estilo, línea, género y deporte. Las
+   * cantidades pedidas se suman por talla entre esos ítems.
+   */
+  private async prendasDisponiblesDeOrden(
+    idOrdenProduccion: number,
+  ): Promise<PrendaDisponible[]> {
+    const lineas = await this.prisma.lineaProduccion.findMany({
+      where: { idOrdenProduccion },
+      select: {
+        producto: {
+          select: {
+            idProducto: true,
+            codigo: true,
+            descripcion: true,
+            estilo: { select: { nombre: true } },
+          },
+        },
+        tallas: {
+          select: {
+            cantidad: true,
+            talla: { select: { idTalla: true, nombre: true, orden: true } },
+          },
+        },
+      },
+    });
+    type TallaAcum = {
+      idTalla: number;
+      nombre: string;
+      cantidadPedida: number;
+      orden: number;
+    };
+    const porProducto = new Map<
+      number,
+      {
+        idProducto: number;
+        codigo: string;
+        descripcion: string | null;
+        estilo: string | null;
+        tallas: Map<number, TallaAcum>;
+      }
+    >();
+    for (const l of lineas) {
+      let p = porProducto.get(l.producto.idProducto);
+      if (!p) {
+        p = {
+          idProducto: l.producto.idProducto,
+          codigo: l.producto.codigo,
+          descripcion: l.producto.descripcion ?? null,
+          estilo: l.producto.estilo?.nombre ?? null,
+          tallas: new Map(),
+        };
+        porProducto.set(l.producto.idProducto, p);
+      }
+      for (const t of l.tallas) {
+        const previa = p.tallas.get(t.talla.idTalla);
+        if (previa) previa.cantidadPedida += t.cantidad;
+        else
+          p.tallas.set(t.talla.idTalla, {
+            idTalla: t.talla.idTalla,
+            nombre: t.talla.nombre,
+            cantidadPedida: t.cantidad,
+            orden: t.talla.orden,
+          });
+      }
+    }
+    return [...porProducto.values()]
+      .map((p) => ({
+        idProducto: p.idProducto,
+        codigo: p.codigo,
+        descripcion: p.descripcion,
+        estilo: p.estilo,
+        tallas: [...p.tallas.values()]
+          .sort((x, y) => x.orden - y.orden)
+          .map((t) => ({
+            idTalla: t.idTalla,
+            nombre: t.nombre,
+            cantidadPedida: t.cantidadPedida,
+          })),
+      }))
+      .sort((x, y) => x.codigo.localeCompare(y.codigo));
+  }
+
   async siguienteNumero(
     codigoOp: string,
     idEmpresa: number,
     idUsuario: number,
   ) {
     const orden = await this.resolverOrden(codigoOp, idEmpresa, idUsuario);
+    const prendasDisponibles = await this.prendasDisponiblesDeOrden(
+      orden.idOrdenProduccion,
+    );
     const agg = await this.prisma.reposicion.aggregate({
       where: { idOrdenProduccion: orden.idOrdenProduccion },
       _max: { numeroRepo: true },
@@ -124,6 +250,11 @@ export class CosteoReposicionesService {
         orden.idOrdenProduccion,
         orden.estilo?.nombre,
       ),
+      // Lo que la pantalla ofrece como prendas. Va acá y no en el endpoint de
+      // órdenes: aquél pide `costeo.orden.ver`, que el operario de
+      // reposiciones no necesariamente tiene.
+      tieneItems: prendasDisponibles.length > 0,
+      prendasDisponibles,
     };
   }
 
@@ -237,6 +368,58 @@ export class CosteoReposicionesService {
         );
     }
 
+    // ── Prendas ──────────────────────────────────────────────────────
+    // Qué se repuso: producto + talla + piezas. Obligatorio si la orden tiene
+    // ítems; las órdenes migradas del legacy no los tienen y se registran sin
+    // prendas. Se valida contra los ÍTEMS de la orden —no contra el catálogo—
+    // porque lo que llega pasa por el navegador y un POST armado a mano podría
+    // mandar cualquier producto.
+    const prendas = dto.prendas ?? [];
+    const disponibles = await this.prendasDisponiblesDeOrden(
+      orden.idOrdenProduccion,
+    );
+    if (disponibles.length > 0 && prendas.length === 0)
+      throw new BadRequestException(
+        'Indicá qué prendas se repusieron: la orden tiene ítems cargados.',
+      );
+    if (disponibles.length === 0 && prendas.length > 0)
+      throw new BadRequestException(
+        'Esta orden no tiene ítems cargados, así que no se pueden indicar prendas.',
+      );
+    // Las piezas se validan contra el catálogo: llegan del navegador.
+    const idsPieza = [...new Set(prendas.map((p) => p.idPieza))];
+    const piezas = await this.prisma.pieza.findMany({
+      where: { idPieza: { in: idsPieza } },
+      select: { idPieza: true, nombre: true, activo: true },
+    });
+    if (piezas.length !== idsPieza.length)
+      throw new BadRequestException(
+        'Una de las piezas ya no existe en el catálogo.',
+      );
+    const retiradas = piezas.filter((p) => !p.activo);
+    if (retiradas.length > 0)
+      throw new BadRequestException(
+        `Pieza(s) retirada(s) del catálogo: ${retiradas.map((p) => p.nombre).join(', ')}.`,
+      );
+    const vistas = new Set<string>();
+    for (const pr of prendas) {
+      const producto = disponibles.find((d) => d.idProducto === pr.idProducto);
+      if (!producto)
+        throw new BadRequestException(
+          'Una de las prendas es de un producto que no está en esta orden.',
+        );
+      if (!producto.tallas.some((t) => t.idTalla === pr.idTalla))
+        throw new BadRequestException(
+          `${producto.codigo} no tiene esa talla en esta orden.`,
+        );
+      const clave = `${pr.idProducto}:${pr.idTalla}:${pr.idPieza}`;
+      if (vistas.has(clave))
+        throw new BadRequestException(
+          'Hay una prenda repetida (mismo producto, talla y pieza): sumá las piezas en una sola línea.',
+        );
+      vistas.add(clave);
+    }
+
     const yardasPapel = tipo === 'MATERIALES' ? 0 : (dto.yardasPapel ?? 0);
 
     const { idReposicion, nrolloTexto } = await this.prisma.$transaction(
@@ -326,6 +509,19 @@ export class CosteoReposicionesService {
           });
         }
 
+        // Las prendas van en la misma transacción que la reposición.
+        if (prendas.length > 0) {
+          await tx.reposicionPrenda.createMany({
+            data: prendas.map((pr) => ({
+              idReposicion: reposicion.idReposicion,
+              idProducto: pr.idProducto,
+              idTalla: pr.idTalla,
+              idPieza: pr.idPieza,
+              cantidad: pr.cantidad,
+            })),
+          });
+        }
+
         // Si la reposición sí consumió papel de un rollo resuelto, queda
         // registrada también como hecho de consumo — es lo que permite que
         // el panel de Gestión de Rollos (F2) refleje el papel usado por
@@ -360,6 +556,13 @@ export class CosteoReposicionesService {
         idDefecto: dto.idDefecto,
         yardasPapel,
         yardasTela: dto.yardasTela ?? 0,
+        // Resumen legible: "BSN-FB01N M×1 MANGA IZQ".
+        prendas: prendas.map((pr) => {
+          const prod = disponibles.find((d) => d.idProducto === pr.idProducto);
+          const talla = prod?.tallas.find((t) => t.idTalla === pr.idTalla);
+          const pieza = piezas.find((x) => x.idPieza === pr.idPieza);
+          return `${prod?.codigo ?? pr.idProducto} ${talla?.nombre ?? pr.idTalla}×${pr.cantidad} ${pieza?.nombre ?? pr.idPieza}`;
+        }),
       },
     });
 
@@ -412,7 +615,8 @@ export class CosteoReposicionesService {
     // exacta de guardarRepo()/hojasRepos.appendRow() del Código.gs legacy,
     // más la columna P "Comentario" (agregada a pedido del usuario, solo en
     // este libro — el campo comentario del ERP no existía en el legacy y no
-    // tiene equivalente en "Datos"/ConsumosFinal).
+    // tiene equivalente en "Datos"/ConsumosFinal). Lleva el comentario del ERP
+    // y, a continuación, las piezas repuestas ("Piezas: BSN-FB01N M×1 MANGA IZQ").
     const filaRegistro = [
       fechaTexto,
       detalle.ordenProduccion.codigo,
@@ -429,7 +633,15 @@ export class CosteoReposicionesService {
       impresora,
       detalle.calandra?.codigo ?? '',
       nrolloTexto,
-      detalle.comentario ?? '',
+      comentarioParaSheets(
+        detalle.comentario,
+        detalle.prendas.map((p) => ({
+          producto: p.producto.codigo,
+          talla: p.talla.nombre,
+          pieza: p.pieza.nombre,
+          cantidad: p.cantidad,
+        })),
+      ),
     ];
 
     // Hoja "Datos" (libro ConsumosFinal DIGITEXSA, compartido con Forma 2) —

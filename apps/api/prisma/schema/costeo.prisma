@@ -597,6 +597,7 @@ model Reposicion {
   insumoTela      Insumo?         @relation(fields: [idInsumoTela], references: [idInsumo])
   consumosPapel   ConsumoPapel[]
   reposicionInsumos ReposicionInsumo[]
+  prendas           ReposicionPrenda[]
 
   // Evita que dos reposiciones concurrentes para la misma OP terminen con el
   // mismo número — el número sugerido (MAX+1) solo es confiable si el motor
@@ -707,6 +708,49 @@ model ReposicionInsumo {
   @@unique([idReposicion, idInsumo])
   @@index([idInsumo])
   @@map("reposicion_insumo")
+  @@schema("costeo")
+}
+
+/// Las PRENDAS (producto + talla + cantidad) que cubre una reposición. Una
+/// reposición puede cubrir varias. Sin yardas: el papel y la tela son de la
+/// reposición entera y no se reparten entre prendas.
+model ReposicionPrenda {
+  idReposicionPrenda Int      @id @default(autoincrement()) @map("id_reposicion_prenda")
+  idReposicion       Int      @map("id_reposicion")
+  idProducto         Int      @map("id_producto")
+  idTalla            Int      @map("id_talla")
+  idPieza            Int      @map("id_pieza")
+  cantidad           Int
+  creadoEn           DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+
+  reposicion Reposicion @relation(fields: [idReposicion], references: [idReposicion], onDelete: Cascade, onUpdate: Cascade)
+  /// Restrict: un producto o una talla ya repuestos no se pueden borrar.
+  producto   Producto   @relation(fields: [idProducto], references: [idProducto], onDelete: Restrict, onUpdate: Cascade)
+  talla      Talla      @relation(fields: [idTalla], references: [idTalla], onDelete: Restrict, onUpdate: Cascade)
+  /// Restrict: una pieza ya usada no se borra, se retira.
+  pieza      Pieza      @relation(fields: [idPieza], references: [idPieza], onDelete: Restrict, onUpdate: Cascade)
+
+  // + SQL: CHECK (cantidad > 0).
+  @@unique([idReposicion, idProducto, idTalla, idPieza])
+  @@index([idProducto])
+  @@index([idTalla])
+  @@index([idPieza])
+  @@map("reposicion_prenda")
+  @@schema("costeo")
+}
+
+/// Piezas que integran una prenda (cuello, manga, frontal…). Se eligen al
+/// registrar una reposición: "de la talla L se repusieron 3 mangas".
+model Pieza {
+  idPieza  Int      @id @default(autoincrement()) @map("id_pieza")
+  nombre   String   @db.VarChar(80)
+  activo   Boolean  @default(true)
+  creadoEn DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+
+  prendas ReposicionPrenda[]
+
+  // + SQL: UNIQUE INDEX ux_pieza_nombre ON (lower(nombre)) — Prisma no expresa índices sobre expresiones.
+  @@map("pieza")
   @@schema("costeo")
 }
 

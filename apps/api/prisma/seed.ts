@@ -88,6 +88,10 @@ const PERMISOS_COSTEO = [
   // Al vivir en PERMISOS_COSTEO lo reciben ADMIN y ADMIN_IT_COSTEO, y ningún
   // rol de planta (esos listan sus permisos uno por uno).
   'costeo.reposicion.impresora_sin_rollo',
+  // Mantenimiento del catálogo de piezas de una prenda (cuello, manga…) que se
+  // elige en Reposiciones. Lo reciben ADMIN, ADMIN_IT_COSTEO y los roles que
+  // listan el permiso abajo; asignable a otro rol desde /roles.
+  'costeo.pieza.administrar',
   'costeo.consumo.ver',
   'costeo.consumo.capturar',
   'costeo.consumo.anular',
@@ -113,6 +117,12 @@ const PERMISOS_COSTEO = [
   'costeo.estandar.administrar',
   'costeo.dashboard.ver',
   'costeo.dashboard.ver_financiero',
+  // Mostrar el menú de descarga (Excel/CSV/imagen) de los gráficos incrustados.
+  // Es un control de PANTALLA: Superset tiene un solo rol para todos los
+  // usuarios incrustados, así que esto oculta el menú pero no es un gate real.
+  // Lo sensible (costos) se exporta solo por reportes del ERP. Al vivir en
+  // PERMISOS_COSTEO lo reciben ADMIN y ADMIN_IT_COSTEO; asignable desde /roles.
+  'costeo.dashboard.exportar',
 ]
 
 // Los roles granulares que sugiere PROMPT_CLAUDE_CODE.md §7, ajustados tras
@@ -216,6 +226,7 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.insumo.editar_costo',
       'costeo.estandar.ver',
       'costeo.estandar.administrar',
+      'costeo.pieza.administrar',
       // Necesario solo para el selector de Producto/Talla al dar de alta un
       // consumo estándar (llama GET /recetas/productos y /recetas/tallas) —
       // mismo criterio que Operador Reposiciones con el selector de tela: no
@@ -241,6 +252,7 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.reposicion.ver',
       'costeo.reposicion.crear',
       'costeo.reposicion.anular',
+      'costeo.pieza.administrar',
       'costeo.consumo.ver',
       'costeo.consumo.capturar',
       'costeo.consumo.anular',
@@ -632,6 +644,8 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
   'costeo.reposicion.anular': 'Anular una reposición ya registrada',
   'costeo.reposicion.impresora_sin_rollo':
     'EXCEPCIÓN: elegir una impresora que no tiene rollo montado en este momento',
+  'costeo.pieza.administrar':
+    'Agregar, renombrar y retirar piezas del catálogo (cuello, manga, frontal…) que se eligen al registrar una reposición',
 
   // ── Costeo: consumo de papel (Impresión de OPs) ──
   'costeo.consumo.ver': 'Entrar a Impresión de OPs y ver el trabajo pendiente',
@@ -654,8 +668,10 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
   'costeo.of.cerrar': 'Cerrar una orden de facturación',
   'costeo.of.reabrir': 'Reabrir una orden de facturación cerrada',
   'costeo.of.anular': 'Anular una orden de facturación entera (libera sus OP)',
-  'costeo.dashboard.ver': 'Ver los tableros de Costeo',
-  'costeo.dashboard.ver_financiero': 'Ver las cifras financieras de los tableros',
+  'costeo.dashboard.ver': 'Ver los dashboards de Costeo',
+  'costeo.dashboard.ver_financiero': 'Ver las cifras financieras de los dashboards',
+  'costeo.dashboard.exportar':
+    'Mostrar el menú de descarga (Excel, CSV, imagen) en los gráficos de los dashboards',
 }
 
 async function upsertPermiso(codigo: string) {

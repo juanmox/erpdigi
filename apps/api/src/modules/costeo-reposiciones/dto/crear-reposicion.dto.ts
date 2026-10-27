@@ -33,6 +33,34 @@ export class MaterialReposicionDto {
   cantidad!: number;
 }
 
+/**
+ * Una PRENDA repuesta: producto + talla + pieza + cuántas ("de la talla L del
+ * producto X, 3 mangas"). Una reposición puede
+ * cubrir varias (el comentario legacy decía cosas como "M= 1 BK  XL= 1 FT").
+ *
+ * El servidor verifica que el producto y la talla existan en los ÍTEMS de la
+ * orden: no se acepta cualquier combinación del catálogo.
+ */
+export class PrendaReposicionDto {
+  @Type(() => Number)
+  @IsInt()
+  idProducto!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  idTalla!: number;
+
+  /** Del catálogo de piezas (costeo.pieza); "PRENDA COMPLETA" es una de ellas. */
+  @Type(() => Number)
+  @IsInt()
+  idPieza!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cantidad!: number;
+}
+
 export class CrearReposicionDto {
   @IsDateString()
   fecha!: string;
@@ -114,6 +142,20 @@ export class CrearReposicionDto {
   @ValidateNested({ each: true })
   @Type(() => MaterialReposicionDto)
   materiales?: MaterialReposicionDto[];
+
+  /**
+   * Las prendas que cubre la reposición. Obligatorias cuando la orden tiene
+   * ítems cargados (lo verifica el servicio, que es quien conoce la orden);
+   * una orden sin ítems —las migradas del legacy— se registra sin prendas.
+   * Aplica a REIMPRESION y a MATERIALES. Tope de 50, mismo criterio defensivo
+   * que `materiales`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => PrendaReposicionDto)
+  prendas?: PrendaReposicionDto[];
 
   @IsOptional()
   @IsString()

@@ -52,10 +52,44 @@ export interface ReposicionInsumo {
   }
 }
 
+/** Una pieza del catálogo (cuello, manga, frontal…). */
+export interface Pieza {
+  idPieza: number
+  nombre: string
+}
+
+/** Una pieza con su estado y uso, para el mantenimiento del catálogo. */
+export interface PiezaAdmin extends Pieza {
+  activo: boolean
+  /** Cuántas líneas de prendas repuestas la usan. */
+  usos: number
+}
+
+/** Un producto de los ítems de la orden con sus tallas: lo único que se puede elegir como prenda. */
+export interface PrendaDisponible {
+  idProducto: number
+  codigo: string
+  descripcion: string | null
+  estilo: string | null
+  tallas: { idTalla: number; nombre: string; cantidadPedida: number }[]
+}
+
 export interface SiguienteNumero {
   siguienteNumero: number
   cliente: string | null
   estilos: string[]
+  /** Si la orden no tiene ítems (las migradas del legacy) no se piden prendas. */
+  tieneItems: boolean
+  prendasDisponibles: PrendaDisponible[]
+}
+
+/** Una prenda repuesta, ya guardada, con producto y talla resueltos. */
+export interface ReposicionPrenda {
+  idReposicionPrenda: number
+  cantidad: number
+  producto: { idProducto: number; codigo: string; descripcion: string | null; estilo: { nombre: string } | null }
+  talla: { idTalla: number; nombre: string; orden: number }
+  pieza: Pieza
 }
 
 export interface Reposicion {
@@ -80,6 +114,8 @@ export interface Reposicion {
   tipoPapel: { nombre: string } | null
   insumoTela: InsumoTela | null
   reposicionInsumos: ReposicionInsumo[]
+  /** Qué prendas cubre. Vacío en las reposiciones migradas del legacy. */
+  prendas: ReposicionPrenda[]
   ordenProduccion: {
     codigo: string
     cliente: { nombre: string } | null

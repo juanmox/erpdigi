@@ -672,6 +672,104 @@ una** — no avanzar por iniciativa propia.
     única tabla de Gestión de datos con Cliente/Talla/Deporte, las demás (Insumos, Precios) tienen
     menos columnas y no fueron reportadas con este problema; mismo criterio si se pide ahí después.
 
+## Tableros gerenciales — Apache Superset incrustado (2026-10-25, SOLO LOCAL)
+Detalle operativo en `infra/bi/README.md`. **Producción no tiene nada de esto**: el servidor no
+respondió por SSH ese día. Punto de restauración previo: etiqueta git `pre-bi-2026-10-25` (commit
+`fc02238`) y respaldo local en `C:\Users\PETER\backups-erp\`; el respaldo de producción está pendiente.
+- Superset (Apache 2.0) corre aparte, lee solo el schema `analitica` con el rol `bi_lector` y se ve
+  **dentro del ERP** en `/dashboards` (menú "Dashboards"). La API (`apps/api/src/modules/bi/`) emite un *guest token* por
+  tablero: verifica el permiso (`tableros.ts`: `costeo.dashboard.ver` / `ver_financiero`) y fija la regla
+  por fila `id_empresa = <empresa del JWT>`. Sin variables `SUPERSET_*` el módulo queda inerte.
+- Migración `20261025120000_analitica_vistas` (+ rollback): 8 vistas con las reglas del ERP aplicadas
+  una vez. **Validadas contra el reporte de consumo del ERP: exactas** (143,830.5467 yd). `v_consumo`
+  excluye `origen=REPOSICION` (las reposiciones salen de `v_reposiciones`); dinero solo en vistas `*_costo`.
+- ⚠️ **La descarga a Excel es un control de pantalla, no un gate real**: Superset aplica un solo rol
+  (`ERPGuest`) a todos los incrustados. Permiso nuevo `costeo.dashboard.exportar` (solo oculta el menú);
+  el tablero de costos nunca ofrece descarga.
+- Hallazgos de datos al construirlo: **6,602 de 6,675 OP no tienen `fecha_recibido`** y 7 traen el año
+  2001, por eso las series de tiempo usan `fecha_impresion` (primer consumo). `v_costo_op` es costo
+  **estándar** y solo 4 productos tienen receta: casi todo el dinero sale en 0. La primera versión de
+  esa vista tardaba 15 s por subconsultas correlacionadas; con una sola agregación, 29 ms.
+- ⚠️ La imagen oficial de Superset **no trae traducciones**: todo salía en inglés. Se agregan en el `Dockerfile`
+  y exigen además `LANGUAGES` solo con `es` y el rol `Public` con `can_language_pack` (el navegador pide el
+  idioma sin token); sin cualquiera de las dos vuelve a inglés **sin error visible**. Caché de consultas de
+  5 min (verificado que no cruza empresas).
+- La imagen oficial de Superset no trae `psycopg2` (hay `infra/bi/Dockerfile`). Un `touch` no reinicia la
+  API en modo watch: las variables nuevas del `.env` solo se leen al arrancar.
+- Pendiente: instalar en el servidor (guía en el README), acceso externo con HTTPS, apagar el espejo a
+  Sheets tras comparar cifras, y costo real en dinero (F5).
+
+## Reposiciones con prendas: producto + talla + piezas (2026-10-26, SOLO LOCAL)
+Una reposición ya no es solo "de la orden": indica **qué prendas** repuso, para que la estadística de
+calidad pueda cortar por estilo, línea, género, deporte y talla.
+- **Tabla `costeo.reposicion_prenda`** (migración `20261026160000_reposicion_prendas` + rollback): una fila
+  por producto+talla de la reposición, con `cantidad > 0` y `UNIQUE (reposición, producto, talla)`. FK
+  `RESTRICT` hacia producto y talla (un producto ya repuesto no se borra), `CASCADE` desde la reposición.
+- Se elige por **PRODUCTO y no por ítem**: el mismo producto aparece en varios ítems de una OP (3,141
+  casos) y es el producto el que trae los atributos. **Las yardas de papel y tela siguen siendo de la
+  reposición ENTERA y no se reparten entre prendas**, por eso la tabla no lleva yardas.
+- **Obligatorio solo si la OP tiene ítems.** Las OP migradas del legacy no los tienen (439 de las OP con
+  reposiciones) y se registran sin prendas, con aviso en pantalla. El servidor valida que producto y talla
+  existan **en los ítems de la orden** (no en el catálogo), rechaza repetidas y exige prendas si hay ítems.
+  Aplica a REIMPRESIÓN y a MATERIALES. `GET /siguiente-numero` devuelve `tieneItems` y `prendasDisponibles`,
+  así que la pantalla no depende de `costeo.orden.ver`.
+- **El comentario legacy** ("M= 1 BK  XL= 1 FT") NO se interpretó ni se migró: las reposiciones existentes
+  quedan sin prendas. La **pieza** ahora tiene su propio catálogo, ver el bloque "Piezas" más abajo.
+- Reporte de consumo: columna "Prendas" en el detalle y el PDF, y hoja Excel nueva **"Prendas repuestas"**
+  (una fila por prenda, sin yardas). En "Consolidado" la reposición sigue en **una** fila: repetirla por
+  prenda duplicaría las yardas en cualquier suma (verificado: 4.5 yd contra 4.5 yd).
+- Dashboards: vista `analitica.v_reposicion_prendas` (migración `20261026170000`, depende de
+  `20261025120000_analitica_vistas`) y dashboard nuevo **"Reposiciones por prenda"**. Sin yardas, igual
+  razón. Sus datos empiezan desde que se use el formulario nuevo.
+- **Google Sheets**: lo que se manda no cambia, salvo el texto CLIENTE ya documentado y la columna
+  COMENTARIO de "Registro" (ver "Piezas"). **Pendiente de decisión**: cuando existan prendas, ¿se agrega el estilo al texto `cliente - deporte`? El usuario había
+  dicho que el estilo entraría "cuando llegue el detalle por prenda"; una reposición con varias prendas
+  podría mezclar estilos (`Jersey/Short`).
+- ⚠️ **Orden de migraciones al desplegar**: `20261025120000` (analitica) → `20261026160000` (tabla) →
+  `20261026170000` (vista) → `20261027120000` (piezas). Conviene desplegar los dashboards y las prendas **juntos**: la vista no existe
+  sin el schema `analitica`.
+- **Verificado**: 13 pruebas por API (sin prendas, producto ajeno, talla ajena, repetida, cantidad 0, más de
+  50, MATERIALES y REIMPRESIÓN con prendas, OP sin ítems con y sin prendas) más la REIMPRESIÓN en una
+  instancia aislada con Sheets falsos; formulario completo en navegador a 1500 y 390 px; requisición impresa
+  con "Prendas:"; Excel leído de vuelta; dashboard con los 15 pzs de prueba. Rollback de ambas migraciones
+  probado en una base desechable. Datos de prueba borrados.
+- **Piezas: catálogo + una pieza por línea de prenda (2026-10-27, SOLO LOCAL).** Cada línea pasa a ser
+  producto + talla + **pieza** + cantidad ("de la talla L del producto X, 3 mangas"). **Sin consumo por pieza
+  todavía**: las yardas siguen siendo de la reposición entera; un catálogo de consumo por pieza y talla
+  vendrá después y no se modeló.
+  - Migración `20261027120000_reposicion_pieza` (+ rollback): tabla `costeo.pieza` (nombre único sin
+    distinguir mayúsculas, `activo`), **sembrada en la propia migración** con las 30 piezas (el seed no corre
+    solo al desplegar y la FK es obligatoria), `reposicion_prenda.id_pieza` NOT NULL con FK `RESTRICT`, y el
+    UNIQUE pasa a (reposición, producto, talla, **pieza**): se puede reponer la misma talla con dos piezas
+    distintas. Lo que hubiera de antes se rellena con "PRENDA COMPLETA". La vista
+    `analitica.v_reposicion_prendas` gana la columna `pieza` (`piezas` sigue siendo la **cantidad**: nombre
+    confuso, se dejó por no romper el dashboard). El rollback fusiona sumando las cantidades si hay varias
+    piezas por producto+talla (se pierde cuál era); probado en una base desechable, y reaplicar la migración
+    encima también.
+  - **Lista de piezas**: del Excel del usuario; "DELANTERA" era lo mismo que "FRONTAL" y se quitó (queda
+    FRONTAL y TRASERA). No es lista final. "INSERTO(S) DE COSTADO" aparece dos veces con distinta forma
+    (singular DER/IZQ y plural), tal cual vino.
+  - **Mantenimiento**: modal "Administrar piezas" dentro del formulario de Reposiciones (alta, renombrar,
+    retirar/reactivar; una pieza usada **no se borra**). Permiso nuevo `costeo.pieza.administrar`: lo reciben
+    ADMIN, ADMIN_IT_COSTEO, ANALISTA_COSTOS y SUPERVISOR_PRODUCCION; asignable desde /roles. Los nombres se
+    guardan en MAYÚSCULAS. `GET /costeo/reposiciones/piezas` (activas, con `costeo.reposicion.ver`) alimenta
+    el selector; `/costeo/piezas` (todas + usos) es solo del permiso nuevo. ⚠️ Hay que correr el seed y los
+    usuarios deben volver a entrar para que el permiso llegue al token.
+  - **Google Sheets, columna P "Comentario" de "Registro"**: ahora lleva el comentario del ERP **y las
+    piezas**: `<comentario> | Piezas: BSN-FB01N L×3 MANGA DER, XL×1 CUELLO V` (solo `Piezas: …` si no hay
+    comentario; solo el comentario en las OP sin ítems). **"Datos" sigue sin comentario**, igual que antes.
+    Helper compartido `common/prendas-texto.ts` (también lo usa el reporte); el formato del frontend está en
+    `lib/prendas.ts` y deben cambiar juntos. Probado con un spec que simula el servicio de Sheets y mira la
+    fila exacta (no se escribió en los libros reales).
+  - **Reporte**: hoja Excel "Prendas repuestas" gana columna Pieza; el resumen de prendas lleva la pieza en
+    pantalla, PDF y requisición impresa. Dashboard: filtro Pieza y gráfico "Cantidad por pieza" en
+    `construir-tableros.mjs`; **`construir-tableros` no toca tableros ya existentes**, así que en un Superset
+    donde "Reposiciones por prenda" ya exista hay que agregarlo a mano (el dataset sí se refresca con
+    `PUT /api/v1/dataset/<id>/refresh`, hecho en local). En producción no hay nada creado todavía.
+- *Tropiezo de proceso*: para probar la REIMPRESIÓN por la pantalla hubo que apagar `espeja_sheets` en la
+  base **local**, porque el `.env` local apunta a los libros reales. Se restauró al terminar; es la misma
+  trampa ya documentada con las pruebas de Impresión de OPs.
+
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
 código en él.** Al empezar cualquier sesión de trabajo aquí:

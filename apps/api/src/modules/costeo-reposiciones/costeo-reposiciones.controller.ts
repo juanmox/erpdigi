@@ -43,6 +43,12 @@ export class CosteoReposicionesController {
   }
 
   @RequirePermissions('costeo.reposicion.ver')
+  @Get('piezas')
+  piezas() {
+    return this.service.listarPiezas();
+  }
+
+  @RequirePermissions('costeo.reposicion.ver')
   @Get('calandras')
   calandras() {
     return this.service.listarCalandras();

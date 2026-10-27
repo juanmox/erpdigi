@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { resumirMateriales } from '@/lib/materiales'
+import { resumirPrendas } from '@/lib/prendas'
 import { useMarcaEmpresa } from '@/app/marca-empresa'
 import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
@@ -489,6 +490,7 @@ export function ReportesPage() {
                     {/* Los materiales van en su columna y fuera de todo total:
                         no salen del rollo y cada uno trae su propia unidad. */}
                     <TableHead>Materiales</TableHead>
+                    <TableHead>Prendas</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -506,6 +508,9 @@ export function ReportesPage() {
                       <TableCell className="text-right tabular-nums">{yd(x.yardasTela)}</TableCell>
                       <TableCell className="break-words whitespace-normal text-xs">
                         {x.materiales.length > 0 ? resumirMateriales(x.materiales) : '—'}
+                      </TableCell>
+                      <TableCell className="break-words whitespace-normal text-xs">
+                        {x.prendas.length > 0 ? resumirPrendas(x.prendas) : '—'}
                       </TableCell>
                     </TableRow>
                   ))}

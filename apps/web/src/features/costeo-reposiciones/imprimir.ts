@@ -1,5 +1,6 @@
 import { encabezadoMarcaHTML, type MarcaEmpresa } from '@/app/marca-empresa'
 import { imprimirHTML } from '@/lib/imprimir'
+import { resumirPrendas } from '@/lib/prendas'
 import type { Reposicion } from './types'
 
 const fmt = (n: number) => n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -56,6 +57,12 @@ export function imprimirReposicion(
   const primerMaterial = filas[0]?.descripcion.split(' — ')[0] ?? ''
   const descripcionCabecera = [r.ordenProduccion.cliente?.nombre, primerMaterial].filter(Boolean).join(' - ')
 
+  // Qué prendas se repusieron (producto, talla, pieza y cantidad). Las reposiciones
+  // migradas del legacy no lo traen y esta línea simplemente no sale.
+  const prendasTexto = resumirPrendas(
+    (r.prendas ?? []).map((p) => ({ producto: p.producto.codigo, talla: p.talla.nombre, pieza: p.pieza.nombre, cantidad: p.cantidad })),
+  )
+
   const observaciones = [
     `Reposición por: ${r.defecto.nombre}.`,
     r.empleado ? `Responsable: ${r.empleado.nombres}.` : '',
@@ -101,6 +108,7 @@ export function imprimirReposicion(
     <div class="campo"><b>Fecha:</b> ${fechaFmt}</div>
     <div class="campo"><b>Descripción:</b> ${descripcionCabecera}</div>
     <div class="campo"><b>Orden de Producción:</b> ${r.ordenProduccion.codigo}</div>
+    ${prendasTexto ? `<div class="campo"><b>Prendas:</b> ${prendasTexto}</div>` : ''}
 
     <table>
       <thead>

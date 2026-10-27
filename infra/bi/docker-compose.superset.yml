@@ -1,0 +1,69 @@
+# Apache Superset para los tableros gerenciales — uso exclusivo de DESARROLLO LOCAL.
+# El servidor de producción NO usa Docker: allá se instala con un entorno virtual de
+# Python y un servicio systemd (ver plan de BI). Esto no interfiere con el
+# docker-compose.dev.yml del ERP: proyecto, red, volumen y puertos propios.
+#
+# Uso (desde la raíz del repo):
+#   docker compose -p digitexsa-bi -f infra/bi/docker-compose.superset.yml --env-file infra/bi/.env.local up -d
+# Detener / quitar todo (los tableros viven en el volumen `superset_pgdata`):
+#   docker compose -p digitexsa-bi -f infra/bi/docker-compose.superset.yml down        # conserva tableros
+#   docker compose -p digitexsa-bi -f infra/bi/docker-compose.superset.yml down -v     # BORRA tableros
+#
+# Los secretos viven en infra/bi/.env.local (nunca se commitea).
+x-superset: &superset
+  image: digitexsa-superset:6.0.0
+  build: .
+  env_file: .env.local
+  environment:
+    SCARF_ANALYTICS: "false" # apaga la telemetría hacia el proyecto
+    SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+  volumes:
+    - ./superset_config.py:/app/pythonpath/superset_config.py:ro
+  extra_hosts:
+    # Para llegar al Postgres del ERP (puerto 5433 publicado en la máquina).
+    - "host.docker.internal:host-gateway"
+
+services:
+  superset-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: ${SUPERSET_DB_PASSWORD}
+      POSTGRES_DB: superset
+    volumes:
+      - superset_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset -d superset"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Crea/actualiza las tablas de Superset y el usuario administrador. Es
+  # idempotente: correrlo de nuevo no duplica nada.
+  superset-init:
+    <<: *superset
+    depends_on:
+      superset-db:
+        condition: service_healthy
+    restart: "no"
+    command:
+      - bash
+      - -c
+      - |
+        superset db upgrade &&
+        (superset fab create-admin --username "$$SUPERSET_ADMIN_USER" --firstname Admin --lastname BI \
+          --email bi_admin@localhost --password "$$SUPERSET_ADMIN_PASSWORD" || true) &&
+        superset init
+
+  superset:
+    <<: *superset
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+
+volumes:
+  superset_pgdata:

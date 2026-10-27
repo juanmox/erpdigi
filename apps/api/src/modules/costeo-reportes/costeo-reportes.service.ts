@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
+import { resumirPrendas } from '../../common/prendas-texto';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface FiltrosConsumo {
@@ -353,6 +354,18 @@ export class CosteoReportesService {
             },
             orderBy: { idReposicionInsumo: 'asc' },
           },
+          // Qué prendas se repusieron. Las reposiciones migradas del legacy no
+          // las traen: la lista viene vacía, no es un error.
+          prendas: {
+            include: {
+              producto: {
+                select: { codigo: true, estilo: { select: { nombre: true } } },
+              },
+              talla: { select: { nombre: true } },
+              pieza: { select: { nombre: true } },
+            },
+            orderBy: { idReposicionPrenda: 'asc' },
+          },
         },
         orderBy: [{ fecha: 'asc' }, { idReposicion: 'asc' }],
       }),
@@ -638,6 +651,21 @@ export class CosteoReportesService {
         unidad: m.insumo.unidad.nombre,
         cantidad: Number(m.cantidad),
       })),
+      /**
+       * Las prendas que cubre la reposición (producto + talla + piezas).
+       *
+       * ⚠️ Las yardas de arriba son de la reposición ENTERA y no se reparten
+       * entre estas prendas: por eso el Excel las lista en una hoja aparte, sin
+       * yardas, y no repite la reposición una vez por prenda (duplicaría las
+       * yardas en cualquier suma).
+       */
+      prendas: rp.prendas.map((p) => ({
+        producto: p.producto.codigo,
+        estilo: p.producto.estilo?.nombre ?? null,
+        talla: p.talla.nombre,
+        pieza: p.pieza.nombre,
+        cantidad: p.cantidad,
+      })),
     }));
 
     return {
@@ -887,11 +915,14 @@ export class CosteoReportesService {
         x.tipo === 'MATERIALES' ? 'Materiales' : 'Reposición',
         x.orden,
         clientePorOp.get(x.orden) ?? '',
-        '',
-        '',
-        '',
-        '',
-        '',
+        '', // LINE
+        // Producto: las prendas repuestas, agrupadas. La reposición sigue en UNA
+        // fila (si se repitiera por prenda se duplicarían las yardas); el detalle
+        // por talla está en la hoja "Prendas repuestas".
+        resumirPrendas(x.prendas),
+        '', // Subcliente
+        '', // Talla
+        '', // Cantidad
         x.codigoRepo ?? '',
         x.departamento,
         x.defecto,
@@ -1007,6 +1038,8 @@ export class CosteoReportesService {
       'Tela',
       'Yardas tela',
       'Materiales',
+      // Al final, para no correr ninguna columna de un archivo ya armado.
+      'Prendas',
     ]);
     encRep.eachCell((c) => Object.assign(c, negrita));
     for (const x of d.detalleReposiciones)
@@ -1026,9 +1059,50 @@ export class CosteoReportesService {
         // resumidos en una celda. Uno por fila está en "Consolidado", que es
         // la hoja pensada para agrupar.
         resumirMateriales(x.materiales),
+        resumirPrendas(x.prendas),
       ]);
     rep.columns.forEach(
-      (c, i) => (c.width = i === 5 || i === 9 || i === 11 ? 26 : 14),
+      (c, i) =>
+        (c.width = i === 5 || i === 9 || i === 11 || i === 12 ? 26 : 14),
+    );
+
+    // Una fila por PRENDA repuesta: es la hoja pensada para agrupar por
+    // producto, estilo o talla. Sin yardas a propósito: las yardas son de la
+    // reposición entera y repetirlas en cada prenda las sumaría de más.
+    const pre = wb.addWorksheet('Prendas repuestas');
+    const encPre = pre.addRow([
+      'Fecha',
+      'OP',
+      'Cliente',
+      'No. repo',
+      'Producto',
+      'Estilo',
+      'Talla',
+      'Pieza',
+      'Cantidad',
+      'Departamento',
+      'Defecto',
+    ]);
+    encPre.eachCell((c) => Object.assign(c, negrita));
+    for (const x of d.detalleReposiciones)
+      for (const p of x.prendas)
+        pre.addRow([
+          fecha(x.fecha),
+          x.orden,
+          clientePorOp.get(x.orden) ?? '',
+          x.codigoRepo ?? '',
+          p.producto,
+          p.estilo ?? '',
+          p.talla,
+          p.pieza,
+          p.cantidad,
+          x.departamento,
+          x.defecto,
+        ]);
+    pre.views = [{ state: 'frozen', ySplit: 1 }];
+    pre.autoFilter = { from: 'A1', to: 'K1' };
+    pre.columns.forEach(
+      (c, i) => (c.width = i === 2 || i === 4 || i === 6 || i === 10 ? 24 : 14),
     );
 
     return wb.xlsx.writeBuffer();

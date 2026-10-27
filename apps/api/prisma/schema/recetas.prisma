@@ -300,6 +300,7 @@ model Producto {
   consumosEstandarCosteo  ConsumoEstandar[]
   lineasProduccionCosteo  LineaProduccion[]
   consumosPapelCosteo     ConsumoPapel[]
+  reposicionPrendasCosteo ReposicionPrenda[]
 
   @@index([idCliente], map: "idx_prod_cliente")
   // + SQL: el índice de id_subcliente es PARCIAL (WHERE IS NOT NULL) porque los
@@ -328,6 +329,7 @@ model Talla {
   consumosEstandarCosteo      ConsumoEstandar[]
   lineaProduccionTallasCosteo LineaProduccionTalla[]
   consumosPapelCosteo         ConsumoPapel[]
+  reposicionPrendasCosteo     ReposicionPrenda[]
 
   desarrollosTallaBase Desarrollo[]
 

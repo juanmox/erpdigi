@@ -14,6 +14,7 @@ import { InicioPage } from '@/features/inicio/inicio-page'
 import { CotizacionPage } from '@/features/recetas/cotizacion-page'
 import { OrdenesFacturacionPage } from '@/features/costeo-facturacion/ordenes-facturacion-page'
 import { ReportesPage } from '@/features/costeo-reportes/reportes-page'
+import { TablerosPage } from '@/features/bi/tableros-page'
 import { BitacoraPage } from '@/features/auditoria/bitacora-page'
 import { RolesPage } from '@/features/roles/roles-page'
 import { UsuariosPage } from '@/features/usuarios/usuarios-page'
@@ -142,6 +143,14 @@ function App() {
               element={
                 <RutaConPermiso permisos={['costeo.dashboard.ver']}>
                   <ReportesPage />
+                </RutaConPermiso>
+              }
+            />
+            <Route
+              path="dashboards"
+              element={
+                <RutaConPermiso permisos={['costeo.dashboard.ver', 'costeo.dashboard.ver_financiero']}>
+                  <TablerosPage />
                 </RutaConPermiso>
               }
             />

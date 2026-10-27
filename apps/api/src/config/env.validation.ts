@@ -47,6 +47,18 @@ export const envSchema = z.object({
   GOOGLE_SHEETS_CREDENTIALS_PATH: z.string().optional(),
   GOOGLE_SHEETS_ID_REGISTRO: z.string().optional(),
   GOOGLE_SHEETS_ID_CONSUMOS: z.string().optional(),
+  // Tableros incrustados (Apache Superset). Todas opcionales a propósito: sin
+  // ellas el módulo `bi` queda inerte (el menú "Tableros" no aparece) y el resto
+  // del ERP no se entera. Declaradas acá por la misma razón de arriba.
+  // · SUPERSET_URL: cómo llega la API a Superset (red interna).
+  // · SUPERSET_PUBLIC_URL: cómo llega el NAVEGADOR (puede ser otra dirección).
+  // · SUPERSET_SERVICE_USER/PASSWORD: cuenta de servicio que solo emite guest tokens.
+  // · BI_TABLEROS: JSON { "clave": "uuid-embebido-de-superset" }.
+  SUPERSET_URL: z.string().url().optional(),
+  SUPERSET_PUBLIC_URL: z.string().url().optional(),
+  SUPERSET_SERVICE_USER: z.string().optional(),
+  SUPERSET_SERVICE_PASSWORD: z.string().optional(),
+  BI_TABLEROS: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

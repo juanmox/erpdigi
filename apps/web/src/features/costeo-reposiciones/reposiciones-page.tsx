@@ -17,10 +17,13 @@ import { ApiError } from '@/lib/api'
 import { avisarError, avisarExito, avisarFaltan } from '@/lib/avisos'
 import { normalizarCodigoCosteo } from '@/lib/codigos-costeo'
 import { resumirMateriales } from '@/lib/materiales'
+import { resumirPrendas } from '@/lib/prendas'
 import { costeoReposicionesApi } from './api'
 import { ModalAnular } from './components/modal-anular'
 import { PanelImpresoras } from './components/panel-impresoras'
 import { SeccionMateriales, type LineaMaterial } from './components/seccion-materiales'
+import { ModalPiezas } from './components/modal-piezas'
+import { SeccionPrendas, type LineaPrenda } from './components/seccion-prendas'
 import { useMarcaEmpresa } from '@/app/marca-empresa'
 import { imprimirReposicion } from './imprimir'
 import type { Reposicion } from './types'
@@ -48,6 +51,7 @@ type CampoForm =
   | 'idInsumoTela'
   | 'yardasTela'
   | 'materiales'
+  | 'prendas'
 
 function campoVacio() {
   return {
@@ -70,6 +74,8 @@ export function ReposicionesPage() {
   const { usuario, tienePermiso } = useAuth()
   const puedeAnular = tienePermiso('costeo.reposicion.anular')
   const puedeImpresoraSinRollo = tienePermiso('costeo.reposicion.impresora_sin_rollo')
+  const puedeAdministrarPiezas = tienePermiso('costeo.pieza.administrar')
+  const [modalPiezas, setModalPiezas] = useState(false)
 
   const [codigoOp, setCodigoOp] = useState('')
   const [opBuscada, setOpBuscada] = useState<string | null>(null)
@@ -83,6 +89,9 @@ export function ReposicionesPage() {
   // ni siquiera es representable.
   const [esMateriales, setEsMateriales] = useState(false)
   const [materiales, setMateriales] = useState<LineaMaterial[]>([])
+  // Qué prendas (producto + talla + pieza + cantidad) cubre la reposición. Obligatorio si
+  // la orden tiene ítems; el servidor lo valida igual.
+  const [prendas, setPrendas] = useState<LineaPrenda[]>([])
   // Las yardas de tela igualan a las de papel salvo que alguien las edite: el
   // usuario confirmó que "regularmente son el mismo número, muy raras veces
   // cambia". En cuanto se tocan, dejan de copiarse solas.
@@ -103,6 +112,7 @@ export function ReposicionesPage() {
   const refInsumoTela = useRef<HTMLButtonElement>(null)
   const refYardasTela = useRef<HTMLInputElement>(null)
   const refMateriales = useRef<HTMLDivElement>(null)
+  const refPrendas = useRef<HTMLDivElement>(null)
   const refsPorCampo: Record<CampoForm, React.RefObject<HTMLElement | null>> = {
     idDepartamento: refDepartamento,
     idDefecto: refDefecto,
@@ -111,6 +121,7 @@ export function ReposicionesPage() {
     idInsumoTela: refInsumoTela,
     yardasTela: refYardasTela,
     materiales: refMateriales,
+    prendas: refPrendas,
   }
 
   function limpiarInvalido(campo: CampoForm) {
@@ -124,6 +135,7 @@ export function ReposicionesPage() {
 
   const { data: departamentos } = useQuery({ queryKey: ['costeo-reposiciones', 'departamentos'], queryFn: () => costeoReposicionesApi.departamentos() })
   const { data: defectos } = useQuery({ queryKey: ['costeo-reposiciones', 'defectos'], queryFn: () => costeoReposicionesApi.defectos() })
+  const { data: piezas } = useQuery({ queryKey: ['costeo-reposiciones', 'piezas'], queryFn: () => costeoReposicionesApi.piezas() })
   const { data: calandras } = useQuery({ queryKey: ['costeo-reposiciones', 'calandras'], queryFn: () => costeoReposicionesApi.calandras() })
   const { data: todosLosInsumos } = useQuery({ queryKey: ['costeo-reposiciones', 'insumos'], queryFn: () => costeoReposicionesApi.insumos() })
 
@@ -197,6 +209,7 @@ export function ReposicionesPage() {
   function limpiarFormulario() {
     setCampos(campoVacio())
     setMateriales([])
+    setPrendas([])
     setTelaTocada(false)
     setCamposInvalidos(new Set())
   }
@@ -234,6 +247,10 @@ export function ReposicionesPage() {
       faltan.push({ campo: 'idDepartamento', seccion: 'Datos', etiqueta: 'Departamento' })
     if (!campos.idDefecto)
       faltan.push({ campo: 'idDefecto', seccion: 'Datos', etiqueta: 'Defecto' })
+    // Solo se exige si la orden tiene ítems; las migradas del legacy no los
+    // tienen y se registran sin prendas. El servidor revalida.
+    if (siguienteNumero?.tieneItems && prendas.length === 0)
+      faltan.push({ campo: 'prendas', seccion: 'Prendas', etiqueta: 'Agregar al menos una prenda' })
     if (esMateriales) {
       if (materiales.length === 0)
         faltan.push({ campo: 'materiales', seccion: 'Materiales', etiqueta: 'Agregar al menos un material' })
@@ -282,6 +299,16 @@ export function ReposicionesPage() {
         idDefecto: Number(campos.idDefecto),
         bodegaSac: campos.bodegaSac || undefined,
         comentario: campos.comentario || undefined,
+        ...(prendas.length > 0
+          ? {
+              prendas: prendas.map((p) => ({
+                idProducto: p.idProducto,
+                idTalla: p.idTalla,
+                idPieza: p.idPieza,
+                cantidad: p.cantidad,
+              })),
+            }
+          : {}),
         ...(esMateriales
           ? {
               materiales: materiales.map((m) => ({
@@ -419,6 +446,27 @@ export function ReposicionesPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div
+              ref={refPrendas}
+              className={
+                camposInvalidos.has('prendas') ? 'rounded-md ring-2 ring-destructive/60' : undefined
+              }
+            >
+              <Label className="mb-1 block text-xs">Prendas repuestas</Label>
+              <SeccionPrendas
+                disponibles={siguienteNumero?.prendasDisponibles ?? []}
+                piezas={piezas ?? []}
+                onAdministrarPiezas={puedeAdministrarPiezas ? () => setModalPiezas(true) : undefined}
+                tieneItems={siguienteNumero?.tieneItems ?? true}
+                prendas={prendas}
+                onChange={(p) => {
+                  setPrendas(p)
+                  if (p.length > 0) limpiarInvalido('prendas')
+                }}
+                disabled={guardando}
+              />
             </div>
 
             <div>
@@ -637,6 +685,7 @@ export function ReposicionesPage() {
                 <TableRow>
                   <TableHead>Código</TableHead>
                   <TableHead>Defecto</TableHead>
+                  <TableHead>Prendas</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Detalle</TableHead>
                   <TableHead>Estado</TableHead>
@@ -648,6 +697,18 @@ export function ReposicionesPage() {
                   <TableRow key={r.idReposicion}>
                     <TableCell className="font-mono">{r.codigoRepo}</TableCell>
                     <TableCell className="whitespace-normal">{r.defecto.nombre}</TableCell>
+                    <TableCell className="whitespace-normal text-xs">
+                      {r.prendas.length > 0
+                        ? resumirPrendas(
+                            r.prendas.map((p) => ({
+                              producto: p.producto.codigo,
+                              talla: p.talla.nombre,
+                              pieza: p.pieza.nombre,
+                              cantidad: p.cantidad,
+                            })),
+                          )
+                        : '—'}
+                    </TableCell>
                     <TableCell>
                       {r.tipo === 'MATERIALES' ? (
                         <Badge variant="secondary">Materiales</Badge>
@@ -701,6 +762,8 @@ export function ReposicionesPage() {
         />
       </div>
       </div>
+
+      {puedeAdministrarPiezas && <ModalPiezas open={modalPiezas} onOpenChange={setModalPiezas} />}
 
       <ModalAnular
         reposicion={reposicionAnular}

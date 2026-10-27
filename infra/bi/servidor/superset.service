@@ -1,0 +1,28 @@
+# /etc/systemd/system/superset.service — Superset en el servidor, SIN Docker.
+# Instalación previa (como el usuario `superset`, sin sudo salvo apt):
+#   sudo apt install python3-venv python3-dev libpq-dev build-essential
+#   sudo useradd --system --create-home --shell /usr/sbin/nologin superset
+#   sudo -u superset python3 -m venv /home/superset/venv
+#   sudo -u superset /home/superset/venv/bin/pip install apache-superset==6.0.0 psycopg2-binary==2.9.10 gunicorn
+#   sudo install -d -m 750 -o superset -g superset /etc/superset
+#   sudo install -m 640 -o root -g superset superset_config.py /etc/superset/superset_config.py
+#   sudo install -m 640 -o root -g superset superset.env /etc/superset/superset.env   # basado en superset.env.example
+#   sudo systemctl daemon-reload && sudo systemctl enable --now superset
+[Unit]
+Description=Apache Superset (tableros del ERP)
+After=network.target postgresql.service
+
+[Service]
+User=superset
+Group=superset
+EnvironmentFile=/etc/superset/superset.env
+Environment=SUPERSET_CONFIG_PATH=/etc/superset/superset_config.py
+WorkingDirectory=/home/superset
+# Escucha en la red interna; con dominio + HTTPS se pasa a 127.0.0.1 detrás de Nginx.
+ExecStart=/home/superset/venv/bin/gunicorn --workers 2 --worker-class gthread --threads 4 \
+  --timeout 120 --bind 0.0.0.0:8088 "superset.app:create_app()"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

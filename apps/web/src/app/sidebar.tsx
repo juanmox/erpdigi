@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/features/auth/auth-context'
+import { useTablerosBi } from '@/features/bi/api'
 import { MODULOS } from './modulos'
 
 const CLAVE_COLAPSADO = 'digitexsa.sidebar.colapsado'
@@ -48,6 +49,7 @@ function ItemNav({ item, colapsado }: { item: NavItemInfo; colapsado: boolean })
 
 export function Sidebar() {
   const { empresasDisponibles, idEmpresa, tienePermiso } = useAuth()
+  const { data: tablerosBi } = useTablerosBi()
   const [colapsado, setColapsado] = useState(() => localStorage.getItem(CLAVE_COLAPSADO) === '1')
 
   useEffect(() => {
@@ -80,6 +82,10 @@ export function Sidebar() {
     // candidato, es el del tile "Reportes" del roadmap.
     ...(tienePermiso('costeo.dashboard.ver') ? [{ to: '/costeo/reportes', codigo: 'RS', etiqueta: 'Reportes de Costeo' }] : []),
     ...(tienePermiso('costeo.of.ver') ? [{ to: '/costeo/facturacion', codigo: 'OF', etiqueta: 'Órdenes de Facturación' }] : []),
+    // Solo si el servidor dice que hay al menos un tablero para este usuario en
+    // esta empresa (Superset configurado + permiso por tablero): evita ofrecer
+    // un menú que lleva a una pantalla vacía. `TB` no choca con ningún otro código.
+    ...(tablerosBi?.tableros.length ? [{ to: '/dashboards', codigo: 'DB', etiqueta: 'Dashboards' }] : []),
   ]
 
   const proximamente = MODULOS.filter((m) => !m.activo)

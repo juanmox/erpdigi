@@ -78,6 +78,8 @@ export interface DetalleReposicion {
    * mezcla unidades, así que un total sería un número sin significado físico.
    */
   materiales: MaterialRequisado[]
+  /** Prendas que cubre (producto + talla + pieza + cantidad). Vacío en las migradas del legacy. */
+  prendas: { producto: string; estilo: string | null; talla: string; pieza: string; cantidad: number }[]
 }
 
 export interface ReporteConsumo {
