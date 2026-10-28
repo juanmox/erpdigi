@@ -22,7 +22,10 @@ export const biApi = {
  */
 export function useTablerosBi() {
   const { idEmpresa, tienePermiso } = useAuth()
-  const puedeAlguno = tienePermiso('costeo.dashboard.ver') || tienePermiso('costeo.dashboard.ver_financiero')
+  // `plataforma.tableros.acceder` es el interruptor del módulo; los otros dos, el de cada tablero.
+  const puedeAlguno =
+    tienePermiso('plataforma.tableros.acceder') &&
+    (tienePermiso('costeo.dashboard.ver') || tienePermiso('costeo.dashboard.ver_financiero'))
   return useQuery({
     queryKey: ['bi', 'tableros', idEmpresa],
     queryFn: biApi.tableros,

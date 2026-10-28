@@ -85,5 +85,15 @@ export const TABLEROS: readonly DefinicionTablero[] = [
   },
 ];
 
+/**
+ * Interruptor de TODO el módulo: sin este permiso el usuario no ve el menú
+ * "Dashboards" ni obtiene tokens, aunque tenga el permiso de un tablero. Se pide
+ * ADEMÁS del permiso de cada tablero (no en su lugar), y solo ADMIN lo recibe de
+ * fábrica: instalar Superset no expone nada a nadie hasta que se asigne desde
+ * /roles. Es plataforma.* y no costeo.* a propósito, para que tampoco le llegue
+ * por herencia a roles como ADMIN_IT_COSTEO.
+ */
+export const PERMISO_ACCESO = 'plataforma.tableros.acceder';
+
 /** Permiso que muestra el menú de descarga de los gráficos incrustados. */
 export const PERMISO_EXPORTAR = 'costeo.dashboard.exportar';

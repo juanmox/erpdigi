@@ -149,7 +149,7 @@ function App() {
             <Route
               path="dashboards"
               element={
-                <RutaConPermiso permisos={['costeo.dashboard.ver', 'costeo.dashboard.ver_financiero']}>
+                <RutaConPermiso permisos={['plataforma.tableros.acceder']}>
                   <TablerosPage />
                 </RutaConPermiso>
               }

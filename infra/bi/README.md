@@ -26,7 +26,7 @@ PostgreSQL ──► schema `analitica` (vistas) ◄── rol bi_lector (solo S
 | `infra/bi/configurar-superset.mjs` | Conexión a la base y un dataset por vista |
 | `infra/bi/crear_rol_guest.py`, `crear_servicio.py` | Rol de los usuarios incrustados y cuenta de servicio |
 | `infra/bi/tableros/construir-tableros.mjs` | Primera tanda de 5 tableros (Producción, Calidad, Papel, Facturación, Costos) |
-| `infra/bi/servidor/` | Servicio systemd y variables para el servidor (sin Docker) |
+| `infra/bi/servidor/` | Alternativa con `systemd` (pide `sudo`, usuario y `python3-venv`); la guía de abajo usa PM2 y no la necesita |
 
 ## Reglas que conviene no romper
 
@@ -89,41 +89,169 @@ pnpm --filter @digitexsa-erp/api exec prisma db seed
 `SUPERSET_SERVICE_PASSWORD`, `BI_TABLEROS` — ver `.env.example`. Sin ellas el módulo queda inerte:
 el menú "Dashboards" no aparece.
 
+**El menú exige además el permiso `plataforma.tableros.acceder`** (interruptor del módulo), que solo ADMIN
+recibe de fábrica. Se pide *además* del permiso de cada tablero (`costeo.dashboard.ver` / `ver_financiero`):
+aunque Superset esté instalado y configurado, nadie más ve el menú, ni obtiene tokens, hasta que se asigne
+desde `/roles`. Sin él, además, `/dashboards` redirige a Inicio.
+
 ## Servidor de producción (sin Docker) — pendiente de ejecutar
 
-Estado al 2026-10-25: **el servidor no respondió por SSH, así que nada de esto se hizo**. Producción
-no tiene ningún cambio de este trabajo. Orden, y no se avanza si un paso falla:
+Guía para instalar Superset en `192.168.2.13` **sin tocar los procesos en marcha**. Todo vive en
+`~/superset` (usuario `erpadmin`) y corre bajo **PM2**, igual que `digitexsa-api`; así no hace
+falta `systemd` ni crear usuarios del sistema. Solo **dos pasos piden `sudo`**: crear los roles de
+Postgres (paso 3) y, si está activo, abrir el puerto en `ufw` (paso 6).
 
-0. **Punto de restauración** (como `erpadmin`): etiqueta `pre-bi-2026-10-25` en git (ya creada
-   en local; `git push origin pre-bi-2026-10-25`), `pg_dump` completo de `erpdb` a `~/backups/`
-   (verificar que restaura en una base desechable) y copia del `.env` y `ecosystem.config.js`.
-   Medir antes: `free -m`, `df -h`, `nproc`, `python3 --version` (Superset 6.0 pide 3.10–3.12) —
-   necesita ~1–2 GB de RAM libres.
-1. **Migración** `analitica` (solo agrega objetos; la corre `digitexsa_erp`, dueño de `costeo` y
-   `recetas`): desplegar el código y `prisma migrate deploy`.
-2. **Rol de lectura** (superusuario): `sudo -u postgres psql -d erpdb -v clave="'...'" -f infra/bi/crear-rol-bi-lector.sql`.
-3. **Base de Superset** (superusuario): `CREATE ROLE superset LOGIN PASSWORD '...'; CREATE DATABASE superset OWNER superset;`
-4. **Superset**: ver `infra/bi/servidor/superset.service` (entorno virtual + gunicorn + systemd) y
-   `infra/bi/servidor/superset.env.example`. `ERP_ORIGEN` = la dirección del ERP
-   (`http://192.168.2.13`); `SUPERSET_PUBLIC_URL` = `http://192.168.2.13:8088`.
-5. `superset db upgrade` y `superset init`; luego los tres scripts de arriba apuntando a
-   `SUPERSET_URL=http://127.0.0.1:8088` y `BI_DB_HOST=localhost`, `BI_DB_PORT=5432`, `BI_DB_NAME=erpdb`.
-6. **Seed** (permiso `costeo.dashboard.exportar`) y `pm2 restart digitexsa-api` con las variables
-   `SUPERSET_*` y `BI_TABLEROS` en el `.env` de la API. Cada usuario debe **cerrar sesión y volver a
-   entrar** para ver permisos nuevos.
-7. Asignar `costeo.dashboard.ver` / `ver_financiero` / `exportar` a quien corresponda desde `/roles`.
+**Por qué es transparente para quien usa el ERP**: hasta el paso 8 no se toca la API ni la base
+`erpdb` (el paso 3 solo agrega un rol y una base nueva). La instalación pesada corre con `nice`.
+Superset ocupa entre 0.5 y 1 GB de RAM según uso (el servidor tiene ~5.6 GB libres) y un puerto nuevo (8088). El único
+instante visible es el reinicio de la API del paso 8, de 1-2 s, que conviene hacer fuera de horas pico.
 
-`deploy.sh` migra antes de compilar; esta migración solo agrega, así que es seguro.
+### Lo que se descubrió probando esta guía (no repetir el tropiezo)
+
+- **El servidor tiene Python 3.14**, y Superset 6.0 solo soporta 3.10–3.12. Además no trae
+  `python3-venv`. Por eso se usa `uv`, que baja un Python 3.11 propio **sin sudo** y no toca el del sistema.
+- **No hay compilador (`gcc`)**. `apache-superset==6.0.0` solo se publica como código fuente, pero es
+  Python puro y todas sus dependencias traen binarios: se instaló en un Linux limpio sin compilador.
+- **Hay que instalar `rich` aparte**: el paquete de PyPI no lo declara y sin él el comando
+  `superset` se cae (`ModuleNotFoundError: rich`). La imagen de Docker sí lo trae, por eso en local no se vio.
+- **`crear-rol-bi-lector.sql` ya NO hace `REVOKE ... FROM PUBLIC`** sobre la base: no aporta nada y toca una
+  base en producción. (Se quitó creyendo que `erpadmin` entraba solo por ese `CONNECT`; al verificar el
+  servidor resultó que `erpadmin` ya no posee nada en `erpdb`, pero se dejó quitado igual.)
+
+### Orden (no se avanza si un paso falla)
+
+**0. Chequeo y traer los archivos corregidos.** `git pull` solo baja el código: no recompila ni reinicia nada.
+La guarda de la 3.ª línea es importante: el script viejo del rol de lectura quita el `CONNECT` público de `erpdb`.
+```bash
+free -m; df -h ~; ss -ltn | grep ':8088' || echo "8088 libre"
+cd ~/digitexsa-erp && git pull
+grep -q "REVOKE ALL ON DATABASE %I" infra/bi/crear-rol-bi-lector.sql && echo "¡NO CONTINUAR: script viejo!" || echo "script OK"
+```
+
+**1. Python 3.11 y Superset en su propia carpeta** (`erpadmin`, sin sudo, ~5 min, ocupa ~700 MB de disco).
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv python install 3.11
+mkdir -p ~/superset && uv venv ~/superset/venv --python 3.11
+nice -n 19 uv pip install --python ~/superset/venv/bin/python \
+  apache-superset==6.0.0 psycopg2-binary==2.9.10 gunicorn rich
+~/superset/venv/bin/python -c "import psycopg2, rich, gunicorn; from importlib.metadata import version; print('Superset', version('apache-superset'))"
+```
+Debe imprimir `Superset 6.0.0`. (No usar `superset version` aquí: sin configuración se niega a arrancar por la `SECRET_KEY` por defecto, y parece un fallo.)
+
+**2. Secretos y configuración.** Los genera el propio servidor y quedan solo en `~/superset/superset.env`
+(modo 600); no se escriben en ningún otro lado ni pasan por el repositorio. Son hexadecimales a propósito
+(la contraseña de la base va dentro de una URL).
+```bash
+cd ~/superset && mkdir -p cache
+install -m 600 /dev/null superset.env
+cat > superset.env <<EOF
+SUPERSET_SECRET_KEY=$(openssl rand -hex 32)
+GUEST_TOKEN_JWT_SECRET=$(openssl rand -hex 32)
+SUPERSET_DB_PASSWORD=$(openssl rand -hex 16)
+SUPERSET_DB_HOST=localhost
+SUPERSET_CACHE_DIR=$HOME/superset/cache
+ERP_ORIGEN=http://192.168.2.13
+SCARF_ANALYTICS=false
+BI_LECTOR_PASSWORD=$(openssl rand -hex 16)
+SUPERSET_ADMIN_PASSWORD=$(openssl rand -hex 12)
+SUPERSET_SERVICE_PASSWORD=$(openssl rand -hex 16)
+EOF
+cp ~/digitexsa-erp/infra/bi/superset_config.py ~/superset/superset_config.py
+```
+
+**3. Postgres** (**necesita sudo**, ~1 min). Crea el rol de solo lectura y la base propia de Superset.
+Después comprueba que `bi_lector` ve `analitica` y NO ve `core`, y que el ERP sigue conectando.
+```bash
+cd /tmp && set -a && . ~/superset/superset.env && set +a
+sudo -u postgres psql -d erpdb -v clave="'$BI_LECTOR_PASSWORD'" \
+  < ~/digitexsa-erp/infra/bi/crear-rol-bi-lector.sql
+sudo -u postgres psql -v ON_ERROR_STOP=1 \
+  -c "CREATE ROLE superset LOGIN PASSWORD '$SUPERSET_DB_PASSWORD'" \
+  -c "CREATE DATABASE superset OWNER superset"
+
+# Verificación — la 1.ª debe dar un número; la 2.ª debe decir "permission denied"; la 3.ª, 1
+PGPASSWORD=$BI_LECTOR_PASSWORD psql -h localhost -U bi_lector -d erpdb -Atc "select count(*) from analitica.v_consumo"
+PGPASSWORD=$BI_LECTOR_PASSWORD psql -h localhost -U bi_lector -d erpdb -Atc "select count(*) from core.usuarios" 2>&1 | head -1
+psql "$(grep ^DATABASE_URL ~/digitexsa-erp/apps/api/.env | cut -d= -f2- | tr -d '"')" -Atc "select 1"
+```
+
+**4. Inicializar Superset** (crea sus tablas, el admin, el rol de los incrustados y la cuenta de servicio).
+```bash
+cd ~/superset && set -a && . ./superset.env && set +a
+export SUPERSET_CONFIG_PATH=$HOME/superset/superset_config.py FLASK_APP=superset PATH=$HOME/superset/venv/bin:$PATH
+superset db upgrade
+superset fab create-admin --username admin --firstname Admin --lastname ERP \
+  --email admin@localhost --password "$SUPERSET_ADMIN_PASSWORD"
+superset init
+python - < ~/digitexsa-erp/infra/bi/crear_rol_guest.py
+python - < ~/digitexsa-erp/infra/bi/crear_servicio.py
+```
+
+**5. Dejarlo corriendo con PM2** (arranca solo al reiniciar el servidor, como las otras apps).
+```bash
+cat > ~/superset/run.sh <<'EOF'
+#!/bin/bash
+set -a; . "$HOME/superset/superset.env"; set +a
+export SUPERSET_CONFIG_PATH="$HOME/superset/superset_config.py"
+exec "$HOME/superset/venv/bin/gunicorn" --workers 2 --worker-class gthread --threads 4 \
+  --timeout 120 --bind 0.0.0.0:8088 "superset.app:create_app()"
+EOF
+chmod +x ~/superset/run.sh
+export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
+pm2 start ~/superset/run.sh --name superset --interpreter bash --cwd ~/superset --max-memory-restart 1500M
+pm2 save
+sleep 20; curl -s http://127.0.0.1:8088/health     # debe responder OK
+```
+
+**6. Puerto 8088 para los navegadores** (**sudo**; solo si `ufw` está activo). Los usuarios abren el ERP en
+`http://192.168.2.13` y el tablero se carga desde `http://192.168.2.13:8088`, así que su PC tiene que llegar a ese puerto.
+```bash
+sudo ufw status
+sudo ufw allow from 192.168.2.0/24 to any port 8088 proto tcp     # solo si dice "Status: active"
+```
+Prueba desde una PC de la red: abrir `http://192.168.2.13:8088/health`.
+
+**7. Datasets y tableros.** `--escribir-env` deja `BI_TABLEROS` escrito en el `.env` de la API (la API aún no lo lee).
+```bash
+export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
+cd ~/digitexsa-erp && set -a && . ~/superset/superset.env && set +a
+export SUPERSET_URL=http://127.0.0.1:8088 SUPERSET_ADMIN_USER=admin \
+  BI_DB_HOST=localhost BI_DB_PORT=5432 BI_DB_NAME=erpdb
+node infra/bi/configurar-superset.mjs
+node infra/bi/tableros/construir-tableros.mjs --escribir-env apps/api/.env
+```
+
+**8. Activar en el ERP** (el único paso con efecto visible: reinicia la API 1-2 s).
+Antes, el código con el interruptor `plataforma.tableros.acceder` tiene que estar desplegado: así, aunque
+Superset ya esté funcionando, **el menú no aparece para nadie salvo ADMIN** hasta que se asigne desde `/roles`.
+```bash
+cd ~/digitexsa-erp/apps/api && set -a && . ~/superset/superset.env && set +a
+cat >> .env <<EOF
+SUPERSET_URL=http://127.0.0.1:8088
+SUPERSET_PUBLIC_URL=http://192.168.2.13:8088
+SUPERSET_SERVICE_USER=erp_servicio
+SUPERSET_SERVICE_PASSWORD=$SUPERSET_SERVICE_PASSWORD
+EOF
+cd ~/digitexsa-erp && export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
+bash scripts/deploy.sh          # mira que llegue a "Listo" ANTES de seguir
+cd apps/api && npx prisma db seed
+```
+
+**9. Dar acceso.** En `/roles` asignar `plataforma.tableros.acceder` al rol que corresponda (además de
+`costeo.dashboard.ver` / `ver_financiero`). Cada usuario debe cerrar sesión y volver a entrar.
 
 ### Cómo se revierte, paso por paso
 
 | Paso | Retroceso |
 |---|---|
-| Superset | `systemctl disable --now superset`, borrar `~/superset`, `DROP DATABASE superset; DROP ROLE superset;` |
+| Ocultarlo YA (sin desinstalar) | Quitar `plataforma.tableros.acceder` desde `/roles`, o borrar las líneas `SUPERSET_*` del `.env` de la API y `pm2 restart digitexsa-api` |
+| Superset | `pm2 delete superset && pm2 save`, borrar `~/superset`, y `sudo -u postgres psql -c "DROP DATABASE superset" -c "DROP ROLE superset"` |
 | Rol de lectura | `infra/bi/quitar-rol-bi-lector.sql` (superusuario) |
-| Migración | `apps/api/prisma/migrations/20261025120000_analitica_vistas/rollback.sql` (`DROP SCHEMA analitica CASCADE`) y `DELETE FROM _prisma_migrations WHERE migration_name = '20261025120000_analitica_vistas'` |
+| Migración `analitica` | `apps/api/prisma/migrations/20261025120000_analitica_vistas/rollback.sql` (`DROP SCHEMA analitica CASCADE`) y `DELETE FROM _prisma_migrations WHERE migration_name = '20261025120000_analitica_vistas'` |
 | Código del ERP | `git revert` del commit; el módulo es aditivo y sin Superset configurado no se ve |
-| Todo el trabajo | `git checkout pre-bi-2026-10-25` + build + `pm2 restart`, y restaurar el `pg_dump` solo si se necesitara |
+| Puerto | `sudo ufw delete allow from 192.168.2.0/24 to any port 8088 proto tcp` |
 
 Looker Studio y el espejo a Google Sheets **no se tocaron** y siguen funcionando igual.
 

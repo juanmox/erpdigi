@@ -699,6 +699,33 @@ respondió por SSH ese día. Punto de restauración previo: etiqueta git `pre-bi
 - Pendiente: instalar en el servidor (guía en el README), acceso externo con HTTPS, apagar el espejo a
   Sheets tras comparar cifras, y costo real en dinero (F5).
 
+- **Estado en producción (2026-10-28)**: el 2026-10-27 se desplegó `3a63c05` con las migraciones `analitica`
+  (vistas), prendas y piezas, y el módulo `bi` del ERP (inerte). **Superset todavía NO está instalado.**
+- **El menú "Dashboards" exige el permiso `plataforma.tableros.acceder`** (interruptor del módulo), pedido
+  ADEMÁS del de cada tablero. Solo ADMIN lo recibe de fábrica (`PERMISOS_ADMIN_ADICIONALES`): es `plataforma.*`
+  y no `costeo.*` a propósito, para que tampoco le llegue a ADMIN_IT_COSTEO por herencia. Motivo: cinco roles ya
+  tenían `costeo.dashboard.ver`, así que instalar Superset habría mostrado el menú a cuatro roles más sin que
+  nadie lo decidiera. Sin el interruptor: `GET /bi/tableros` devuelve vacío, `POST /bi/token/:clave` da 403, la
+  consulta del frontend ni se dispara y `/dashboards` redirige a Inicio (verificado en navegador con dos
+  usuarios). Pide correr el seed y que cada usuario vuelva a entrar.
+- **Instalación en el servidor: la guía está probada, y se corrigió en el camino** (`infra/bi/README.md`).
+  - ⚠️ El servidor tiene **Python 3.14** (Superset 6.0 solo soporta 3.10–3.12), sin `python3-venv` ni `gcc`.
+    Se usa `uv` para bajar un Python 3.11 propio sin sudo. `apache-superset==6.0.0` solo se publica como
+    código fuente en PyPI, pero es Python puro: se probó instalarlo en un Linux limpio sin compilador.
+  - ⚠️ **Hay que instalar `rich` aparte**: el paquete no lo declara y sin él el CLI `superset` se cae. La
+    imagen de Docker sí lo trae, por eso en local nunca se vio.
+  - ⚠️ **`crear-rol-bi-lector.sql` hacía `REVOKE ALL ON DATABASE ... FROM PUBLIC` y se quitó.** Se quitó
+    suponiendo que `erpadmin` (con el que se migraba `recetas`) entraba solo por el `CONNECT` que PUBLIC tiene
+    por defecto. **Esa suposición ya no es cierta** (ver "Estado real de la base de producción", más abajo):
+    `erpadmin` no es dueño de nada. Se dejó quitado igual: no aporta, y el aislamiento de `bi_lector` está en
+    los privilegios de schema.
+  - Corre bajo **PM2** (ya arranca solo al reiniciar: `pm2-erpadmin` habilitado) en vez de `systemd`, así que
+    solo dos pasos piden sudo (roles de Postgres y, si está activo, `ufw`).
+  - Probado el flujo completo en contenedores: instalación sin compilador, migración de metadatos, admin,
+    `init`, `crear_rol_guest.py` (81 permisos), `crear_servicio.py`, gunicorn con `health` OK, login 200 de
+    admin y de la cuenta de servicio, y paquete de idioma 200 para anónimo. **No** se probó contra la base
+    Postgres real del servidor ni el puerto 8088 desde otra PC (eso es parte de la instalación).
+
 ## Reposiciones con prendas: producto + talla + piezas (2026-10-26, SOLO LOCAL)
 Una reposición ya no es solo "de la orden": indica **qué prendas** repuso, para que la estadística de
 calidad pueda cortar por estilo, línea, género, deporte y talla.
@@ -826,6 +853,27 @@ corriendo ahí. Repo en GitHub privado: `github.com/juanmox/erpdigi` (deploy key
 el servidor, no la llave personal del usuario). Checkout del servidor en
 `/home/erpadmin/digitexsa-erp`.
 
+### Estado real del servidor (verificado por SSH el 2026-10-28)
+Lo de arriba describe el día del primer despliegue. **Hoy es distinto**, y conviene no operar con la
+foto vieja:
+- **PM2 corre tres apps**: `digitexsa-api`, `biosac-rrhh` (`/opt/biosac-rrhh/backend`) y
+  `digitexsa-helpdesk` (`/opt/digitexsa-helpdesk`). **`erpapp` (01_erp) ya no existe**: el puerto 3000
+  está libre, Nginx no lo menciona y sus logs de PM2 están vacíos desde el 2026-08-27.
+- **Instancia de Postgres compartida, pero cada app con su base**: `erpdb` (solo este ERP, dueño
+  `digitexsa_erp`), `biosac_rrhh` (dueño `postgres`) y `digitexsa_helpdesk` (dueño `helpdesk_user`).
+  Ni `biosac-rrhh` ni el helpdesk mencionan `erpdb` en su `.env`.
+- **Todo `erpdb` es de `digitexsa_erp`**: los schemas `core`, `recetas`, `costeo` y `analitica`, y las
+  18 tablas de `recetas`. El rol de Postgres **`erpadmin` no es dueño de ningún objeto** y ya nadie se
+  conecta con él (solo conserva `LOGIN`). Por eso `prisma migrate deploy` con la `DATABASE_URL` de la app
+  alcanza para **cualquier** migración, incluidas las que tocan `recetas` o cruzan schemas: ya no hay que
+  partirlas por dueño ni correrlas con `psql -U erpadmin`.
+- **No hay base "legacy" que cuidar**: `recetas` es el catálogo del ERP nuevo, no una base ajena. Lo
+  único del legacy que sobrevive es la carpeta `~/erpapp` (checkout frío) en el servidor.
+- **Decisión del usuario (2026-10-28): `~/erpapp`, `~/erpapp.nuevo` y el rol `erpadmin` de Postgres NO se
+  borran, pero tampoco se tocan ni se usan para nada.** Quedan como están.
+- ⚠️ `sudo` sigue pidiendo contraseña, así que lo que lo necesite (roles de Postgres, `ufw`, Nginx) lo
+  corre el usuario.
+
 - **Un solo proceso PM2** (`digitexsa-api`, puerto `4001`, ver `ecosystem.config.js` en la raíz) —
   el frontend no tiene proceso propio, Nginx lo sirve directo desde `apps/web/dist/`. Nginx
   no usaba ningún prefijo de ruta para `01_erp` (proxea *todo* `:80` a `:3000`) — la config nueva
@@ -892,11 +940,11 @@ el servidor, no la llave personal del usuario). Checkout del servidor en
   5. `/home/erpadmin` tenía permisos `750` — bloqueaba que `www-data` (usuario de Nginx) leyera
      los estáticos de `apps/web/dist/`, tiraba 500. Se resolvió con `chmod o+x /home/erpadmin`
      (el dueño de su propio home no necesita sudo para esto).
-- **Postgres — rol dedicado**: `digitexsa_erp` (no reusar `erpadmin`, el rol que ya usa `01_erp`),
-  con permisos de lectura/escritura sobre `recetas` (compartido con `01_erp`) y `CREATE` sobre la
-  base para el schema `core` nuevo. Antes del primer `migrate deploy`/aplicar SQL contra la base
-  real se hizo `pg_dump --schema=recetas` de respaldo (queda en el home de `erpadmin` en el
-  servidor) — recomendable repetirlo antes de cualquier migración futura que si toque `recetas`.
+- **Postgres — rol dedicado**: `digitexsa_erp` (no reusar `erpadmin`, el rol que usaba `01_erp`).
+  Al primer despliegue tenía permisos de lectura/escritura sobre `recetas` (que entonces era de
+  `erpadmin`) y `CREATE` sobre la base para el schema `core` nuevo; **hoy es dueño de todo `erpdb`**
+  (ver "Estado real del servidor"). Antes de cualquier migración que toque `recetas` o cambie una
+  vista, tomar `pg_dump` de respaldo en `~/backups/` (el home de `erpadmin` en el servidor).
 - **Caché de Nginx: `index.html` no se cachea, los assets sí (corregido el 2026-09-23).** Tras un
   despliegue, el usuario no veía una pestaña nueva en el servidor aunque **el bundle desplegado sí
   la traía** — verificado con grep sobre el `.js` real y con un navegador limpio, que sí cargaba la
@@ -3718,7 +3766,11 @@ borrado de un desarrollo que tiene producto. Respaldo `pg_dump --schema=recetas`
 - `Producto.minutosMo` / `costoMoMinuto` quedan como columnas **muertas**: nada las lee ni las
   escribe desde el apagado del legacy. Se pueden borrar en una migración aparte cuando convenga.
 
-### Pendiente en el servidor (NO ejecutado por Claude)
+### Pendiente en el servidor (NO ejecutado por Claude) — **CERRADO el 2026-08-31, ver más abajo**
+
+*Sección histórica, previa al corte: se ejecutó entera (despliegue, validación y `pm2 delete erpapp`).
+Lo único que no se hizo, por decisión del usuario, es borrar nada de `01_erp`: ni el repositorio ni la
+carpeta del servidor se tocan. Se conserva por el contexto de cómo se hizo el corte.*
 
 El trabajo de código está hecho y commiteado, pero **el corte en producción sigue pendiente** y debe
 hacerse en este orden:
@@ -3755,9 +3807,12 @@ al final. Resultado: 1 → 99 clientes, 24 → 25 insumos, 4 → 1,285 desarroll
 `count(productos) = count(v_producto_costo) = 1,285` y los costos de los 4 reales idénticos antes y
 después de migrar.
 
-#### ⚠️ Los dos schemas tienen dueños distintos y ninguno es superusuario
+#### ⚠️ Los dos schemas tenían dueños distintos y ninguno es superusuario — **ya NO es así (2026-10-28)**
 
-`recetas` es de `erpadmin`; `core` y `costeo` son de `digitexsa_erp`. **Ninguno de los dos roles es
+*Esto describe el despliegue del 2026-08-31. Hoy `digitexsa_erp` es dueño de todo `erpdb` y `erpadmin` no
+posee nada (ver "Estado real del servidor"), así que esta partición por dueño ya no hace falta.*
+
+`recetas` era de `erpadmin`; `core` y `costeo` son de `digitexsa_erp`. **Ninguno de los dos roles es
 miembro del otro ni superusuario**, así que `prisma migrate deploy` no puede aplicar nada que cruce
 schemas, y ni siquiera puede aplicar lo suyo con un solo rol. De las 5 migraciones pendientes:
 

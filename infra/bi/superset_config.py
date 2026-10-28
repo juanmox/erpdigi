@@ -32,7 +32,8 @@ AUTH_ROLE_PUBLIC = "Public"
 # resultados. Archivos locales (un solo servidor); con varias instancias, Redis.
 _CACHE = {
     "CACHE_TYPE": "FileSystemCache",
-    "CACHE_DIR": "/app/superset_home/cache",
+    # En Docker es /app/superset_home/cache; en el servidor se fija con SUPERSET_CACHE_DIR.
+    "CACHE_DIR": os.environ.get("SUPERSET_CACHE_DIR", "/app/superset_home/cache"),
     "CACHE_DEFAULT_TIMEOUT": 300,
 }
 CACHE_CONFIG = _CACHE

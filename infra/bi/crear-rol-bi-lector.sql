@@ -25,10 +25,15 @@ ALTER ROLE bi_lector SET statement_timeout = '30s';
 ALTER ROLE bi_lector SET idle_in_transaction_session_timeout = '60s';
 ALTER ROLE bi_lector SET default_transaction_read_only = on;
 
--- Solo ve `analitica`. Nada de core (usuarios, tokens), recetas ni costeo.
+-- Solo ve `analitica`. Nada de core (usuarios, tokens), recetas ni costeo: eso lo decide que
+-- el rol NO tenga USAGE sobre esos schemas (verificado en el servidor: ninguno se lo da a PUBLIC).
+--
+-- ⚠️ NO se hace `REVOKE ALL ON DATABASE ... FROM PUBLIC`: no aporta nada y toca una base en
+-- producción. (Se quitó creyendo que `erpadmin` entraba a `erpdb` solo por el CONNECT de PUBLIC;
+-- el 2026-10-28 se verificó que `erpadmin` ya no es dueño de nada, pero igual no hace falta.)
+-- El aislamiento real está en los privilegios de schema, no acá.
 DO $$
 BEGIN
-  EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO bi_lector', current_database());
 END
 $$;

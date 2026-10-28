@@ -44,6 +44,9 @@ const PERMISOS_ADMIN_ADICIONALES = [
   'plataforma.roles.administrar',
   'plataforma.empresas.administrar',
   'plataforma.auditoria.ver',
+  // Interruptor de los tableros (Superset). Solo ADMIN lo recibe de fábrica, a propósito: instalar
+  // Superset no debe mostrar el menú a nadie más hasta que se asigne desde /roles.
+  'plataforma.tableros.acceder',
 ]
 
 // Permisos del módulo Costeo Real (PROMPT_CLAUDE_CODE.md §7). Otorgados por
@@ -603,6 +606,8 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
   'plataforma.roles.administrar': 'Ver y editar los permisos de cada rol, y crear roles nuevos',
   'plataforma.empresas.administrar': 'Ver y administrar el catálogo de empresas',
   'plataforma.auditoria.ver': 'Consultar el registro de auditoría (quién hizo qué y cuándo)',
+  'plataforma.tableros.acceder':
+    'Ver el menú Dashboards. Hace falta además el permiso de cada tablero (Dashboard: ver / ver financiero)',
 
   // ── Recetas ──
   'recetas.catalogo.ver':

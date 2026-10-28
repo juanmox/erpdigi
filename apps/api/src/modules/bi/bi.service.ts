@@ -6,7 +6,12 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
-import { PERMISO_EXPORTAR, TABLEROS, type DefinicionTablero } from './tableros';
+import {
+  PERMISO_ACCESO,
+  PERMISO_EXPORTAR,
+  TABLEROS,
+  type DefinicionTablero,
+} from './tableros';
 
 export interface TableroVisible {
   clave: string;
@@ -74,7 +79,9 @@ export class BiService {
   listar(usuario: JwtPayload): ListadoTableros {
     const c = this.config();
     const configurado = !!(c.url && c.usuario && c.clave);
-    if (!configurado) {
+    // Sin el interruptor, el módulo "no existe" para este usuario: ni tableros
+    // ni la dirección de Superset.
+    if (!configurado || !usuario.permisos.includes(PERMISO_ACCESO)) {
       return {
         configurado: false,
         urlSuperset: null,
@@ -103,6 +110,9 @@ export class BiService {
     idEmpresa: number,
     clave: string,
   ): Promise<{ token: string }> {
+    if (!usuario.permisos.includes(PERMISO_ACCESO)) {
+      throw new ForbiddenException('No tenés acceso a los dashboards');
+    }
     const def = TABLEROS.find((t) => t.clave === clave);
     const c = this.config();
     // Tablero desconocido o sin UUID configurado: para el cliente es lo mismo,

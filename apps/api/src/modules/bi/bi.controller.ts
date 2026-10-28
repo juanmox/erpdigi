@@ -11,6 +11,9 @@ import { BiService } from './bi.service';
  * lista, y cada tablero pide uno distinto (`ver` o `ver_financiero`). El
  * permiso se verifica dentro del servicio, tablero por tablero, y queda
  * escrito en `tableros.ts`.
+ *
+ * Antes de eso, ambos exigen el interruptor `plataforma.tableros.acceder`
+ * (`PERMISO_ACCESO`): sin él el módulo no existe para ese usuario.
  */
 @Controller('bi')
 export class BiController {
