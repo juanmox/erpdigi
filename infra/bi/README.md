@@ -114,6 +114,11 @@ instante visible es el reinicio de la API del paso 8, de 1-2 s, que conviene hac
   Python puro y todas sus dependencias traen binarios: se instaló en un Linux limpio sin compilador.
 - **Hay que instalar `rich` aparte**: el paquete de PyPI no lo declara y sin él el comando
   `superset` se cae (`ModuleNotFoundError: rich`). La imagen de Docker sí lo trae, por eso en local no se vio.
+- **⚠️ Hay que instalar con `-c constraints-superset-6.0.0.txt`.** Sin él `pip` resuelve librerías más nuevas
+  que las de la imagen oficial y Superset **arranca, inicia sesión y emite tokens, pero responde 403 a todo
+  tablero incrustado**, sin una sola línea en sus logs (lo causa Flask-AppBuilder 5.3.0 en vez de 5.0.0).
+  Se descubrió en el servidor real, no en la prueba en contenedor: esa solo comprobó que arrancaba. Para
+  validar una instalación hay que abrir un tablero incrustado desde el ERP, no basta `health`.
 - **`crear-rol-bi-lector.sql` ya NO hace `REVOKE ... FROM PUBLIC`** sobre la base: no aporta nada y toca una
   base en producción. (Se quitó creyendo que `erpadmin` entraba solo por ese `CONNECT`; al verificar el
   servidor resultó que `erpadmin` ya no posee nada en `erpdb`, pero se dejó quitado igual.)
@@ -135,6 +140,7 @@ export PATH="$HOME/.local/bin:$PATH"
 uv python install 3.11
 mkdir -p ~/superset && uv venv ~/superset/venv --python 3.11
 nice -n 19 uv pip install --python ~/superset/venv/bin/python \
+  -c ~/digitexsa-erp/infra/bi/constraints-superset-6.0.0.txt \
   apache-superset==6.0.0 psycopg2-binary==2.9.10 gunicorn rich
 ~/superset/venv/bin/python -c "import psycopg2, rich, gunicorn; from importlib.metadata import version; print('Superset', version('apache-superset'))"
 ```

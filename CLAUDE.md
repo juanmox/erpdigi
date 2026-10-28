@@ -700,7 +700,22 @@ respondió por SSH ese día. Punto de restauración previo: etiqueta git `pre-bi
   Sheets tras comparar cifras, y costo real en dinero (F5).
 
 - **Estado en producción (2026-10-28)**: el 2026-10-27 se desplegó `3a63c05` con las migraciones `analitica`
-  (vistas), prendas y piezas, y el módulo `bi` del ERP (inerte). **Superset todavía NO está instalado.**
+  (vistas), prendas y piezas, y el módulo `bi` del ERP (inerte). **El 2026-10-28 Superset 6.0.0 se instaló y
+  quedó funcionando en el servidor**: `~/superset` (venv con `uv` + Python 3.11, secretos en
+  `~/superset/superset.env` modo 600), corre bajo PM2 como `superset` en `0.0.0.0:8088`, con la regla de
+  `ufw` solo para `192.168.2.0/24`. Roles de Postgres `bi_lector` (solo `analitica`, verificado: no ve `core`,
+  `recetas` ni `costeo` y no escribe) y `superset` (su propia base). Los 6 tableros y 9 datasets están creados;
+  `BI_TABLEROS` y las `SUPERSET_*` están en el `.env` de la API y el menú ya funciona para ADMIN. El resto de
+  roles lo recibe asignando `plataforma.tableros.acceder` desde `/roles`.
+  - ⚠️ **Instalar con `-c infra/bi/constraints-superset-6.0.0.txt`.** La primera instalación, sin restricciones,
+    dejó a Superset "sano" (`health` OK, login OK, tokens OK) pero **respondiendo 403 a cualquier tablero
+    incrustado, sin una línea en sus logs**: `pip` resolvió Flask-AppBuilder 5.3.0 (la imagen usa 5.0.0) y
+    otras ~90 librerías más nuevas. Se corrigió fijando las versiones de la imagen oficial. La prueba en
+    contenedor de la guía solo había comprobado que arrancaba, no que un tablero cargara: **validar siempre
+    abriendo un tablero desde el ERP**. Entorno anterior guardado en `~/superset/freeze-antes-del-ajuste.txt`.
+  - Los `<NULL>` de "Por línea" y "Por género" son **datos reales, no un fallo**: en producción
+    `recetas.lineas` tiene 0 filas y solo 1 producto tiene género (de 54 repuestos, 0 con línea y 0 con género;
+    estilo y deporte sí están casi completos). Se llenan en el catálogo, no en el tablero.
 - **El menú "Dashboards" exige el permiso `plataforma.tableros.acceder`** (interruptor del módulo), pedido
   ADEMÁS del de cada tablero. Solo ADMIN lo recibe de fábrica (`PERMISOS_ADMIN_ADICIONALES`): es `plataforma.*`
   y no `costeo.*` a propósito, para que tampoco le llegue a ADMIN_IT_COSTEO por herencia. Motivo: cinco roles ya

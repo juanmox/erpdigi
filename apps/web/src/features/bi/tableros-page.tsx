@@ -72,27 +72,30 @@ export function TablerosPage() {
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-4 p-4 lg:p-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
+      <div className="space-y-1">
+        {/* Título y pestañas comparten fila; la descripción va DEBAJO, a todo el ancho.
+            Antes iba dentro del bloque del título: una descripción larga lo ensanchaba,
+            empujaba las pestañas a otra línea y su posición cambiaba según el tablero. */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-xl font-semibold text-ink">Dashboards</h1>
-          {tablero && <p className="text-sm text-ink-muted">{tablero.descripcion}</p>}
+          {tableros.length > 1 && (
+            <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Dashboards">
+              {tableros.map((t) => (
+                <Button
+                  key={t.clave}
+                  role="tab"
+                  aria-selected={t.clave === tablero?.clave}
+                  size="sm"
+                  variant={t.clave === tablero?.clave ? 'default' : 'outline'}
+                  onClick={() => setClaveElegida(t.clave)}
+                >
+                  {t.titulo}
+                </Button>
+              ))}
+            </div>
+          )}
         </div>
-        {tableros.length > 1 && (
-          <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Dashboards">
-            {tableros.map((t) => (
-              <Button
-                key={t.clave}
-                role="tab"
-                aria-selected={t.clave === tablero?.clave}
-                size="sm"
-                variant={t.clave === tablero?.clave ? 'default' : 'outline'}
-                onClick={() => setClaveElegida(t.clave)}
-              >
-                {t.titulo}
-              </Button>
-            ))}
-          </div>
-        )}
+        {tablero && <p className="text-sm text-ink-muted">{tablero.descripcion}</p>}
       </div>
 
       {isLoading && <p className="text-sm text-ink-muted">Cargando…</p>}
