@@ -26,7 +26,10 @@ export interface FilaPreviewLinea {
   estatus: string
   prioridad: string | null
   tallas: FilaTallaCantidad[]
+  /** Prendas; no incluye las yardas de un servicio. */
   totalPiezas: number
+  /** Yardas de un servicio de sublimación (talla YARDAS); 0 en prendas. */
+  totalYardas: number
   error: string | null
   /** Advertencia que NO impide importar (hoy: alias de subcliente). */
   aviso: string | null
@@ -130,6 +133,7 @@ export interface LineaPendienteOrden {
   /** Cantidad por nombre de talla; solo las tallas que la línea usa. */
   cantidades: Record<string, number>
   total: number
+  totalYardas: number
 }
 
 export interface OrdenPendiente {
@@ -142,6 +146,7 @@ export interface OrdenPendiente {
   fechaCompromiso: string | null
   lineas: LineaPendienteOrden[]
   totalPiezas: number
+  totalYardas: number
   lineasImpresas: number
 }
 

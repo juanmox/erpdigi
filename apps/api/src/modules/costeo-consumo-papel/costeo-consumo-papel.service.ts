@@ -18,6 +18,7 @@ import { estilosDeOrden } from '../../common/estilos-orden';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
+import { separarCantidad } from '../../common/cantidad-linea';
 import {
   enguiamientoYd,
   FACTOR_ENGUIAMIENTO_DEFAULT,
@@ -94,7 +95,10 @@ export interface OrdenPendiente {
   consumoEnBlanco: boolean;
   enBlancoYd: number;
   lineas: number;
+  /** Prendas: no incluye las yardas de un servicio. */
   totalPiezas: number;
+  /** Yardas de servicio de sublimación; 0 en una orden de prendas. */
+  totalYardas: number;
   /** Lo que se envía al marcar la orden: sus líneas pendientes EN ESA impresora. */
   idsLineaProduccion: number[];
   /**
@@ -335,7 +339,8 @@ export class CosteoConsumoPapelService {
         enguiamientoCapturadoYd: Number(l.enguiamientoYd),
         estatus: l.estatus,
         tallas,
-        totalPiezas: tallas.reduce((a, t) => a + t.cantidad, 0),
+        totalPiezas: separarCantidad(tallas).piezas,
+        totalYardas: separarCantidad(tallas).yardas,
         totalConsumoYd: +tallas
           .reduce((a, t) => a + (t.consumoYd ?? 0), 0)
           .toFixed(4),
@@ -603,6 +608,7 @@ export class CosteoConsumoPapelService {
           enBlancoYd: Number(l.ordenProduccion.enBlancoYd),
           lineas: 0,
           totalPiezas: 0,
+          totalYardas: 0,
           idsLineaProduccion: [],
           estimadoYd: 0,
           tallasSinEstandar: [],
@@ -613,7 +619,11 @@ export class CosteoConsumoPapelService {
       }
 
       orden.lineas++;
-      orden.totalPiezas += l.tallas.reduce((a, t) => a + t.cantidad, 0);
+      const cant = separarCantidad(
+        l.tallas.map((t) => ({ talla: t.talla.nombre, cantidad: t.cantidad })),
+      );
+      orden.totalPiezas += cant.piezas;
+      orden.totalYardas += cant.yardas;
       orden.idsLineaProduccion.push(l.idLineaProduccion);
 
       // Mismas fórmulas que la captura, que salieron del Código.gs legacy:

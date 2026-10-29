@@ -11,6 +11,7 @@ import type {
   OrdenPendiente,
   RolloDelGrupo,
 } from '../types'
+import { cantidadConUnidad, cantidadCorta } from '@/lib/cantidad-orden'
 
 interface Props {
   grupos: GrupoImpresoraPendiente[]
@@ -215,6 +216,7 @@ export function TablaPendientes({
           seleccionablesDelGrupo.length > 0 &&
           seleccionablesDelGrupo.every((l) => seleccionadas.has(l.idLineaProduccion))
         const piezas = g.ordenes.reduce((a, o) => a + o.totalPiezas, 0)
+        const yardas = g.ordenes.reduce((a, o) => a + o.totalYardas, 0)
         // Solo lo seleccionado EN ESTE grupo: el rollo es de esta máquina, así
         // que sumar la selección de las otras daría un contraste sin sentido.
         const estimadoSel = estimadoDeLaSeleccion(g, seleccionadas)
@@ -226,7 +228,7 @@ export function TablaPendientes({
               <span className="flex flex-wrap items-center gap-2">
                 <strong className="text-ink">{g.impresora}</strong>
                 <span className="text-ink-faint text-xs">
-                  {g.ordenes.length} orden(es) · {piezas.toLocaleString('es-GT')} pieza(s)
+                  {g.ordenes.length} orden(es) · {cantidadConUnidad(piezas, yardas)}
                 </span>
                 <EstadoRollo rollo={g.rollo} />
                 {g.ocupadaPor && <AvisoOcupada ocupada={g.ocupadaPor} />}
@@ -307,7 +309,9 @@ export function TablaPendientes({
                       <TableCell className="text-xs">{o.ordenCompra ?? '—'}</TableCell>
                       <TableCell className="text-xs">{fecha(o.fechaCompromiso)}</TableCell>
                       <TableCell className="text-right tabular-nums">{o.lineas}</TableCell>
-                      <TableCell className="text-right tabular-nums">{o.totalPiezas}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {cantidadCorta(o.totalPiezas, o.totalYardas)}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums text-xs">
                         {o.tallasSinEstandar.length > 0 ? (
                           // Sin estándar no hay estimado real, y mostrar el
@@ -374,7 +378,7 @@ export function TablaPendientes({
                         )}
                         <span className="text-accent-brand font-mono text-xs font-medium">{o.codigo}</span>
                         <Badge variant="secondary" className="ml-auto shrink-0">
-                          {o.totalPiezas} pz
+                          {o.totalYardas > 0 ? cantidadCorta(o.totalPiezas, o.totalYardas) : `${o.totalPiezas} pz`}
                         </Badge>
                       </button>
                       <div className="text-ink-faint mt-1 text-[11px]">

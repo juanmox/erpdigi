@@ -92,7 +92,7 @@ const TABLEROS = [
     clave: 'produccion', titulo: 'Producción', vista: 'v_consumo',
     filtros: [filtroTiempo(), filtroSelect('Cliente', 'v_consumo', 'cliente'), filtroSelect('Marca', 'v_consumo', 'marca'), filtroSelect('Estilo', 'v_consumo', 'estilo'), filtroSelect('Impresora', 'v_consumo', 'impresora'), filtroSelect('Tipo de papel', 'v_consumo', 'tipo_papel')],
     filas: [
-      [kpi('Piezas impresas', SUM('piezas', 'Piezas'), 3), kpi('Yardas de papel', yardas, 3, 'impresión + enguiamiento + en blanco'), kpi('Órdenes', sql('COUNT(DISTINCT codigo_op)', 'Órdenes'), 3), kpi('Yardas por pieza', sql('SUM(total_yd) / NULLIF(SUM(piezas), 0)', 'Yd/pieza'), 3, 'yardas de papel por pieza', ',.2f')],
+      [kpi('Piezas impresas', SUM('piezas', 'Piezas'), 3), kpi('Yardas de papel', yardas, 3, 'impresión + enguiamiento + en blanco'), kpi('Órdenes', sql('COUNT(DISTINCT codigo_op)', 'Órdenes'), 3), kpi('Yardas por pieza', sql('SUM(total_yd) FILTER (WHERE NOT es_servicio) / NULLIF(SUM(piezas), 0)', 'Yd/pieza'), 3, 'yardas de papel por pieza (sin servicios por yardas)', ',.2f')],
       [barraTiempo('Yardas por mes y concepto', [SUM('impresion_yd', 'Impresión'), SUM('enguiamiento_yd', 'Enguiamiento'), SUM('en_blanco_yd', 'Papel en blanco')], 8), dona('Yardas por impresora', 'impresora', yardas, 4)],
       [barraCat('Clientes con más consumo', 'cliente', yardas, 6), dona('Por estilo', 'estilo', yardas, 3), dona('Por tipo de papel', 'tipo_papel', yardas, 3)],
       [tabla('Órdenes con más consumo', ['codigo_op', 'cliente'], [SUM('piezas', 'Piezas'), yardas], yardas)],

@@ -829,9 +829,27 @@ import reconozca"): en un servicio de sublimación continua no hay prendas, la c
 - **Consumo estándar por producto, un dato de negocio**: `SERV SUBLIMADO` y `SERV-SUBLIMADO` × `YARDAS` =
   36 pulgadas (1 yd por yd), cargados en **local** por SQL. Un producto de servicio nuevo necesita su
   fila en Consumo Estándar o su línea queda "falta estándar", igual que cualquier prenda.
-- ⚠️ **Pendiente: las yardas cuentan como "piezas"** en `analitica.v_ordenes`/`v_consumo`, en el listado
-  de Órdenes y en el preview. Mezclar 197 yd con prendas distorsiona cualquier gráfico de piezas; no se
-  tocó porque ninguna OP por yardas se ha cargado todavía.
+- **Las yardas ya NO cuentan como "piezas" (2026-10-29)**: el servidor las separa (`common/cantidad-linea.ts`,
+  `totalPiezas` + `totalYardas`) en el listado de Órdenes, el preview del import y la cola de Impresión;
+  las pantallas muestran `120`, `197 yd` o `5 · 50 yd` (`web/src/lib/cantidad-orden.ts`). Una fila solo de
+  YARDAS es válida aunque tenga 0 piezas. Migración `20261029120000_analitica_yardas_servicio` (+ rollback):
+  `v_consumo.piezas` y `v_ordenes.piezas` excluyen la talla YARDAS (`v_facturacion` y `v_costo_op` lo
+  heredan) y se agregan al final `yardas_servicio` (ambas) y `es_servicio` (`v_consumo`).
+  - ⚠️ **El papel que gasta un servicio SIGUE en `total_yd`**: salió del rollo. Por eso el KPI "Yardas por
+    pieza" se inflaría (el papel cuenta, las piezas no): `construir-tableros.mjs` ya lo calcula con
+    `FILTER (WHERE NOT es_servicio)`, pero **`construir-tableros` no toca tableros existentes**, así que en un
+    Superset donde ya exista hay que editar esa métrica a mano. Los datasets `v_consumo` y `v_ordenes`
+    necesitan además `PUT /api/v1/dataset/<id>/refresh` para ver las columnas nuevas.
+  - ⚠️ **También es servicio el consumo de PRODUCCION sin talla** (`id_talla` vacío): así quedaron los
+    servicios migrados del legacy (16 órdenes de `SERV-SUBLIMADO`, 86 filas, 3,582 yd en local y en
+    producción): la línea no tiene tallas y cada consumo trae las yardas sueltas. La primera versión de la
+    migración solo miraba la talla `YARDAS` y seguía contándolas como piezas (se vio en `26OP029937`: 319
+    piezas). No se les puede poner la talla `YARDAS`: el índice único por línea+talla lo rechaza. En esas
+    órdenes la pantalla de Impresión de OPs muestra 0 piezas y 0 yd de consumo (la línea no tiene tallas),
+    pero el tablero sí las cuenta como servicio.
+  - `v_costo_op` no se tocó: su costo estándar es receta × cantidad, o sea por yarda en un servicio.
+  - El rollback no puede quitar las columnas nuevas (`CREATE OR REPLACE VIEW` solo agrega): restaura el
+    significado de `piezas` y las deja sin uso.
 - Verificado con la plantilla real (YARDAS 197/1000/3/100/2/50): preview sin errores, aplicar creó las 6
   OP, y el servidor calculó 6/30/1/3/1/2 yd de enguiamiento; el estimado de la cola da 203/1030/4/103/3/52.
 

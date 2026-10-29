@@ -9,6 +9,7 @@ import ExcelJS from 'exceljs';
 import { fechaCelda, textoCelda } from '../../common/excel-celda';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
+import { separarCantidad } from '../../common/cantidad-linea';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import {
@@ -536,11 +537,14 @@ export class CosteoOrdenesService {
       ordenes: ordenes.map((o) => {
         const lineas = o.lineasProduccion.map((l) => {
           const cantidades: Record<string, number> = {};
-          let totalPiezas = 0;
-          for (const t of l.tallas) {
-            cantidades[t.talla.nombre] = t.cantidad;
-            totalPiezas += t.cantidad;
-          }
+          for (const t of l.tallas) cantidades[t.talla.nombre] = t.cantidad;
+          // Las yardas de un servicio no son piezas: se informan aparte.
+          const { piezas: totalPiezas, yardas: totalYardas } = separarCantidad(
+            l.tallas.map((t) => ({
+              talla: t.talla.nombre,
+              cantidad: t.cantidad,
+            })),
+          );
           return {
             idLineaProduccion: l.idLineaProduccion,
             codigoLine: l.codigoLine,
@@ -552,6 +556,7 @@ export class CosteoOrdenesService {
             impresa: l.consumosPapel.length > 0,
             cantidades,
             total: totalPiezas,
+            totalYardas,
           };
         });
         return {
@@ -574,6 +579,7 @@ export class CosteoOrdenesService {
           fechaCompromiso: o.fechaCompromiso,
           lineas,
           totalPiezas: lineas.reduce((acc, l) => acc + l.total, 0),
+          totalYardas: lineas.reduce((acc, l) => acc + l.totalYardas, 0),
           lineasImpresas: lineas.filter((l) => l.impresa).length,
         };
       }),
@@ -776,7 +782,9 @@ export class CosteoOrdenesService {
       const idImpresora = r.impresora
         ? (impresoraPorCodigo.get(r.impresora.toLowerCase()) ?? null)
         : null;
-      const totalPiezas = r.tallas.reduce((acc, t) => acc + t.cantidad, 0);
+      const { piezas: totalPiezas, yardas: totalYardas } = separarCantidad(
+        r.tallas,
+      );
 
       let error: string | null = null;
       if (!opParsed)
@@ -815,7 +823,9 @@ export class CosteoOrdenesService {
         error =
           `La columna ${r.tallasIgnoradas.join(', ')} no es una talla que el import reconozca, ` +
           'así que esas piezas no se cargarían. Usá la plantilla descargada tal cual, o pedí que se agregue esa talla.';
-      else if (totalPiezas <= 0)
+      // Una fila solo de YARDAS (servicio) no tiene piezas y es válida: lo que
+      // se exige es que haya ALGUNA cantidad.
+      else if (totalPiezas + totalYardas <= 0)
         error = 'Sin cantidad en ninguna talla reconocida';
       // Un typo en esa celda tiene que verse, no convertirse en un `false`
       // silencioso: es justo el dato que después no se puede corregir.
@@ -849,6 +859,7 @@ export class CosteoOrdenesService {
         prioridad: r.prioridad || null,
         tallas: r.tallas,
         totalPiezas,
+        totalYardas,
         consumoEnBlanco: r.enBlanco === true,
         error,
         // El aviso solo tiene sentido si la fila de verdad se va a importar.

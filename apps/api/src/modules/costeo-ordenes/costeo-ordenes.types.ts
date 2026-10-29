@@ -80,7 +80,10 @@ export interface FilaPreviewLinea {
   estatus: string;
   prioridad: string | null;
   tallas: FilaTallaCantidad[];
+  /** Prendas: no incluye las yardas de un servicio (talla YARDAS). */
   totalPiezas: number;
+  /** Yardas de un servicio de sublimación; 0 en una orden de prendas. */
+  totalYardas: number;
   /** Columna "En blanco" de la plantilla; false si el archivo no la trae. */
   consumoEnBlanco: boolean;
   error: string | null;

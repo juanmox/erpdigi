@@ -2,6 +2,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { LineaConsumo } from '../types'
+import { cantidadCorta } from '@/lib/cantidad-orden'
 
 /**
  * Una línea de producción lista para enviar. Es la unidad de decisión del
@@ -115,8 +116,8 @@ export function TarjetaLinea({
       <div className="mt-3 flex flex-wrap items-end justify-between gap-2 border-t pt-2">
         <div className="text-xs">
           <div>
-            <span className="text-muted-foreground">Piezas </span>
-            <strong className="tabular-nums">{linea.totalPiezas}</strong>
+            <span className="text-muted-foreground">{linea.totalYardas > 0 && linea.totalPiezas === 0 ? 'Yardas ' : 'Piezas '}</span>
+            <strong className="tabular-nums">{cantidadCorta(linea.totalPiezas, linea.totalYardas)}</strong>
           </div>
           <div className="tabular-nums">
             <span className="text-muted-foreground">Consumo </span>

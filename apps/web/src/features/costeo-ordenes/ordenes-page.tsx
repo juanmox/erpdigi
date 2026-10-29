@@ -17,6 +17,7 @@ import { ModalEditarLinea } from './components/modal-editar-linea'
 import { ModalEditarOrden } from './components/modal-editar-orden'
 import { TablaOrdenes } from './components/tabla-ordenes'
 import type { FilaPreviewLinea, LineaProduccionDetalle, OrdenProduccionDetalle } from './types'
+import { cantidadCorta } from '@/lib/cantidad-orden'
 
 export function OrdenesPage() {
   const { tienePermiso } = useAuth()
@@ -205,7 +206,12 @@ export function OrdenesPage() {
           { key: 'linea', header: 'Item', render: (f) => f.codigoLine ?? '—' },
           { key: 'producto', header: 'Producto', render: (f) => f.productoCodigo ?? '—' },
           { key: 'cliente', header: 'Cliente', render: (f) => f.clienteCodigo ?? '—' },
-          { key: 'total', header: 'Piezas', className: 'text-right', render: (f) => f.totalPiezas },
+          {
+            key: 'total',
+            header: 'Cantidad',
+            className: 'text-right',
+            render: (f) => cantidadCorta(f.totalPiezas, f.totalYardas),
+          },
           {
             key: 'estado',
             header: 'Estado',

@@ -25,6 +25,7 @@ export interface LineaConsumo {
   estatus: string
   tallas: TallaConsumo[]
   totalPiezas: number
+  totalYardas: number
   totalConsumoYd: number
   totalEnguiamientoYd: number
   /** Todas sus tallas ya se enviaron. */
@@ -60,6 +61,7 @@ export interface OrdenPendiente {
   enBlancoYd: number
   lineas: number
   totalPiezas: number
+  totalYardas: number
   /** Lo que se envía al marcarla: sus líneas pendientes EN ESA impresora. */
   idsLineaProduccion: number[]
   /**

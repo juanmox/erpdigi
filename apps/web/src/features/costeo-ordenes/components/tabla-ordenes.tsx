@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils'
 import { costeoOrdenesApi } from '../api'
 import type { EstadoListadoOrdenes, LineaPendienteOrden, OrdenPendiente } from '../types'
+import { cantidadConUnidad, cantidadCorta } from '@/lib/cantidad-orden'
 
 const MODOS: { valor: EstadoListadoOrdenes; etiqueta: string; vacio: string }[] = [
   {
@@ -123,6 +124,7 @@ export function TablaOrdenes({ onAbrirOrden }: { onAbrirOrden: (codigo: string) 
   )
   const tallas = data?.tallas ?? []
   const piezas = ordenes.reduce((acc, o) => acc + o.totalPiezas, 0)
+  const yardas = ordenes.reduce((acc, o) => acc + o.totalYardas, 0)
   const modo = MODOS.find((m) => m.valor === estado)!
   // Solo en el modo mixto hace falta distinguirlas: en los otros dos el estado
   // de cada línea ya lo dice el filtro elegido.
@@ -172,7 +174,7 @@ export function TablaOrdenes({ onAbrirOrden }: { onAbrirOrden: (codigo: string) 
           <p className="text-muted-foreground text-sm">
             {isLoading
               ? 'Cargando…'
-              : `${ordenes.length} orden(es) · ${piezas.toLocaleString('es-GT')} pieza(s)`}
+              : `${ordenes.length} orden(es) · ${cantidadConUnidad(piezas, yardas)}`}
             {data && data.totalOrdenes > data.ordenes.length && !busqueda && (
               <> · se muestran las {data.ordenes.length} más recientes de {data.totalOrdenes}</>
             )}
@@ -404,7 +406,7 @@ function FilasDeOrden({
           </div>
         </TableCell>
         <TableCell className="px-1 text-right text-sm font-semibold tabular-nums">
-          {orden.totalPiezas.toLocaleString('es-GT')}
+          {cantidadCorta(orden.totalPiezas, orden.totalYardas)}
         </TableCell>
       </TableRow>
 
@@ -439,7 +441,7 @@ function FilasDeOrden({
               </TableCell>
             ))}
             <TableCell className="px-1 text-right text-sm font-medium tabular-nums">
-              {l.total}
+              {cantidadCorta(l.total, l.totalYardas)}
             </TableCell>
           </TableRow>
         ))}
@@ -474,7 +476,7 @@ function TarjetaOrden({
         </span>
         <ResumenOrden orden={orden} marcarEstado={marcarEstado} onAbrir={onAbrir} />
         <span className="ml-auto shrink-0 text-sm font-semibold tabular-nums">
-          {orden.totalPiezas.toLocaleString('es-GT')}
+          {cantidadCorta(orden.totalPiezas, orden.totalYardas)}
         </span>
       </div>
 
@@ -492,7 +494,9 @@ function TarjetaOrden({
                     {l.impresa ? 'Impresa' : 'Pendiente'}
                   </Badge>
                 )}
-                <span className="ml-auto text-sm font-semibold tabular-nums">{l.total}</span>
+                <span className="ml-auto text-sm font-semibold tabular-nums">
+                  {cantidadCorta(l.total, l.totalYardas)}
+                </span>
               </div>
               <div className="text-sm font-medium break-words">{l.producto}</div>
               <div className="text-muted-foreground text-xs break-words">
