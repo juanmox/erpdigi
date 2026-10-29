@@ -444,6 +444,9 @@ const GRUPO_TALLAS_EXISTENTES: Record<string, { grupo: string; orden: number; fr
 // `orden` respeta la escala real (XS < S < M < L < XL < 2XL < …) y coloca cada
 // variante "+N" justo después de su talla base.
 const TALLAS_ADICIONALES: { nombre: string; orden: number; grupo: string }[] = [
+  // Servicios de sublimación continua: la cantidad son yardas, no prendas. La crea
+  // también la migración 20261028150000 (el seed no corre solo al desplegar).
+  { nombre: 'YARDAS', orden: 1200, grupo: 'SERVICIO' },
   { nombre: 'YS+2', orden: 106, grupo: 'YOUTH' },
   { nombre: 'YS+4', orden: 107, grupo: 'YOUTH' },
   { nombre: 'YM+2', orden: 110, grupo: 'YOUTH' },

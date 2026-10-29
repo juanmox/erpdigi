@@ -1,3 +1,5 @@
+import { TALLA_YARDAS } from '../../common/enguiamiento';
+
 // Las tallas que lleva la plantilla del import de Órdenes. NO son las 155 del
 // catálogo: una columna por talla haría la plantilla inusable en Excel, así que
 // esta lista se amplía conforme aparecen órdenes que las necesitan (mismo
@@ -40,6 +42,10 @@ export const TALLAS_IMPORT_LINEAS = [
   // Agregada el 2026-10-15: existía en el catálogo (grupo ADULT) pero no en la
   // plantilla, que solo traía `XS` y la combinada `2XS-XS`.
   '2XS',
+  // Agregada el 2026-10-28: servicios de sublimación continua. No hay prendas,
+  // la cantidad son las YARDAS a sublimar (ver common/enguiamiento.ts). Antes
+  // la columna `YARDAS` de esos archivos se rechazaba como "no es una talla".
+  TALLA_YARDAS,
 ] as const;
 
 export interface FilaTallaCantidad {

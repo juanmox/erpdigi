@@ -24,6 +24,7 @@ const ETIQUETA: Record<string, string> = {
   NUMERICA: 'Numérica',
   PANT: 'Pantalón',
   COMBINADA: 'Combinada',
+  SERVICIO: 'Servicio (yardas)',
 }
 
 /** Clave interna del bloque que va primero; no existe como grupo en la base. */

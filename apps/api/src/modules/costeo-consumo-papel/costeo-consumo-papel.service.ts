@@ -18,23 +18,14 @@ import { estilosDeOrden } from '../../common/estilos-orden';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  enguiamientoYd,
+  FACTOR_ENGUIAMIENTO_DEFAULT,
+} from '../../common/enguiamiento';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { ETIQUETA_EN_BLANCO } from '../costeo-reportes/costeo-reportes.service';
 import { CosteoRollosService } from '../costeo-rollos/costeo-rollos.service';
 import { CapturarConsumoDto } from './dto/capturar-consumo.dto';
-
-/**
- * Factor de enguiamiento del legacy (columna K de la hoja "Datos":
- * `cantidad * 0.084375`). Es el DEFAULT: cada línea puede traer el suyo en
- * `factorEnguiamiento`, como pide la corrección #2 de §6.2 — el valor no debe
- * quedar incrustado en el código.
- *
- * Medido contra las 1,128 líneas reales de DataDisev3: el `ENGUIAMIENTO` que
- * Diseño teclea por línea es esta misma fórmula redondeada a un decimal (81.5%
- * techo, 16.5% redondeo, desviación media +0.0209 yd). Por eso se calcula y no
- * se lee: el valor capturado sirve como contraste, no como fuente.
- */
-const FACTOR_ENGUIAMIENTO_DEFAULT = 0.084375;
 
 /**
  * Una fila de la hoja "Datos" del libro ConsumosFinal, que alimenta los
@@ -319,7 +310,7 @@ export class CosteoConsumoPapelService {
           idConsumoEstandar: est?.idConsumoEstandar ?? null,
           yardasEstandar: yardas,
           consumoYd: yardas === null ? null : +(yardas * t.cantidad).toFixed(4),
-          enguiamientoYd: +(t.cantidad * factorEng).toFixed(4),
+          enguiamientoYd: enguiamientoYd(t.talla.nombre, t.cantidad, factorEng),
           yaEnviada: enviadoPor.has(`${l.idLineaProduccion}|${t.idTalla}`),
           idConsumoPapel:
             enviadoPor.get(`${l.idLineaProduccion}|${t.idTalla}`)
@@ -643,7 +634,9 @@ export class CosteoConsumoPapelService {
           lineaBloqueada = true;
           continue;
         }
-        estimadoLinea += yd * t.cantidad + t.cantidad * factorEng;
+        estimadoLinea +=
+          yd * t.cantidad +
+          enguiamientoYd(t.talla.nombre, t.cantidad, factorEng);
       }
       orden.estimadoYd += estimadoLinea;
       orden.lineasDetalle.push({
@@ -1402,7 +1395,11 @@ export class CosteoConsumoPapelService {
             // aplicó, para que el recosteo sea reproducible más adelante.
             idConsumoEstandar: est.idConsumoEstandar,
             consumoYd,
-            enguiamientoYd: +(t.cantidad * factorEng).toFixed(4),
+            enguiamientoYd: enguiamientoYd(
+              t.talla.nombre,
+              t.cantidad,
+              factorEng,
+            ),
             // `enBlancoYd` NO se calcula acá: el papel en blanco es un monto
             // fijo por ORDEN y vive en su propia fila (`origen = EN_BLANCO`).
             // Calcularlo por talla era lo que daba 237 yd donde van 4.
@@ -1430,7 +1427,7 @@ export class CosteoConsumoPapelService {
           tipoPapelNombre, // H - TIPO DE PAPEL
           t.talla.nombre, // I - Talla
           t.cantidad, // J - Cantidad
-          +(t.cantidad * factorEng).toFixed(4), // K - Yardas (enguiamiento)
+          enguiamientoYd(t.talla.nombre, t.cantidad, factorEng), // K - Yardas (enguiamiento)
           // Columna L siempre vacía desde que el papel en blanco es por ORDEN:
           // ya no hay un monto atribuible a esta talla. El legacy también la
           // dejaba vacía (no 0) cuando no aplicaba, así que no se le cambia el
@@ -1588,7 +1585,11 @@ export class CosteoConsumoPapelService {
     const resultado = await this.prisma.$transaction(async (tx) => {
       await tx.consumoPapel.updateMany({
         where: { idConsumoPapel: { in: filas.map((f) => f.idConsumoPapel) } },
-        data: { anuladoEn: ahora, anuladoPor: idUsuarioActor, motivoAnulacion: motivo },
+        data: {
+          anuladoEn: ahora,
+          anuladoPor: idUsuarioActor,
+          motivoAnulacion: motivo,
+        },
       });
 
       let tallasQuitadas = 0;
@@ -1608,7 +1609,10 @@ export class CosteoConsumoPapelService {
           });
           if (quedan > 0) continue;
           const borradas = await tx.lineaProduccionTalla.deleteMany({
-            where: { idLineaProduccion: f.idLineaProduccion, idTalla: f.idTalla },
+            where: {
+              idLineaProduccion: f.idLineaProduccion,
+              idTalla: f.idTalla,
+            },
           });
           tallasQuitadas += borradas.count;
         }

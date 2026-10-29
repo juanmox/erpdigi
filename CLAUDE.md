@@ -812,6 +812,29 @@ calidad pueda cortar por estilo, línea, género, deporte y talla.
   base **local**, porque el `.env` local apunta a los libros reales. Se restauró al terminar; es la misma
   trampa ya documentada con las pruebas de Impresión de OPs.
 
+## Servicios de sublimación por yardas en el import de Órdenes (2026-10-28, SOLO LOCAL)
+El import de Órdenes rechazaba las OP de `SERV SUBLIMADO` ("la columna YARDAS no es una talla que el
+import reconozca"): en un servicio de sublimación continua no hay prendas, la cantidad son **yardas**.
+- **El legacy ya lo hacía así**: `YARDAS` (y `YDS` desde 2025) era una "talla" más de la hoja "Datos".
+  Medido sobre sus **2,490 filas** (julio 2024 a septiembre 2026, 158,797 yd): consumo = yardas 1 a 1.
+- **Talla nueva `YARDAS`** (grupo `SERVICIO`, orden 1200) en `recetas.tallas`: migración
+  `20261028150000_talla_yardas_servicio` (+ rollback) y seed. Entra como columna de la plantilla de Órdenes.
+- **Enguiamiento = 3 % de las yardas hacia arriba, mínimo 1 yd** (`common/enguiamiento.ts`, con spec).
+  Coincide con 2,486 de 2,490 filas del legacy (99.8 %). ⚠️ **No es la fórmula del `Código.gs`**
+  (`cantidad * 0.084375` para toda columna, YARDAS incluida): esos valores no salieron de ahí, y 197 yd
+  habrían cobrado 16.6 yd contra los ~6 reales. Tampoco es un 3.2 % plano: eso es solo la mediana, el
+  redondeo y el mínimo producen la diferencia. Las 4 filas que no calzan son 3 del 12/06/2025 que sí
+  usaron la fórmula genérica y una suelta. El cálculo vive en UN helper usado por la captura, el
+  estimado de la cola y la fila del espejo a Sheets: tienen que dar lo mismo.
+- **Consumo estándar por producto, un dato de negocio**: `SERV SUBLIMADO` y `SERV-SUBLIMADO` × `YARDAS` =
+  36 pulgadas (1 yd por yd), cargados en **local** por SQL. Un producto de servicio nuevo necesita su
+  fila en Consumo Estándar o su línea queda "falta estándar", igual que cualquier prenda.
+- ⚠️ **Pendiente: las yardas cuentan como "piezas"** en `analitica.v_ordenes`/`v_consumo`, en el listado
+  de Órdenes y en el preview. Mezclar 197 yd con prendas distorsiona cualquier gráfico de piezas; no se
+  tocó porque ninguna OP por yardas se ha cargado todavía.
+- Verificado con la plantilla real (YARDAS 197/1000/3/100/2/50): preview sin errores, aplicar creó las 6
+  OP, y el servidor calculó 6/30/1/3/1/2 yd de enguiamiento; el estimado de la cola da 203/1030/4/103/3/52.
+
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
 código en él.** Al empezar cualquier sesión de trabajo aquí:
