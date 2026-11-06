@@ -263,12 +263,16 @@ export function ConsumoPage() {
     mutationFn: ({
       ids,
       idsImpresoraAjenaConfirmadas,
+      tandas,
     }: {
       ids: number[]
       idsImpresoraAjenaConfirmadas?: number[]
+      /** Envío parcial de un servicio por yardas (cuántas yd con este rollo). */
+      tandas?: { idLineaProduccion: number; yardas: number }[]
     }) =>
       costeoConsumoApi.capturar({
         idsLineaProduccion: ids,
+        tandas,
         // datetime-local da "2026-09-02T14:30" sin zona; el servidor guarda
         // timestamptz, así que se manda el instante completo en vez de dejar
         // que cada lado lo interprete a su manera.
@@ -536,7 +540,12 @@ export function ConsumoPage() {
                 codigo={o.codigo}
                 puedeCapturar={puedeCapturar}
                 idsEnviando={capturar.isPending ? (capturar.variables?.ids ?? []) : []}
-                onEnviarLinea={(id) => capturar.mutate({ ids: [id] })}
+                onEnviarLinea={(id, yardas) =>
+                  capturar.mutate({
+                    ids: [id],
+                    tandas: yardas ? [{ idLineaProduccion: id, yardas }] : undefined,
+                  })
+                }
                 seleccionadas={lineasSel}
                 onSeleccionarLinea={alternarLinea}
               />
@@ -814,7 +823,14 @@ export function ConsumoPage() {
                   enviando={
                     capturar.isPending && !!capturar.variables?.ids.includes(l.idLineaProduccion)
                   }
-                  onEnviar={() => capturar.mutate({ ids: [l.idLineaProduccion] })}
+                  onEnviar={(yardas) =>
+                    capturar.mutate({
+                      ids: [l.idLineaProduccion],
+                      tandas: yardas
+                        ? [{ idLineaProduccion: l.idLineaProduccion, yardas }]
+                        : undefined,
+                    })
+                  }
                 />
               ))}
             </div>

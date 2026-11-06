@@ -51,12 +51,15 @@ export function ModalCorregir({
   const lineas = useMemo(
     () =>
       data.lineas
-        .map((l) => ({ ...l, tallas: l.tallas.filter((t) => t.idConsumoPapel != null) }))
+        .map((l) => ({ ...l, tallas: l.tallas.filter((t) => t.registros.length > 0) }))
         .filter((l) => l.tallas.length > 0),
     [data.lineas],
   )
+  // Un registro por consumo vigente: una prenda tiene uno por talla, pero un
+  // servicio por yardas puede tener varios (una tanda por rollo) y se anulan de
+  // a uno.
   const todos = useMemo(
-    () => lineas.flatMap((l) => l.tallas.map((t) => t.idConsumoPapel!)),
+    () => lineas.flatMap((l) => l.tallas.flatMap((t) => t.registros.map((r) => r.idConsumoPapel))),
     [lineas],
   )
 
@@ -71,7 +74,7 @@ export function ModalCorregir({
     let t = 0
     for (const l of lineas)
       for (const x of l.tallas)
-        if (sel.has(x.idConsumoPapel!)) t += x.consumoGuardadoYd ?? 0
+        for (const r of x.registros) if (sel.has(r.idConsumoPapel)) t += r.consumoYd
     return t
   }, [lineas, sel])
 
@@ -107,7 +110,7 @@ export function ModalCorregir({
             </div>
 
             {lineas.map((l) => {
-              const ids = l.tallas.map((t) => t.idConsumoPapel!)
+              const ids = l.tallas.flatMap((t) => t.registros.map((r) => r.idConsumoPapel))
               const todasMarcadas = ids.every((i) => sel.has(i))
               return (
                 <div key={l.idLineaProduccion} className="rounded-md border p-3">
@@ -123,29 +126,42 @@ export function ModalCorregir({
                     </span>
                   </div>
                   <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    {l.tallas.map((t) => (
-                      <label
-                        key={t.idTalla}
-                        className="hover:bg-muted/50 flex items-center gap-2 rounded px-2 py-1 text-sm"
-                      >
-                        <Checkbox
-                          checked={sel.has(t.idConsumoPapel!)}
-                          onCheckedChange={(v) => alternar([t.idConsumoPapel!], v === true)}
-                        />
-                        <span className="w-16 font-medium">{t.talla}</span>
-                        <span className="text-muted-foreground w-14 text-xs">{t.cantidad} pz</span>
-                        <span className="tabular-nums">{yd(t.consumoGuardadoYd ?? 0)} yd</span>
-                        {/* El contraste contra lo calculado: sin estándar es la
-                            señal más fuerte de que la talla no corresponde. */}
-                        {t.consumoYd === null ? (
-                          <span className="text-destructive text-xs">sin estándar</span>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">
-                            calculado {yd(t.consumoYd)}
-                          </span>
-                        )}
-                      </label>
-                    ))}
+                    {l.tallas.flatMap((t) =>
+                      t.registros.map((r) => (
+                        <label
+                          key={r.idConsumoPapel}
+                          className="hover:bg-muted/50 flex items-center gap-2 rounded px-2 py-1 text-sm"
+                        >
+                          <Checkbox
+                            checked={sel.has(r.idConsumoPapel)}
+                            onCheckedChange={(v) => alternar([r.idConsumoPapel], v === true)}
+                          />
+                          <span className="w-16 font-medium">{t.talla}</span>
+                          {t.enviadoYd !== undefined ? (
+                            // Servicio por yardas: cada fila es una tanda de un rollo.
+                            <span className="text-muted-foreground text-xs">
+                              tanda {r.tanda} · {r.cantidad} yd
+                              {r.rollo ? ` · ${r.rollo}` : ''}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground w-14 text-xs">
+                              {r.cantidad ?? t.cantidad} pz
+                            </span>
+                          )}
+                          <span className="tabular-nums">{yd(r.consumoYd)} yd</span>
+                          {/* El contraste contra lo calculado: sin estándar es la
+                              señal más fuerte de que la talla no corresponde. En
+                              una tanda no aplica: lo calculado es lo que FALTA. */}
+                          {t.enviadoYd !== undefined ? null : t.consumoYd === null ? (
+                            <span className="text-destructive text-xs">sin estándar</span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">
+                              calculado {yd(t.consumoYd)}
+                            </span>
+                          )}
+                        </label>
+                      )),
+                    )}
                   </div>
                 </div>
               )

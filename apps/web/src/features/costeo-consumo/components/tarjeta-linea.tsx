@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import type { LineaConsumo } from '../types'
 import { cantidadCorta } from '@/lib/cantidad-orden'
 
@@ -23,13 +25,36 @@ export function TarjetaLinea({
   onSeleccionar,
 }: {
   linea: LineaConsumo
-  onEnviar: () => void
+  /**
+   * `yardas` solo cuando la línea es un servicio por yardas: cuántas se mandan
+   * con el rollo montado ahora (envío parcial).
+   */
+  onEnviar: (yardas?: number) => void
   enviando: boolean
   puedeCapturar: boolean
   seleccionada: boolean
   onSeleccionar: (v: boolean) => void
 }) {
   const bloqueada = linea.sinEstandar.length > 0
+  const servicio = linea.servicio
+  const tandas = linea.tallas.find((t) => t.talla === 'YARDAS')?.registros ?? []
+  // Cuántas yardas se mandan con ESTE rollo. Arranca en lo que cabe en el rollo
+  // montado (lo propone el servidor, enguiamiento incluido) y se puede cambiar.
+  const [yardasTexto, setYardasTexto] = useState(
+    servicio && servicio.sugeridaYd > 0 ? String(servicio.sugeridaYd) : '',
+  )
+  // Tras cada envío el servidor recalcula lo que falta y lo que cabe: se vuelve a
+  // proponer, en vez de dejar la cifra de la tanda anterior.
+  useEffect(() => {
+    if (servicio) setYardasTexto(servicio.sugeridaYd > 0 ? String(servicio.sugeridaYd) : '')
+  }, [servicio?.sugeridaYd, servicio?.pendienteYd]) // eslint-disable-line react-hooks/exhaustive-deps
+  const yardasNum = Number(yardasTexto)
+  const yardasValidas =
+    !servicio ||
+    (Number.isInteger(yardasNum) && yardasNum >= 1 && yardasNum <= servicio.pendienteYd)
+  // Aviso, no bloqueo: pasarse del saldo deja el rollo en negativo y queda registrado.
+  const excedeRollo =
+    !!servicio && servicio.quedanEnRolloYd != null && yardasNum > servicio.quedanEnRolloYd
   // El enguiamiento que tecleó Diseño contra el que sale de la fórmula. Se
   // avisa solo si difieren de forma apreciable: el valor capturado es esa misma
   // fórmula redondeada a un decimal, así que una diferencia chica es normal.
@@ -72,6 +97,8 @@ export function TarjetaLinea({
         <div className="shrink-0">
           {linea.completa ? (
             <Badge variant="secondary">Ya enviada</Badge>
+          ) : servicio && servicio.enviadoYd > 0 ? (
+            <Badge variant="outline">Parcial</Badge>
           ) : bloqueada ? (
             <Badge variant="destructive">Falta estándar</Badge>
           ) : (
@@ -105,13 +132,77 @@ export function TarjetaLinea({
             }
           >
             <div className="text-[11px] font-semibold">{t.talla}</div>
-            <div className="text-base leading-tight font-bold tabular-nums">{t.cantidad}</div>
+            <div className="text-base leading-tight font-bold tabular-nums">
+              {t.enviadoYd ? t.pendienteYd : t.cantidad}
+            </div>
+            {t.enviadoYd ? (
+              <div className="text-muted-foreground text-[10px]">faltan de {t.cantidad}</div>
+            ) : null}
             <div className="text-muted-foreground text-[10px] tabular-nums">
               {t.consumoYd === null ? 'sin est.' : `${t.consumoYd} yd`}
             </div>
           </div>
         ))}
       </div>
+
+      {servicio && (
+        <div className="mt-3 space-y-2 rounded-md border border-dashed p-2 text-xs">
+          <div className="tabular-nums">
+            Pedido <strong>{servicio.pedidoYd} yd</strong> · enviado{' '}
+            <strong>{servicio.enviadoYd}</strong> · faltan <strong>{servicio.pendienteYd}</strong>
+          </div>
+          {tandas.length > 0 && (
+            <ul className="text-muted-foreground space-y-0.5">
+              {tandas.map((r) => (
+                <li key={r.idConsumoPapel} className="tabular-nums">
+                  Tanda {r.tanda}: {r.cantidad} yd (+{r.enguiamientoYd} eng.)
+                  {r.rollo ? ` · rollo ${r.rollo}` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+          {puedeCapturar && !linea.completa && !bloqueada && (
+            <div className="space-y-1">
+              <label className="flex flex-wrap items-center gap-2">
+                <span>Yardas con este rollo</span>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={servicio.pendienteYd}
+                  value={yardasTexto}
+                  onChange={(e) => setYardasTexto(e.target.value)}
+                  className="h-8 w-28"
+                  aria-label={`Yardas a enviar de ${linea.codigoLine} con este rollo`}
+                />
+                {servicio.pendienteYd > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setYardasTexto(String(servicio.pendienteYd))}
+                  >
+                    Todo lo que falta
+                  </Button>
+                )}
+              </label>
+              <p className="text-muted-foreground">
+                {servicio.rolloCodigo
+                  ? servicio.restanteRolloYd == null
+                    ? `Rollo ${servicio.rolloCodigo}: no tiene yardas declaradas, no se sabe cuánto cabe.`
+                    : `Rollo ${servicio.rolloCodigo}: quedan ${servicio.restanteRolloYd} yd; con el enguiamiento caben ${servicio.quedanEnRolloYd}.`
+                  : 'La impresora no tiene rollo montado.'}
+              </p>
+              {excedeRollo && (
+                <p className="text-amber-600 dark:text-amber-400">
+                  Eso no cabe en el rollo montado: quedaría en negativo. Envía lo que cabe y el
+                  resto con el siguiente rollo.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-end justify-between gap-2 border-t pt-2">
         <div className="text-xs">
@@ -129,8 +220,16 @@ export function TarjetaLinea({
           </div>
         </div>
         {puedeCapturar && !linea.completa && (
-          <Button size="sm" disabled={bloqueada || enviando} onClick={onEnviar}>
-            {enviando ? 'Enviando…' : 'Enviar'}
+          <Button
+            size="sm"
+            disabled={bloqueada || enviando || !yardasValidas}
+            onClick={() => onEnviar(servicio ? yardasNum : undefined)}
+          >
+            {enviando
+              ? 'Enviando…'
+              : servicio && yardasValidas
+                ? `Enviar ${yardasNum} yd`
+                : 'Enviar'}
           </Button>
         )}
       </div>

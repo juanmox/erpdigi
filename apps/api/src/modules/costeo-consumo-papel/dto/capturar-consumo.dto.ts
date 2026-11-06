@@ -8,8 +8,22 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
+  Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+
+/** Cuántas yardas de un servicio se envían con ESTE rollo (envío parcial). */
+export class TandaServicioDto {
+  @Type(() => Number)
+  @IsInt()
+  idLineaProduccion!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  yardas!: number;
+}
 
 export class CapturarConsumoDto {
   /**
@@ -49,6 +63,20 @@ export class CapturarConsumoDto {
   @Type(() => Number)
   @IsInt({ each: true })
   idsImpresoraAjenaConfirmadas?: number[];
+
+  /**
+   * Envío PARCIAL de líneas de servicio (talla YARDAS): cuántas yardas se
+   * mandan con el rollo montado ahora. Sin entrada para una línea de servicio
+   * se envía todo lo que falta. Solo aplica a líneas con talla YARDAS; el
+   * servidor rechaza una entrada para una línea de prendas, y rechaza también
+   * pasarse de lo que le falta a la línea.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => TandaServicioDto)
+  tandas?: TandaServicioDto[];
 
   /** Vacío = ahora. Importa porque decide QUÉ rollo estaba montado. */
   @IsOptional()

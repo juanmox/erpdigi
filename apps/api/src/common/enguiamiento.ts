@@ -53,3 +53,21 @@ export function enguiamientoYd(
     );
   return +(cantidad * factor).toFixed(4);
 }
+
+/**
+ * Cuántas yardas de un servicio CABEN en un rollo al que le quedan `restanteYd`,
+ * contando que cada tanda también gasta su enguiamiento (3 % hacia arriba, mínimo
+ * 1 yd): con 1,193 yd no caben 1,193 de trabajo sino 1,158 (1,158 + 35 = 1,193).
+ *
+ * Sirve para proponer cuánto enviar con este rollo cuando el servicio pide más de
+ * lo que queda. Devuelve 0 si ni una yarda cabe.
+ */
+export function yardasQueCaben(restanteYd: number): number {
+  const restante = Math.floor(restanteYd);
+  if (!(restante >= 2)) return 0;
+  const gasto = (x: number) => x + enguiamientoYd(TALLA_YARDAS, x, 0);
+  let x = Math.floor(restante / (1 + PORCENTAJE_ENGUIAMIENTO_YARDAS));
+  while (gasto(x + 1) <= restante) x++;
+  while (x > 0 && gasto(x) > restante) x--;
+  return Math.max(0, x);
+}

@@ -11,6 +11,43 @@ export interface TallaConsumo {
   idConsumoPapel: number | null
   /** Lo REGISTRADO; `consumoYd` es lo que el ERP calcularía hoy. */
   consumoGuardadoYd: number | null
+  /**
+   * Los consumos vigentes de la talla. Una prenda tiene 0 o 1; un servicio por
+   * yardas (talla YARDAS) puede tener varios, uno por rollo.
+   */
+  registros: RegistroEnviado[]
+  /** Solo YARDAS: `cantidad` es lo pedido; acá lo enviado y lo que falta. */
+  enviadoYd?: number
+  pendienteYd?: number
+}
+
+/** Un consumo ya registrado (una tanda, si es un servicio). */
+export interface RegistroEnviado {
+  idConsumoPapel: number
+  tanda: number
+  /** Yardas de la tanda (servicio) o piezas (prendas). */
+  cantidad: number | null
+  consumoYd: number
+  enguiamientoYd: number
+  /** ISO. */
+  fecha: string
+  /** Código del rollo contra el que se descontó. */
+  rollo: string | null
+}
+
+/** Datos de una línea de servicio por yardas, para el envío parcial. */
+export interface ServicioLinea {
+  pedidoYd: number
+  enviadoYd: number
+  /** Lo que falta por enviar. */
+  pendienteYd: number
+  /** Rollo montado ahora en la impresora de la línea. */
+  rolloCodigo: string | null
+  restanteRolloYd: number | null
+  /** Cuánto cabe en ese rollo contando el enguiamiento; null si no se sabe su saldo. */
+  quedanEnRolloYd: number | null
+  /** Lo que se propone enviar con este rollo. */
+  sugeridaYd: number
 }
 
 export interface LineaConsumo {
@@ -28,6 +65,8 @@ export interface LineaConsumo {
   totalYardas: number
   totalConsumoYd: number
   totalEnguiamientoYd: number
+  /** Solo si la línea es un servicio por yardas (talla YARDAS); si no, null. */
+  servicio: ServicioLinea | null
   /** Todas sus tallas ya se enviaron. */
   completa: boolean
   /** Nombres de las tallas sin estándar cargado; si hay alguna, no se envía. */

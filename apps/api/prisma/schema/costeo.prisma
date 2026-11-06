@@ -513,6 +513,11 @@ model ConsumoPapel {
   idTipoPapel         Int       @map("id_tipo_papel")
   cantidad            Int?
   idConsumoEstandar   Int?      @map("id_consumo_estandar")
+  /// Número de envío dentro de la misma línea+talla. Las prendas son SIEMPRE
+  /// tanda 1 (la base les rechaza un segundo envío); solo un servicio por
+  /// yardas (talla YARDAS) se envía en varias, una por rollo.
+  /// + SQL: el índice único parcial es (línea, talla, tanda).
+  tanda               Int       @default(1) @db.SmallInt
   enguiamientoYd      Decimal   @default(0) @map("enguiamiento_yd") @db.Decimal(12, 4)
   enBlancoYd          Decimal   @default(0) @map("en_blanco_yd") @db.Decimal(12, 4)
   consumoYd           Decimal   @map("consumo_yd") @db.Decimal(12, 4)

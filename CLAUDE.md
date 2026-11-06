@@ -853,6 +853,43 @@ import reconozca"): en un servicio de sublimación continua no hay prendas, la c
 - Verificado con la plantilla real (YARDAS 197/1000/3/100/2/50): preview sin errores, aplicar creó las 6
   OP, y el servidor calculó 6/30/1/3/1/2 yd de enguiamiento; el estimado de la cola da 203/1030/4/103/3/52.
 
+- **Envío PARCIAL de un servicio por yardas, una tanda por rollo (2026-11-05, SOLO LOCAL, sin commitear).**
+  Un servicio puede pedir más yardas de las que le quedan al rollo montado (1,500 yd contra un rollo con
+  1,193). Antes la línea se enviaba una sola vez y caía entera en el rollo montado, dejándolo en negativo
+  sin que el siguiente recibiera nada. Ahora una línea con talla **YARDAS** se envía en varias **tandas**,
+  cada una contra el rollo montado en ese momento. Solo aplica a YARDAS: las prendas siguen siendo un solo
+  envío por línea+talla.
+  - Migración `20261105120000_consumo_tandas_servicio` (+ rollback): columna `consumo_papel.tanda` (default 1)
+    y el índice único parcial pasa de (línea, talla) a **(línea, talla, tanda)**. Las prendas son siempre
+    tanda 1, así que la base les sigue rechazando un segundo envío; las YARDAS usan 2, 3… (máx. vigente + 1).
+    Que la suma de tandas no pase de lo pedido lo valida el servidor, **bajo `FOR UPDATE` de la línea**: el
+    índice solo impide repetir el número de tanda, no que la suma exceda.
+  - `CapturarConsumoDto.tandas?: {idLineaProduccion, yardas}[]`: cuántas yardas se mandan con este rollo. Sin
+    entrada para una línea de servicio se envía **todo lo que falta**. Una entrada para una línea sin talla
+    YARDAS es 400; pasarse de lo que falta, también.
+  - **Enguiamiento por tanda**: 3 % de las yardas de ESA tanda, hacia arriba, mínimo 1 (cada rollo que se
+    arranca gasta el suyo). Decisión del usuario. El consumo de cada tanda es estándar × sus yardas.
+  - `yardasQueCaben(restante)` (`common/enguiamiento.ts`): cuántas yardas de trabajo caben en un rollo contando
+    el enguiamiento de la propia tanda (con 1,193 yd caben 1,158: 1,158 + 35 = 1,193). `obtenerOrden` devuelve
+    por línea de servicio `servicio {pedidoYd, enviadoYd, pendienteYd, rolloCodigo, restanteRolloYd,
+    quedanEnRolloYd, sugeridaYd}` y la tarjeta propone esa cantidad. Pasarse del saldo es **aviso, no bloqueo**
+    (igual que el rollo en negativo en la cola).
+  - ⚠️ **"Pendiente" ya no es "no tiene ningún consumo" para estas líneas**: un servicio enviado a medias
+    sigue pendiente. `common/servicio-parcial.ts` (`parcialesDeServicio`) lo resuelve y lo usan la cola de
+    Impresión de OPs (que además estima y cuenta solo lo que falta), el listado y la ficha de Órdenes
+    (`impresa`/`enviada` falsos, más `yardasEnviadas`) y la vista `analitica.v_ordenes` (un servicio a medias
+    no cuenta como ítem impreso; la migración la recrea). Si aparece un cuarto lugar que pregunte "¿qué falta
+    imprimir?", tiene que usar el mismo criterio.
+  - Cada tanda se anula por separado (la pantalla de corrección lista las tandas de una talla YARDAS con su
+    rollo). Al espejo a Sheets llega una fila por tanda, con sus yardas, su enguiamiento y su NRollo.
+  - Fuera de alcance, a propósito: el envío masivo por la casilla manda siempre **todo lo que falta** (el
+    parcial se hace desde la tarjeta del ítem); las líneas migradas del legacy (consumos sin talla) no se tocan.
+  - Verificado en local con un rollo de 300 yd y otro de 300 yd contra un servicio de 500 yd: tanda 1 de 291 yd
+    (+9 eng.) en el rollo 1, tanda 2 de 209 yd (+7 eng.) en el rollo 2, restante del rollo 2 = 84 = 300 − 209 − 7;
+    501 yd rechazado; reenviar una línea completa da `yaEstaban`; anular una tanda vuelve a dejar 291 pendientes;
+    `v_ordenes` pasa PENDIENTE → IMPRESA; la base rechaza una tanda repetida. En navegador a 1500 y 390 px sin
+    desborde ni errores de consola.
+
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
 código en él.** Al empezar cualquier sesión de trabajo aquí:

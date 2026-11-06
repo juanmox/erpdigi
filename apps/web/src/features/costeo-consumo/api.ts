@@ -18,6 +18,11 @@ export const costeoConsumoApi = {
    */
   capturar: (body: {
     idsLineaProduccion: number[]
+    /**
+     * Envío PARCIAL de un servicio por yardas: cuántas yardas se mandan con el
+     * rollo montado ahora. Sin entrada se envía todo lo que falta.
+     */
+    tandas?: { idLineaProduccion: number; yardas: number }[]
     idImpresora?: number
     fecha?: string
     observacion?: string

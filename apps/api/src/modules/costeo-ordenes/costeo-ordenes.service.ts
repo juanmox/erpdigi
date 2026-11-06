@@ -11,6 +11,7 @@ import { parsearCodigoOp } from '../../common/op-codigo';
 import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { separarCantidad } from '../../common/cantidad-linea';
 import { PrismaService } from '../../prisma/prisma.service';
+import { parcialesDeServicio } from '../../common/servicio-parcial';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import {
   FilaPreviewLinea,
@@ -384,6 +385,7 @@ export class CosteoOrdenesService {
           idEmpresaActual: idEmpresa,
         }),
       );
+    const parciales = await parcialesDeServicio(this.prisma, idEmpresa);
     // `enviada` sale del mismo criterio que usa Impresión de OPs; la pantalla
     // la muestra como estado de la línea. Ya NO bloquea nada: el papel en
     // blanco es de la orden y vive en su propia fila de consumo, así que se
@@ -407,10 +409,21 @@ export class CosteoOrdenesService {
       // Decimal de Prisma serializa como string; la pantalla lo quiere número.
       enBlancoYd: Number(orden.enBlancoYd),
       lineasProduccion: orden.lineasProduccion.map(
-        ({ consumosPapel, ...l }) => ({
-          ...l,
-          enviada: consumosPapel.length > 0,
-        }),
+        ({ consumosPapel, ...l }) => {
+          // Un servicio por yardas enviado a medias NO está enviado: le faltan
+          // yardas (misma regla que la cola de Impresión de OPs).
+          const parcial = parciales.get(l.idLineaProduccion);
+          return {
+            ...l,
+            enviada: consumosPapel.length > 0 && !parcial,
+            ...(parcial
+              ? {
+                  yardasEnviadas: parcial.enviado,
+                  yardasPedidas: parcial.pedido,
+                }
+              : {}),
+          };
+        },
       ),
     };
   }
@@ -447,14 +460,20 @@ export class CosteoOrdenesService {
     // fuera y el buscador por código sigue encontrándolas.
     limite = 200,
   ) {
-    const lineaPendiente = {
-      consumosPapel: { none: { origen: 'PRODUCCION', anuladoEn: null } },
+    // Servicios por yardas enviados a medias: siguen pendientes (les faltan
+    // yardas), igual que en la cola de Impresión de OPs.
+    const parciales = await parcialesDeServicio(this.prisma, idEmpresa);
+    const lineaPendiente: Prisma.LineaProduccionWhereInput = {
+      OR: [
+        { consumosPapel: { none: { origen: 'PRODUCCION', anuladoEn: null } } },
+        { idLineaProduccion: { in: [...parciales.keys()] } },
+      ],
       // Mismo criterio que el panel de Impresión de OPs, incluido el "y con al
       // menos una talla": una línea sin tallas no se puede imprimir, así que no
       // es trabajo pendiente. Si los dos criterios divergen, las dos pantallas
       // dan respuestas distintas a la misma pregunta.
       tallas: { some: {} },
-    } as const;
+    };
 
     // `some: {}` en los tres modos: una OP sin ninguna línea no tiene nada que
     // mostrar, y sin esto `impresas` la incluiría (un `every` sobre un conjunto
@@ -553,7 +572,14 @@ export class CosteoOrdenesService {
             impresora: l.impresora?.codigo ?? null,
             fechaCliente: l.fechaCliente,
             fechaEntregar: l.fechaEntregar,
-            impresa: l.consumosPapel.length > 0,
+            impresa:
+              l.consumosPapel.length > 0 && !parciales.has(l.idLineaProduccion),
+            // Solo un servicio enviado a medias: lo que ya salió y lo pedido.
+            ...(parciales.has(l.idLineaProduccion)
+              ? {
+                  yardasEnviadas: parciales.get(l.idLineaProduccion)!.enviado,
+                }
+              : {}),
             cantidades,
             total: totalPiezas,
             totalYardas,

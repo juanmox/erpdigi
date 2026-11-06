@@ -22,7 +22,10 @@ import { separarCantidad } from '../../common/cantidad-linea';
 import {
   enguiamientoYd,
   FACTOR_ENGUIAMIENTO_DEFAULT,
+  TALLA_YARDAS,
+  yardasQueCaben,
 } from '../../common/enguiamiento';
+import { parcialesDeServicio } from '../../common/servicio-parcial';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { ETIQUETA_EN_BLANCO } from '../costeo-reportes/costeo-reportes.service';
 import { CosteoRollosService } from '../costeo-rollos/costeo-rollos.service';
@@ -53,6 +56,28 @@ export interface TallaCalculada {
    * del legacy. La diferencia es lo que delata una captura mala.
    */
   consumoGuardadoYd: number | null;
+  /**
+   * Los consumos vigentes de esta talla. Las prendas tienen 0 o 1; un servicio
+   * por yardas (talla YARDAS) puede tener varios, uno por rollo (envío parcial).
+   * La pantalla de corrección anula de a uno.
+   */
+  registros: RegistroEnviado[];
+  /** Solo YARDAS: lo ya enviado y lo que falta de `cantidad` (lo pedido). */
+  enviadoYd?: number;
+  pendienteYd?: number;
+}
+
+/** Un consumo ya registrado (una tanda, si es un servicio). */
+export interface RegistroEnviado {
+  idConsumoPapel: number;
+  tanda: number;
+  /** Yardas de esa tanda (servicio) o piezas (prendas). */
+  cantidad: number | null;
+  consumoYd: number;
+  enguiamientoYd: number;
+  fecha: Date;
+  /** Código del rollo contra el que se descontó, p. ej. 777-10-3. */
+  rollo: string | null;
 }
 
 /**
@@ -287,19 +312,65 @@ export class CosteoConsumoPapelService {
         idConsumoPapel: true,
         idLineaProduccion: true,
         idTalla: true,
+        tanda: true,
+        cantidad: true,
+        fecha: true,
         // Lo que de verdad quedó registrado. Se muestra al lado de lo que el
         // ERP calcularía, porque la diferencia entre ambos es lo que delata una
         // captura mala: en `26OP028950` el 4XL tenía 2.0000 yd guardadas contra
         // un cálculo imposible (ese producto no tiene esa talla).
         consumoYd: true,
         enguiamientoYd: true,
+        montajeRollo: {
+          select: {
+            rolloPapel: {
+              select: {
+                secuencia: true,
+                facturaPapel: {
+                  select: { numeroFactura: true, totalRollos: true },
+                },
+              },
+            },
+          },
+        },
       },
+      orderBy: { tanda: 'asc' },
     });
-    // Guarda la fila entera y no solo el id: la pantalla de corrección necesita
-    // además lo que quedó registrado, para contrastarlo con lo calculado.
-    const enviadoPor = new Map(
-      yaEnviados.map((c) => [`${c.idLineaProduccion}|${c.idTalla}`, c]),
-    );
+    // Por línea+talla y NO una sola fila: un servicio por yardas puede tener
+    // varios consumos vigentes (uno por rollo). Las prendas siguen teniendo uno.
+    const enviadosPor = new Map<string, RegistroEnviado[]>();
+    for (const c of yaEnviados) {
+      const k = `${c.idLineaProduccion}|${c.idTalla}`;
+      const r = c.montajeRollo?.rolloPapel;
+      const registro: RegistroEnviado = {
+        idConsumoPapel: c.idConsumoPapel,
+        tanda: c.tanda,
+        cantidad: c.cantidad,
+        consumoYd: Number(c.consumoYd),
+        enguiamientoYd: Number(c.enguiamientoYd),
+        fecha: c.fecha,
+        rollo: r
+          ? `${r.facturaPapel.numeroFactura}-${r.facturaPapel.totalRollos}-${r.secuencia}`
+          : null,
+      };
+      const lista = enviadosPor.get(k);
+      if (lista) lista.push(registro);
+      else enviadosPor.set(k, [registro]);
+    }
+
+    // Rollo montado AHORA en las impresoras de las líneas de servicio, para
+    // proponer cuánto cabe en él. Una sola consulta para todas.
+    const idsImpresoraServicio = [
+      ...new Set(
+        lineas
+          .filter((l) => l.tallas.some((t) => t.talla.nombre === TALLA_YARDAS))
+          .map((l) => l.idImpresora)
+          .filter((x): x is number => x != null),
+      ),
+    ];
+    const rolloPorImpresora = idsImpresoraServicio.length
+      ? await this.rollos.estadoDeRollosPorImpresora(idsImpresoraServicio)
+      : new Map<number, RolloDelGrupo>();
 
     const lineasCalculadas = lineas.map((l) => {
       const factorEng =
@@ -307,22 +378,41 @@ export class CosteoConsumoPapelService {
       const tallas: TallaCalculada[] = l.tallas.map((t) => {
         const est = estandarPor.get(`${l.idProducto}|${t.idTalla}`);
         const yardas = est ? Number(est.yardas) : null;
+        const registros =
+          enviadosPor.get(`${l.idLineaProduccion}|${t.idTalla}`) ?? [];
+        const esServicio = t.talla.nombre === TALLA_YARDAS;
+        // En un servicio por yardas lo que se enviaría AHORA es lo que falta,
+        // no lo pedido: el resto ya salió contra otros rollos.
+        const enviadoYd = esServicio
+          ? registros.reduce((a, r) => a + (r.cantidad ?? 0), 0)
+          : 0;
+        const pendienteYd = esServicio
+          ? Math.max(0, t.cantidad - enviadoYd)
+          : 0;
+        const aEnviar = esServicio ? pendienteYd : t.cantidad;
         return {
           idTalla: t.idTalla,
           talla: t.talla.nombre,
           cantidad: t.cantidad,
           idConsumoEstandar: est?.idConsumoEstandar ?? null,
           yardasEstandar: yardas,
-          consumoYd: yardas === null ? null : +(yardas * t.cantidad).toFixed(4),
-          enguiamientoYd: enguiamientoYd(t.talla.nombre, t.cantidad, factorEng),
-          yaEnviada: enviadoPor.has(`${l.idLineaProduccion}|${t.idTalla}`),
+          consumoYd: yardas === null ? null : +(yardas * aEnviar).toFixed(4),
+          enguiamientoYd:
+            aEnviar > 0
+              ? enguiamientoYd(t.talla.nombre, aEnviar, factorEng)
+              : 0,
+          yaEnviada: esServicio
+            ? registros.length > 0 && pendienteYd === 0
+            : registros.length > 0,
+          // Una sola fila (prendas, o servicio enviado de una vez). Con varias
+          // tandas no hay "el" consumo: la pantalla usa `registros`.
           idConsumoPapel:
-            enviadoPor.get(`${l.idLineaProduccion}|${t.idTalla}`)
-              ?.idConsumoPapel ?? null,
-          consumoGuardadoYd: (() => {
-            const g = enviadoPor.get(`${l.idLineaProduccion}|${t.idTalla}`);
-            return g ? Number(g.consumoYd) : null;
-          })(),
+            registros.length === 1 ? registros[0].idConsumoPapel : null,
+          consumoGuardadoYd: registros.length
+            ? registros.reduce((a, r) => a + r.consumoYd, 0)
+            : null,
+          registros,
+          ...(esServicio ? { enviadoYd, pendienteYd } : {}),
         };
       });
 
@@ -347,6 +437,30 @@ export class CosteoConsumoPapelService {
         totalEnguiamientoYd: +tallas
           .reduce((a, t) => a + t.enguiamientoYd, 0)
           .toFixed(4),
+        // Solo líneas con talla YARDAS: el rollo montado ahora y cuánto cabe en
+        // él, para proponer la cantidad del envío parcial.
+        servicio: (() => {
+          const y = tallas.find((t) => t.talla === TALLA_YARDAS);
+          if (!y) return null;
+          const rollo = l.idImpresora
+            ? (rolloPorImpresora.get(l.idImpresora) ?? null)
+            : null;
+          const restante = rollo?.yardasRestantesEstimadas ?? null;
+          const pendiente = y.pendienteYd ?? y.cantidad;
+          // Sin saldo conocido (rollo sin yardas declaradas) no hay límite que
+          // proponer: se sugiere todo lo que falta.
+          const caben = restante == null ? pendiente : yardasQueCaben(restante);
+          return {
+            pedidoYd: y.cantidad,
+            enviadoYd: y.enviadoYd ?? 0,
+            pendienteYd: pendiente,
+            rolloCodigo: rollo?.codigoRollo ?? null,
+            restanteRolloYd: restante,
+            /** Cuánto cabe en el rollo montado, enguiamiento incluido. */
+            quedanEnRolloYd: restante == null ? null : caben,
+            sugeridaYd: Math.min(pendiente, caben),
+          };
+        })(),
         // Estados que la pantalla necesita para decidir qué ofrecer.
         completa: pendientes.length === 0,
         sinEstandar: sinEstandar.map((t) => t.talla),
@@ -512,16 +626,23 @@ export class CosteoConsumoPapelService {
     idImpresora?: number,
     limite = 2500,
   ) {
+    // Servicios por yardas enviados a medias: siguen pendientes aunque ya tengan
+    // algún consumo, porque les faltan yardas por enviar.
+    const parciales = await parcialesDeServicio(this.prisma, idEmpresa);
     const lineas = await this.prisma.lineaProduccion.findMany({
       where: {
         // Sin esto el panel ofrecía trabajo pendiente de la otra empresa.
         idEmpresa,
         ...(idImpresora ? { idImpresora } : {}),
-        // Sin ningún consumo vigente todavía. `procesadaEn` no sirve como
-        // filtro: se marca en el primer envío, aunque queden tallas sueltas.
-        consumosPapel: {
-          none: { origen: 'PRODUCCION', anuladoEn: null },
-        },
+        // Sin ningún consumo vigente todavía, O un servicio enviado a medias.
+        // `procesadaEn` no sirve como filtro: se marca en el primer envío,
+        // aunque queden tallas sueltas.
+        OR: [
+          {
+            consumosPapel: { none: { origen: 'PRODUCCION', anuladoEn: null } },
+          },
+          { idLineaProduccion: { in: [...parciales.keys()] } },
+        ],
         // ⚠️ Y con al menos una talla. Una línea sin tallas no es trabajo: no
         // hay nada que imprimir y `capturarUna()` no podría enviarla nunca, así
         // que se quedaría en la cola para siempre. Pasa cuando una corrección
@@ -619,8 +740,15 @@ export class CosteoConsumoPapelService {
       }
 
       orden.lineas++;
+      // En un servicio enviado a medias cuenta lo que FALTA, no lo pedido: lo
+      // ya enviado salió contra otros rollos y no le va a pedir nada al actual.
+      const yaEnviadoYd = parciales.get(l.idLineaProduccion)?.enviado ?? 0;
+      const aEnviar = (t: { talla: { nombre: string }; cantidad: number }) =>
+        t.talla.nombre === TALLA_YARDAS
+          ? Math.max(0, t.cantidad - yaEnviadoYd)
+          : t.cantidad;
       const cant = separarCantidad(
-        l.tallas.map((t) => ({ talla: t.talla.nombre, cantidad: t.cantidad })),
+        l.tallas.map((t) => ({ talla: t.talla.nombre, cantidad: aEnviar(t) })),
       );
       orden.totalPiezas += cant.piezas;
       orden.totalYardas += cant.yardas;
@@ -644,9 +772,10 @@ export class CosteoConsumoPapelService {
           lineaBloqueada = true;
           continue;
         }
+        const cantidadAEnviar = aEnviar(t);
         estimadoLinea +=
-          yd * t.cantidad +
-          enguiamientoYd(t.talla.nombre, t.cantidad, factorEng);
+          yd * cantidadAEnviar +
+          enguiamientoYd(t.talla.nombre, cantidadAEnviar, factorEng);
       }
       orden.estimadoYd += estimadoLinea;
       orden.lineasDetalle.push({
@@ -1287,6 +1416,19 @@ export class CosteoConsumoPapelService {
     // la base rechaza la fila si llegaran a coincidir.
     const impresoraOcupadaPor = ocupada?.idUsuario ?? null;
 
+    // Envío parcial: solo tiene sentido en una línea de servicio (talla YARDAS).
+    // Se valida acá y no solo en la pantalla: el cuerpo lo arma el cliente.
+    const yardasParcial = dto.tandas?.find(
+      (x) => x.idLineaProduccion === linea.idLineaProduccion,
+    )?.yardas;
+    if (
+      yardasParcial != null &&
+      !linea.tallas.some((t) => t.talla.nombre === TALLA_YARDAS)
+    )
+      throw new BadRequestException(
+        `La línea ${linea.codigoLine} no es un servicio por yardas: el envío parcial solo aplica a la talla YARDAS`,
+      );
+
     const hoy = new Date();
     const estandares = await this.prisma.consumoEstandar.findMany({
       where: {
@@ -1309,6 +1451,14 @@ export class CosteoConsumoPapelService {
       Number(linea.factorEnguiamiento ?? 0) || FACTOR_ENGUIAMIENTO_DEFAULT;
 
     return this.prisma.$transaction(async (tx) => {
+      // Bloquea la línea mientras dura el envío: dos tandas simultáneas de un
+      // mismo servicio leerían el mismo "enviado" y juntas podrían pasarse de lo
+      // pedido. El índice único solo impide repetir el NÚMERO de tanda, no que
+      // la suma exceda; esa regla vive acá y necesita este bloqueo.
+      await tx.$queryRaw`
+        SELECT 1 FROM costeo.linea_produccion
+        WHERE id_linea_produccion = ${linea.idLineaProduccion} FOR UPDATE
+      `;
       const rollo = await tx.$queryRaw<{ id_montaje: number | null }[]>`
         SELECT costeo.fn_rollo_en(${idImpresora}, ${fecha}::timestamptz) AS id_montaje
       `;
@@ -1355,7 +1505,7 @@ export class CosteoConsumoPapelService {
           origen: 'PRODUCCION',
           anuladoEn: null,
         },
-        select: { idTalla: true },
+        select: { idTalla: true, cantidad: true, tanda: true },
       });
       const yaEnviadas = new Set(previos.map((c) => c.idTalla));
 
@@ -1383,12 +1533,32 @@ export class CosteoConsumoPapelService {
       const tipoPapelNombre = montaje.rolloPapel.tipoPapel.nombre;
 
       for (const t of linea.tallas) {
-        if (yaEnviadas.has(t.idTalla)) {
+        // Cantidad y número de tanda de ESTE envío. Una prenda se envía una sola
+        // vez completa (tanda 1). Un servicio por yardas puede enviarse en
+        // varias tandas, una por rollo: lo que se manda es lo que se pidió con
+        // este rollo, o todo lo que falta si no se indicó.
+        let cantidad = t.cantidad;
+        let tanda = 1;
+        if (t.talla.nombre === TALLA_YARDAS) {
+          const previas = previos.filter((c) => c.idTalla === t.idTalla);
+          const enviado = previas.reduce((a, c) => a + (c.cantidad ?? 0), 0);
+          const pendiente = t.cantidad - enviado;
+          if (pendiente <= 0) {
+            yaEstaban.push(t.talla.nombre);
+            continue;
+          }
+          cantidad = yardasParcial ?? pendiente;
+          if (cantidad < 1 || cantidad > pendiente)
+            throw new BadRequestException(
+              `A ${linea.codigoLine} le faltan ${pendiente} yd por enviar y se pidieron ${cantidad}: no se puede enviar más de lo que falta`,
+            );
+          tanda = previas.reduce((m, c) => Math.max(m, c.tanda), 0) + 1;
+        } else if (yaEnviadas.has(t.idTalla)) {
           yaEstaban.push(t.talla.nombre);
           continue;
         }
         const est = estandarPor.get(t.idTalla)!;
-        const consumoYd = +(Number(est.yardas) * t.cantidad).toFixed(4);
+        const consumoYd = +(Number(est.yardas) * cantidad).toFixed(4);
         await tx.consumoPapel.create({
           data: {
             fecha,
@@ -1400,16 +1570,15 @@ export class CosteoConsumoPapelService {
             idImpresora,
             idMontajeRollo,
             idTipoPapel: montaje.rolloPapel.idTipoPapel,
-            cantidad: t.cantidad,
+            cantidad,
+            tanda,
             // Corrección #4 de §6.2: se guarda QUÉ versión del estándar se
             // aplicó, para que el recosteo sea reproducible más adelante.
             idConsumoEstandar: est.idConsumoEstandar,
             consumoYd,
-            enguiamientoYd: enguiamientoYd(
-              t.talla.nombre,
-              t.cantidad,
-              factorEng,
-            ),
+            // Por TANDA: cada rollo que se arranca tiene su propio enguiamiento
+            // (3 % de las yardas de esa tanda, hacia arriba).
+            enguiamientoYd: enguiamientoYd(t.talla.nombre, cantidad, factorEng),
             // `enBlancoYd` NO se calcula acá: el papel en blanco es un monto
             // fijo por ORDEN y vive en su propia fila (`origen = EN_BLANCO`).
             // Calcularlo por talla era lo que daba 237 yd donde van 4.
@@ -1436,8 +1605,8 @@ export class CosteoConsumoPapelService {
           linea.producto.codigo, // G - Item
           tipoPapelNombre, // H - TIPO DE PAPEL
           t.talla.nombre, // I - Talla
-          t.cantidad, // J - Cantidad
-          enguiamientoYd(t.talla.nombre, t.cantidad, factorEng), // K - Yardas (enguiamiento)
+          cantidad, // J - Cantidad (en una tanda de servicio, las yardas de ESA tanda)
+          enguiamientoYd(t.talla.nombre, cantidad, factorEng), // K - Yardas (enguiamiento)
           // Columna L siempre vacía desde que el papel en blanco es por ORDEN:
           // ya no hay un monto atribuible a esta talla. El legacy también la
           // dejaba vacía (no 0) cuando no aplicaba, así que no se le cambia el
@@ -1508,7 +1677,13 @@ export class CosteoConsumoPapelService {
         entidad: 'costeo.consumo_papel',
         idEntidad: String(linea.idLineaProduccion),
         accion: 'CREATE',
-        datosNuevos: { codigoLine: linea.codigoLine, creadas, yaEstaban },
+        datosNuevos: {
+          codigoLine: linea.codigoLine,
+          creadas,
+          yaEstaban,
+          // Solo si fue un envío parcial de servicio: cuántas yardas con este rollo.
+          ...(yardasParcial != null ? { yardasParcial } : {}),
+        },
       });
 
       return { creadas, yaEstaban, codigoLine: linea.codigoLine, filasSheets };

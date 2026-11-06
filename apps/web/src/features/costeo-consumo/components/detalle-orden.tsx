@@ -23,7 +23,8 @@ export function DetalleOrden({
   puedeCapturar: boolean
   /** Las líneas que están viajando ahora mismo, para atenuar su botón. */
   idsEnviando: number[]
-  onEnviarLinea: (idLineaProduccion: number) => void
+  /** `yardas` solo en el envío parcial de un servicio por yardas. */
+  onEnviarLinea: (idLineaProduccion: number, yardas?: number) => void
   /** Ids de línea marcados, compartidos con la tabla de arriba. */
   seleccionadas: Set<number>
   onSeleccionarLinea: (idLineaProduccion: number, marcar: boolean) => void
@@ -55,7 +56,7 @@ export function DetalleOrden({
           // el índice `ux_consumo_papel_produccion_natural` lo prohíbe en la
           // base. La casilla de la fila de la ORDEN sigue siendo el camino
           // para mandar el lote completo.
-          onEnviar={() => onEnviarLinea(l.idLineaProduccion)}
+          onEnviar={(yardas) => onEnviarLinea(l.idLineaProduccion, yardas)}
           enviando={idsEnviando.includes(l.idLineaProduccion)}
           puedeCapturar={puedeCapturar}
           // La casilla de la tarjeta y la de la fila de la orden escriben en

@@ -1,4 +1,4 @@
-import { enguiamientoYd, TALLA_YARDAS } from './enguiamiento';
+import { enguiamientoYd, TALLA_YARDAS, yardasQueCaben } from './enguiamiento';
 
 describe('enguiamientoYd', () => {
   it('en prendas es cantidad × factor de la línea', () => {
@@ -23,5 +23,28 @@ describe('enguiamientoYd', () => {
 
   it('ignora el factor de la línea cuando la talla es YARDAS', () => {
     expect(enguiamientoYd(TALLA_YARDAS, 197, 0.5)).toBe(6);
+  });
+});
+
+describe('yardasQueCaben', () => {
+  it('descuenta el enguiamiento de la tanda del saldo del rollo', () => {
+    // 1,158 + ceil(3 %) = 1,158 + 35 = 1,193; con 1,159 ya serían 1,194.
+    expect(yardasQueCaben(1193)).toBe(1158);
+    expect(yardasQueCaben(1100)).toBe(1067); // 1,067 + 33 = 1,100; con 1,068 ya serían 1,101
+  });
+
+  it('lo que propone siempre cabe y una yarda más ya no', () => {
+    for (const r of [2, 3, 10, 34, 35, 100, 500, 1000, 1193, 1208]) {
+      const x = yardasQueCaben(r);
+      const gasto = (n: number) => n + enguiamientoYd(TALLA_YARDAS, n, 0);
+      if (x > 0) expect(gasto(x)).toBeLessThanOrEqual(r);
+      expect(gasto(x + 1)).toBeGreaterThan(r);
+    }
+  });
+
+  it('un rollo sin saldo no admite nada', () => {
+    expect(yardasQueCaben(0)).toBe(0);
+    expect(yardasQueCaben(-300)).toBe(0);
+    expect(yardasQueCaben(1)).toBe(0);
   });
 });
