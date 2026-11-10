@@ -69,6 +69,12 @@ export interface ResumenOrden {
   fechaOf: string | null;
   numeroFactura: string | null;
   fechaFactura: string | null;
+  /** Ítems vigentes de la explosión de materiales de esta OP. */
+  materialesItems: number;
+  /** De ellos, los que se cargaron sin precio: el costo de abajo NO los incluye. */
+  materialesSinCosto: number;
+  /** Suma del costo congelado. null sin `costeo.dashboard.ver_financiero`. */
+  materialesQ: number | null;
 }
 
 /** Fila agregada de la tabla "Resumen por OF". */
@@ -187,7 +193,11 @@ export class CosteoReportesService {
     };
   }
 
-  async consumoPorOrden(idEmpresa: number, f: FiltrosConsumo) {
+  async consumoPorOrden(
+    idEmpresa: number,
+    f: FiltrosConsumo,
+    verDinero = false,
+  ) {
     // `lt` y no `lte`: el límite superior es el arranque del día siguiente.
     // `undefined` cuando se filtra solo por OF/factura sin rango de fecha de
     // impresión — Prisma OMITE el filtro entero cuando el valor es
@@ -451,6 +461,9 @@ export class CosteoReportesService {
       reposicionYd: 0,
       totalPapelYd: 0,
       telaYd: 0,
+      materialesItems: 0,
+      materialesSinCosto: 0,
+      materialesQ: verDinero ? 0 : null,
     });
 
     for (const c of consumos) {
@@ -524,6 +537,40 @@ export class CosteoReportesService {
         ofPorCodigoOp.set(a.ordenProduccion.codigo, a.ordenFacturacion);
     }
 
+    // ── Materiales (explosión) de las OP del reporte ───────────────────
+    // Solo las OP que ya aparecen por su consumo. Por código y no por id: cubre
+    // también un ítem cargado antes que su OP, que todavía no se ligó.
+    const materiales =
+      porOrden.size > 0
+        ? await this.prisma.materialOp.findMany({
+            where: {
+              idEmpresa,
+              anuladoEn: null,
+              codigoOp: { in: [...porOrden.keys()] },
+            },
+            include: {
+              insumo: {
+                select: {
+                  codigo: true,
+                  descripcion: true,
+                  unidad: { select: { nombre: true } },
+                },
+              },
+            },
+            orderBy: [{ fechaPlanificador: 'asc' }, { idMaterialOp: 'asc' }],
+          })
+        : [];
+    for (const m of materiales) {
+      const r = porOrden.get(m.codigoOp);
+      if (!r) continue;
+      r.materialesItems++;
+      // Sin precio no se suma ni se inventa un cero: se cuenta aparte, para que
+      // el total de dinero no parezca completo cuando no lo es.
+      if (m.costoUnitario == null) r.materialesSinCosto++;
+      else if (verDinero && m.costoTotal != null)
+        r.materialesQ = (r.materialesQ ?? 0) + Number(m.costoTotal);
+    }
+
     const resumen = [...porOrden.values()]
       .map((r) => {
         const of = ofPorCodigoOp.get(r.codigo);
@@ -541,6 +588,7 @@ export class CosteoReportesService {
             r.impresionYd + r.enguiamientoYd + r.enBlancoYd + r.reposicionYd,
           ),
           telaYd: F4(r.telaYd),
+          materialesQ: r.materialesQ == null ? null : F4(r.materialesQ),
         };
       })
       .sort((a, b) => b.codigo.localeCompare(a.codigo));
@@ -593,6 +641,43 @@ export class CosteoReportesService {
       },
     );
 
+    // ── Número de rollo ─────────────────────────────────────────────────
+    // Mismo formato que `costeo.v_rollo_codigo` (factura-total-secuencia), en UNA
+    // consulta para todo el reporte: es el rollo del que salió el papel.
+    const idsMontaje = [
+      ...new Set(
+        [
+          ...consumos.map((c) => c.idMontajeRollo),
+          ...reposiciones.map((r) => r.idMontajeRollo),
+        ].filter((x): x is number => x != null),
+      ),
+    ];
+    const montajes =
+      idsMontaje.length > 0
+        ? await this.prisma.montajeRollo.findMany({
+            where: { idMontajeRollo: { in: idsMontaje } },
+            select: {
+              idMontajeRollo: true,
+              rolloPapel: {
+                select: {
+                  secuencia: true,
+                  facturaPapel: {
+                    select: { numeroFactura: true, totalRollos: true },
+                  },
+                },
+              },
+            },
+          })
+        : [];
+    const rolloPorMontaje = new Map(
+      montajes.map((m) => [
+        m.idMontajeRollo,
+        `${m.rolloPapel.facturaPapel.numeroFactura}-${m.rolloPapel.facturaPapel.totalRollos}-${m.rolloPapel.secuencia}`,
+      ]),
+    );
+    const rolloDe = (idMontaje: number | null) =>
+      idMontaje == null ? null : (rolloPorMontaje.get(idMontaje) ?? null);
+
     // ── Detalle ─────────────────────────────────────────────────────────
     const detalleImpresion = consumos
       .filter((c) => c.origen !== 'REPOSICION')
@@ -613,6 +698,7 @@ export class CosteoReportesService {
         cantidad: c.cantidad,
         impresora: c.impresora.codigo,
         tipoPapel: c.tipoPapel.nombre,
+        rollo: rolloDe(c.idMontajeRollo),
         // El detalle ya NO tiene columna "En blanco": el monto va en Consumo.
         // Sumar los dos campos da lo correcto sin ningún `if`, porque son
         // excluyentes — una fila PRODUCCION trae `enBlancoYd` en 0 y una
@@ -633,6 +719,7 @@ export class CosteoReportesService {
       defecto: rp.defecto.nombre,
       impresora: rp.impresora?.codigo ?? null,
       tipoPapel: rp.tipoPapel?.nombre ?? null,
+      rollo: rolloDe(rp.idMontajeRollo),
       yardasPapel: Number(rp.yardasPapel),
       tela: rp.insumoTela?.descripcion ?? null,
       yardasTela: Number(rp.yardasTela),
@@ -666,6 +753,25 @@ export class CosteoReportesService {
         pieza: p.pieza.nombre,
         cantidad: p.cantidad,
       })),
+    }));
+
+    const detalleMateriales = materiales.map((m) => ({
+      fechaPlanificador: diaISO(m.fechaPlanificador),
+      ordenPlanificacion: m.ordenPlanificacion,
+      orden: m.codigoOp,
+      insumo: m.insumo.codigo,
+      descripcion: m.insumo.descripcion,
+      unidad: m.insumo.unidad.nombre,
+      cantidad: Number(m.cantidad),
+      sinCosto: m.costoUnitario == null,
+      // El dinero solo con `ver_financiero`; "sin costo" sí es público.
+      costoUnitario:
+        verDinero && m.costoUnitario != null ? Number(m.costoUnitario) : null,
+      costoTotal:
+        verDinero && m.costoTotal != null ? Number(m.costoTotal) : null,
+      salidaSac: m.salidaSac,
+      fechaEntrega: m.fechaEntrega ? diaISO(m.fechaEntrega) : null,
+      entregado: m.entregadoEn != null,
     }));
 
     return {
@@ -702,15 +808,29 @@ export class CosteoReportesService {
       ),
       resumen,
       resumenPorOf,
-      totales,
+      totales: {
+        ...totales,
+        materialesItems: materiales.length,
+        materialesSinCosto: materiales.filter((m) => m.costoUnitario == null)
+          .length,
+        // Las cantidades NO se suman (unidades distintas); el dinero sí.
+        materialesQ: verDinero
+          ? F4(resumen.reduce((a, r) => a + (r.materialesQ ?? 0), 0))
+          : null,
+      },
       detalleImpresion,
       detalleReposiciones,
+      detalleMateriales,
     };
   }
 
   /** El mismo consolidado, como .xlsx con tres hojas. */
-  async consumoPorOrdenExcel(idEmpresa: number, f: FiltrosConsumo) {
-    const d = await this.consumoPorOrden(idEmpresa, f);
+  async consumoPorOrdenExcel(
+    idEmpresa: number,
+    f: FiltrosConsumo,
+    verDinero = false,
+  ) {
+    const d = await this.consumoPorOrden(idEmpresa, f, verDinero);
     const wb = new ExcelJS.Workbook();
     const negrita = { font: { bold: true } } as const;
     const fecha = (x: Date) =>
@@ -738,6 +858,10 @@ export class CosteoReportesService {
       'Reposiciones (yd)',
       'Total papel (yd)',
       'Tela (yd)',
+      // Al final, para no correr las columnas de un archivo ya armado.
+      'Materiales (ítems)',
+      'Materiales sin costo',
+      ...(verDinero ? ['Materiales (Q)'] : []),
     ]);
     encR.eachCell((c) => Object.assign(c, negrita));
     for (const r of d.resumen)
@@ -752,6 +876,9 @@ export class CosteoReportesService {
         r.reposicionYd,
         r.totalPapelYd,
         r.telaYd,
+        r.materialesItems,
+        r.materialesSinCosto,
+        ...(verDinero ? [r.materialesQ ?? 0] : []),
       ]);
     const totalRow = resumen.addRow([
       'TOTAL',
@@ -764,6 +891,9 @@ export class CosteoReportesService {
       d.totales.reposicionYd,
       d.totales.totalPapelYd,
       d.totales.telaYd,
+      d.totales.materialesItems,
+      d.totales.materialesSinCosto,
+      ...(verDinero ? [d.totales.materialesQ ?? 0] : []),
     ]);
     totalRow.eachCell((c) => Object.assign(c, negrita));
     resumen.columns.forEach((c, i) => (c.width = i < 2 ? 22 : 16));
@@ -845,6 +975,7 @@ export class CosteoReportesService {
       // plantilla de Órdenes).
       'OF',
       'Factura',
+      'Rollo',
     ]);
     encC.eachCell((c) => Object.assign(c, negrita));
 
@@ -900,6 +1031,7 @@ export class CosteoReportesService {
           '', // Unidad
           ofPorOp.get(x.orden) ?? '',
           facturaPorOp.get(x.orden) ?? '',
+          x.rollo ?? '',
         ],
       });
 
@@ -948,6 +1080,7 @@ export class CosteoReportesService {
               m.unidad,
               ofPorOp.get(x.orden) ?? '',
               facturaPorOp.get(x.orden) ?? '',
+              '', // Rollo: un material requisado no sale del rollo
             ],
           });
         continue;
@@ -970,6 +1103,7 @@ export class CosteoReportesService {
           '',
           ofPorOp.get(x.orden) ?? '',
           facturaPorOp.get(x.orden) ?? '',
+          x.rollo ?? '',
         ],
       });
     }
@@ -1005,6 +1139,7 @@ export class CosteoReportesService {
       'Consumo (yd)',
       'Enguiamiento (yd)',
       'Total (yd)',
+      'Rollo',
     ]);
     encI.eachCell((c) => Object.assign(c, negrita));
     for (const x of d.detalleImpresion)
@@ -1021,6 +1156,7 @@ export class CosteoReportesService {
         x.consumoYd,
         x.enguiamientoYd,
         x.totalYd,
+        x.rollo ?? '',
       ]);
     imp.columns.forEach((c, i) => (c.width = i === 3 ? 20 : 14));
 
@@ -1040,6 +1176,7 @@ export class CosteoReportesService {
       'Materiales',
       // Al final, para no correr ninguna columna de un archivo ya armado.
       'Prendas',
+      'Rollo',
     ]);
     encRep.eachCell((c) => Object.assign(c, negrita));
     for (const x of d.detalleReposiciones)
@@ -1060,6 +1197,7 @@ export class CosteoReportesService {
         // la hoja pensada para agrupar.
         resumirMateriales(x.materiales),
         resumirPrendas(x.prendas),
+        x.rollo ?? '',
       ]);
     rep.columns.forEach(
       (c, i) =>
@@ -1104,6 +1242,49 @@ export class CosteoReportesService {
     pre.columns.forEach(
       (c, i) => (c.width = i === 2 || i === 4 || i === 6 || i === 10 ? 24 : 14),
     );
+
+    // Una fila por ítem de la explosión de materiales de las OP del reporte.
+    // Sin fila TOTAL a propósito (misma razón que "Consolidado"): las cantidades
+    // mezclan unidades y el total en dinero ya está en "Resumen".
+    const mat = wb.addWorksheet('Materiales');
+    const encM = mat.addRow([
+      'OP',
+      'Cliente',
+      'Orden de planificación',
+      'Fecha planificador',
+      'Insumo',
+      'Descripción',
+      'Cantidad',
+      'Unidad',
+      ...(verDinero ? ['Costo unitario (Q)', 'Costo total (Q)'] : []),
+      'Sin costo',
+      'Salida SAC',
+      'Fecha de entrega',
+      'Estado',
+    ]);
+    encM.eachCell((c) => Object.assign(c, negrita));
+    for (const x of d.detalleMateriales)
+      mat.addRow([
+        x.orden,
+        clientePorOp.get(x.orden) ?? '',
+        x.ordenPlanificacion,
+        diaLegible(x.fechaPlanificador),
+        x.insumo,
+        x.descripcion,
+        x.cantidad,
+        x.unidad,
+        ...(verDinero ? [x.costoUnitario ?? '', x.costoTotal ?? ''] : []),
+        x.sinCosto ? 'Sí' : '',
+        x.salidaSac ?? '',
+        x.fechaEntrega ? diaLegible(x.fechaEntrega) : '',
+        x.entregado ? 'Entregado' : 'Pendiente',
+      ]);
+    mat.views = [{ state: 'frozen', ySplit: 1 }];
+    mat.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: 1, column: encM.cellCount },
+    };
+    mat.columns.forEach((c, i) => (c.width = i === 1 || i === 5 ? 28 : 15));
 
     return wb.xlsx.writeBuffer();
   }

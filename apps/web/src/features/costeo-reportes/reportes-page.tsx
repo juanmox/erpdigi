@@ -50,6 +50,10 @@ function ConteoFilas({ total }: { total: number }) {
 const yd = (n: number) =>
   n.toLocaleString('es-GT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
 
+/** Costo en quetzales (los costos son nativos en GTQ). */
+const q = (n: number) =>
+  `Q ${n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
 /** Un instante real (cuándo se imprimió), mostrado en hora de Guatemala. */
 const fecha = (iso: string) =>
   new Date(iso).toLocaleDateString('es-GT', { timeZone: 'America/Guatemala' })
@@ -358,6 +362,8 @@ export function ReportesPage() {
                     <TableHead className="text-right">Total papel</TableHead>
                     {/* Separada del total a propósito: la tela no sale del rollo. */}
                     <TableHead className="text-right">Tela</TableHead>
+                    <TableHead className="text-right">Materiales</TableHead>
+                    {data.totales.materialesQ != null && <TableHead className="text-right">Materiales Q</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -373,6 +379,17 @@ export function ReportesPage() {
                       <TableCell className="text-right tabular-nums">{yd(r.reposicionYd)}</TableCell>
                       <TableCell className="text-right font-semibold tabular-nums">{yd(r.totalPapelYd)}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(r.telaYd)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {r.materialesItems}
+                        {r.materialesSinCosto > 0 && (
+                          <span className="text-muted-foreground block text-[10px]">
+                            {r.materialesSinCosto} sin costo
+                          </span>
+                        )}
+                      </TableCell>
+                      {data.totales.materialesQ != null && (
+                        <TableCell className="text-right tabular-nums">{q(r.materialesQ ?? 0)}</TableCell>
+                      )}
                     </TableRow>
                   ))}
                   <TableRow className="bg-black/[0.04] dark:bg-white/[0.05]">
@@ -383,6 +400,17 @@ export function ReportesPage() {
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.reposicionYd)}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.totalPapelYd)}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.telaYd)}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">
+                      {data.totales.materialesItems}
+                      {data.totales.materialesSinCosto > 0 && (
+                        <span className="text-muted-foreground block text-[10px] font-normal">
+                          {data.totales.materialesSinCosto} sin costo
+                        </span>
+                      )}
+                    </TableCell>
+                    {data.totales.materialesQ != null && (
+                      <TableCell className="text-right font-semibold tabular-nums">{q(data.totales.materialesQ)}</TableCell>
+                    )}
                   </TableRow>
                 </TableBody>
               </Table>
@@ -442,6 +470,7 @@ export function ReportesPage() {
                     <TableHead>Talla</TableHead>
                     <TableHead className="text-right">Cant.</TableHead>
                     <TableHead>Impresora</TableHead>
+                    <TableHead>Rollo</TableHead>
                     <TableHead className="text-right">Consumo</TableHead>
                     <TableHead className="text-right">Enguiam.</TableHead>
                     <TableHead className="text-right">Total</TableHead>
@@ -458,6 +487,7 @@ export function ReportesPage() {
                       <TableCell>{x.talla ?? '—'}</TableCell>
                       <TableCell className="text-right tabular-nums">{x.cantidad ?? '—'}</TableCell>
                       <TableCell>{x.impresora}</TableCell>
+                      <TableCell className="font-mono text-xs">{x.rollo ?? '—'}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(x.consumoYd)}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(x.enguiamientoYd)}</TableCell>
                       <TableCell className="text-right font-medium tabular-nums">{yd(x.totalYd)}</TableCell>
@@ -484,6 +514,7 @@ export function ReportesPage() {
                     <TableHead>Departamento</TableHead>
                     <TableHead>Defecto</TableHead>
                     <TableHead>Impresora</TableHead>
+                    <TableHead>Rollo</TableHead>
                     <TableHead className="text-right">Yd papel</TableHead>
                     <TableHead>Tela</TableHead>
                     <TableHead className="text-right">Yd tela</TableHead>
@@ -503,6 +534,7 @@ export function ReportesPage() {
                       <TableCell className="break-words whitespace-normal">{x.departamento}</TableCell>
                       <TableCell className="break-words whitespace-normal">{x.defecto}</TableCell>
                       <TableCell>{x.impresora ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{x.rollo ?? '—'}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(x.yardasPapel)}</TableCell>
                       <TableCell className="break-words whitespace-normal">{x.tela ?? '—'}</TableCell>
                       <TableCell className="text-right tabular-nums">{yd(x.yardasTela)}</TableCell>
@@ -514,6 +546,70 @@ export function ReportesPage() {
                       </TableCell>
                     </TableRow>
                   ))}
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="text-base font-semibold text-ink">
+              Materiales de las órdenes <ConteoFilas total={data.detalleMateriales.length} />
+            </h2>
+            <p className="text-muted-foreground text-xs">
+              Lo que el planificador pidió a bodega para estas órdenes (explosión de materiales). Las cantidades no se
+              suman entre insumos: cada uno trae su unidad.
+            </p>
+            <div className="overflow-x-auto rounded-md border border-border">
+              <Table className="min-w-[1000px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>OP</TableHead>
+                    <TableHead>Orden plan.</TableHead>
+                    <TableHead>Fecha plan.</TableHead>
+                    <TableHead>Insumo</TableHead>
+                    <TableHead className="text-right">Cantidad</TableHead>
+                    {data.totales.materialesQ != null && <TableHead className="text-right">Costo unit.</TableHead>}
+                    {data.totales.materialesQ != null && <TableHead className="text-right">Costo total</TableHead>}
+                    <TableHead>Salida</TableHead>
+                    <TableHead>Entrega</TableHead>
+                    <TableHead>Estado</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.detalleMateriales.slice(0, TOPE_FILAS).map((x, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-mono text-xs">{x.orden}</TableCell>
+                      <TableCell className="font-mono text-xs">{x.ordenPlanificacion}</TableCell>
+                      <TableCell>{dia(x.fechaPlanificador)}</TableCell>
+                      <TableCell className="break-words whitespace-normal text-xs">
+                        <span className="font-mono">{x.insumo}</span> {x.descripcion}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {x.cantidad.toLocaleString('es-GT', { maximumFractionDigits: 4 })}{' '}
+                        <span className="text-muted-foreground text-xs">{x.unidad}</span>
+                      </TableCell>
+                      {data.totales.materialesQ != null && (
+                        <TableCell className="text-right tabular-nums">
+                          {x.sinCosto ? <span className="text-amber-600">sin costo</span> : q(x.costoUnitario ?? 0)}
+                        </TableCell>
+                      )}
+                      {data.totales.materialesQ != null && (
+                        <TableCell className="text-right tabular-nums">
+                          {x.sinCosto ? '—' : q(x.costoTotal ?? 0)}
+                        </TableCell>
+                      )}
+                      <TableCell className="font-mono text-xs">{x.salidaSac ?? '—'}</TableCell>
+                      <TableCell>{x.fechaEntrega ? dia(x.fechaEntrega) : '—'}</TableCell>
+                      <TableCell>{x.entregado ? 'Entregado' : 'Pendiente'}</TableCell>
+                    </TableRow>
+                  ))}
+                  {data.detalleMateriales.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={10} className="text-muted-foreground text-center text-sm">
+                        Ninguna de estas órdenes tiene materiales cargados.
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>

@@ -82,6 +82,8 @@ export function Sidebar() {
     // candidato, es el del tile "Reportes" del roadmap.
     ...(tienePermiso('costeo.dashboard.ver') ? [{ to: '/costeo/reportes', codigo: 'RS', etiqueta: 'Reportes de Costeo' }] : []),
     ...(tienePermiso('costeo.of.ver') ? [{ to: '/costeo/facturacion', codigo: 'OF', etiqueta: 'Órdenes de Facturación' }] : []),
+    // `EM` no choca con ningún otro código del sidebar (IN RC CR OP RE IO CE RS OF DB).
+    ...(tienePermiso('costeo.material.ver') ? [{ to: '/costeo/materiales', codigo: 'EM', etiqueta: 'Explosión de materiales' }] : []),
     // Solo si el servidor dice que hay al menos un tablero para este usuario en
     // esta empresa (Superset configurado + permiso por tablero): evita ofrecer
     // un menú que lleva a una pantalla vacía. `TB` no choca con ningún otro código.

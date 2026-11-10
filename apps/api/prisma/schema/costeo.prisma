@@ -198,6 +198,7 @@ model OrdenProduccion {
   lineasProduccion LineaProduccion[]
   consumosPapel    ConsumoPapel[]
   reposiciones     Reposicion[]
+  materialesOp     MaterialOp[]
 
   @@unique([idEmpresa, anio, correlativo])
   @@index([idEmpresa])
@@ -775,5 +776,102 @@ model SyncOutbox {
   procesadoEn  DateTime? @map("procesado_en") @db.Timestamptz(3)
 
   @@map("sync_outbox")
+  @@schema("costeo")
+}
+
+/// Una plantilla de explosión de materiales aplicada: trazabilidad de "qué subí y cuándo".
+model CargaMaterial {
+  idCargaMaterial Int      @id @default(autoincrement()) @map("id_carga_material")
+  idEmpresa       Int      @map("id_empresa")
+  nombreArchivo   String?  @map("nombre_archivo") @db.VarChar(200)
+  filas           Int
+  creadoEn        DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor       Int      @map("creado_por")
+
+  materiales MaterialOp[]
+
+  @@index([idEmpresa, creadoEn(sort: Desc)])
+  @@map("carga_material")
+  @@schema("costeo")
+}
+
+/// Un insumo que el planificador pide a bodega para una OP (explosión de materiales).
+///
+/// Tres fechas: `fechaPlanificador` (viene del SAC), `creadoEn` (la carga) y
+/// `fechaEntrega` (vacía mientras esté pendiente; bodega la llena al registrar la
+/// salida). "La salida es la entrega": con `salidaSac` el ítem está ENTREGADO.
+///
+/// Hoy llega por plantilla (`origen = PLANTILLA`); el módulo de Inventario la
+/// escribirá con `origen = INVENTARIO` y esta tabla seguirá siendo la fuente que
+/// leen la página y el reporte de costeo.
+///
+/// + SQL: CHECKs (cantidad > 0, entrega todo-o-nada, anulación), FKs de
+/// auditoría hacia core.usuarios, FK compuesta (OP, empresa) y la columna
+/// generada `costo_total`.
+model MaterialOp {
+  idMaterialOp       Int       @id @default(autoincrement()) @map("id_material_op")
+  idEmpresa          Int       @map("id_empresa")
+  origen             String    @default("PLANTILLA") @db.VarChar(20)
+  idCargaMaterial    Int?      @map("id_carga_material")
+  ordenPlanificacion String    @map("orden_planificacion") @db.VarChar(30)
+  fechaPlanificador  DateTime  @map("fecha_planificador") @db.Date
+  codigoOp           String    @map("codigo_op") @db.VarChar(20)
+  /// NULL mientras la OP no exista en el ERP; se liga al importarla.
+  idOrdenProduccion  Int?      @map("id_orden_produccion")
+  idInsumo           Int       @map("id_insumo")
+  cantidad           Decimal   @db.Decimal(14, 4)
+  /// Foto del costo_promedio del insumo al cargar. NULL = sin costo (el insumo
+  /// estaba en 0): se valoriza después, nunca se inventa un cero.
+  costoUnitario      Decimal?  @map("costo_unitario") @db.Decimal(14, 6)
+  // GENERATED ALWAYS AS (cantidad * costo_unitario) STORED — jamás en `data:`.
+  costoTotal         Decimal?  @default(dbgenerated()) @map("costo_total") @db.Decimal(16, 4)
+  salidaSac          String?   @map("salida_sac") @db.VarChar(30)
+  fechaEntrega       DateTime? @map("fecha_entrega") @db.Date
+  entregadoEn        DateTime? @map("entregado_en") @db.Timestamptz(3)
+  entregadoPor       Int?      @map("entregado_por")
+  comentario         String?
+  creadoEn           DateTime  @default(now()) @map("creado_en") @db.Timestamptz(3)
+  creadoPor          Int       @map("creado_por")
+  modificadoEn       DateTime? @map("modificado_en") @db.Timestamptz(3)
+  modificadoPor      Int?      @map("modificado_por")
+  anuladoEn          DateTime? @map("anulado_en") @db.Timestamptz(3)
+  anuladoPor         Int?      @map("anulado_por")
+  motivoAnulacion    String?   @map("motivo_anulacion")
+
+  carga           CargaMaterial?   @relation(fields: [idCargaMaterial], references: [idCargaMaterial], onDelete: Restrict, onUpdate: Cascade)
+  ordenProduccion OrdenProduccion? @relation(fields: [idOrdenProduccion], references: [idOrdenProduccion], onDelete: Restrict, onUpdate: Cascade)
+  insumo          Insumo           @relation(fields: [idInsumo], references: [idInsumo], onDelete: Restrict, onUpdate: Cascade)
+  historial       MaterialOpHistorial[]
+
+  @@index([idEmpresa, ordenPlanificacion])
+  @@index([idOrdenProduccion])
+  @@index([idEmpresa, codigoOp])
+  @@index([idInsumo])
+  @@map("material_op")
+  @@schema("costeo")
+}
+
+/// Una fila por ítem y por acto (editar, anular, entregar, corregir fecha,
+/// revertir, congelar costo, ligar OP). Se escribe en la misma transacción que
+/// el cambio. `usuarioNombre` es texto a propósito: sobrevive al borrado del
+/// usuario (la FK es SET NULL). `idUsuario` no lleva @relation, igual que el
+/// resto de columnas de autoría de costeo.
+model MaterialOpHistorial {
+  idHistorial   Int      @id @default(autoincrement()) @map("id_historial")
+  idEmpresa     Int      @map("id_empresa")
+  idMaterialOp  Int      @map("id_material_op")
+  accion        String   @db.VarChar(30)
+  /// [{ campo, antes, despues }] con los valores ya como texto.
+  cambios       Json     @default("[]")
+  motivo        String?
+  idUsuario     Int?     @map("id_usuario")
+  usuarioNombre String   @map("usuario_nombre") @db.VarChar(80)
+  creadoEn      DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+
+  materialOp MaterialOp @relation(fields: [idMaterialOp], references: [idMaterialOp], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idMaterialOp, creadoEn])
+  @@index([idEmpresa, creadoEn(sort: Desc)])
+  @@map("material_op_historial")
   @@schema("costeo")
 }

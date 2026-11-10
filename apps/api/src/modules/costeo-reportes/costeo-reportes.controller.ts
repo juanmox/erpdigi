@@ -8,7 +8,9 @@ import {
 import type { Response } from 'express';
 import { inicioDelDiaGT } from '../../common/dia-guatemala';
 import { EmpresaActual } from '../auth/decorators/empresa-actual.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import {
   CosteoReportesService,
   type FiltrosConsumo,
@@ -129,6 +131,15 @@ function filtros(q: Record<string, string | undefined>): FiltrosConsumo {
   };
 }
 
+/**
+ * El dinero de los materiales solo con `costeo.dashboard.ver_financiero`, un
+ * permiso OPCIONAL: se resuelve acá y se pasa como booleano porque
+ * `@RequirePermissions` exige TODOS los que lista. Sin él, las cantidades se ven
+ * y el costo viaja en `null`.
+ */
+const verDinero = (u: JwtPayload) =>
+  u.permisos.includes('costeo.dashboard.ver_financiero');
+
 @Controller('costeo/reportes')
 export class CosteoReportesController {
   constructor(private readonly service: CosteoReportesService) {}
@@ -140,20 +151,30 @@ export class CosteoReportesController {
   @Get('consumo')
   consumo(
     @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
     @Query() q: Record<string, string | undefined>,
   ) {
-    return this.service.consumoPorOrden(idEmpresa, filtros(q));
+    return this.service.consumoPorOrden(
+      idEmpresa,
+      filtros(q),
+      verDinero(usuario),
+    );
   }
 
   @RequirePermissions('costeo.dashboard.ver')
   @Get('consumo/excel')
   async consumoExcel(
     @EmpresaActual() idEmpresa: number,
+    @CurrentUser() usuario: JwtPayload,
     @Query() q: Record<string, string | undefined>,
     @Res() res: Response,
   ) {
     const f = filtros(q);
-    const buffer = await this.service.consumoPorOrdenExcel(idEmpresa, f);
+    const buffer = await this.service.consumoPorOrdenExcel(
+      idEmpresa,
+      f,
+      verDinero(usuario),
+    );
     // Los días pedidos, no los instantes: `hastaExclusivo` es el día siguiente
     // y pondría una fecha que el usuario nunca eligió en el nombre del archivo.
     // Sin rango de fecha (filtrando solo por OF) no hay "desde"/"hasta" que

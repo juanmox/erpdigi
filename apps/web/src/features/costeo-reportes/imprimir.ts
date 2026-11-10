@@ -7,6 +7,9 @@ import type { ReporteConsumo } from './types'
 const yd = (n: number) =>
   n.toLocaleString('es-GT', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
 
+const q = (n: number) =>
+  `Q ${n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
 /** Un instante real (cuándo se imprimió), mostrado en hora de Guatemala. */
 const fecha = (iso: string) =>
   new Date(iso).toLocaleDateString('es-GT', { timeZone: 'America/Guatemala' })
@@ -45,6 +48,13 @@ const avisoTope = (total: number, cols: number) =>
  * vertical el detalle no entra sin achicar la letra hasta volverla ilegible.
  */
 export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
+  // El dinero solo viaja con el permiso financiero: sin él `materialesQ` es null
+  // y las columnas de costo ni se dibujan.
+  const conDinero = d.totales.materialesQ != null
+  const celdaMateriales = (items: number, sinCosto: number) =>
+    `${items}${sinCosto > 0 ? ` <span style="color:#777">(${sinCosto} sin costo)</span>` : ''}`
+  const columnasResumen = 11 + (conDinero ? 1 : 0)
+
   const filasResumen = d.resumen
     .slice(0, TOPE_FILAS)
     .map(
@@ -59,9 +69,29 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <td class="n">${yd(r.reposicionYd)}</td>
       <td class="n b">${yd(r.totalPapelYd)}</td>
       <td class="n">${yd(r.telaYd)}</td>
+      <td class="n">${celdaMateriales(r.materialesItems, r.materialesSinCosto)}</td>
+      ${conDinero ? `<td class="n">${q(r.materialesQ ?? 0)}</td>` : ''}
     </tr>`,
     )
     .join('')
+
+  const filasMateriales = d.detalleMateriales
+    .slice(0, TOPE_FILAS)
+    .map(
+      (x) => `<tr>
+      <td class="mono">${esc(x.orden)}</td>
+      <td class="mono">${esc(x.ordenPlanificacion)}</td>
+      <td>${dia(x.fechaPlanificador)}</td>
+      <td><span class="mono">${esc(x.insumo)}</span> ${esc(x.descripcion)}</td>
+      <td class="n">${x.cantidad.toLocaleString('es-GT', { maximumFractionDigits: 4 })} ${esc(x.unidad)}</td>
+      ${conDinero ? `<td class="n">${x.sinCosto ? 'sin costo' : q(x.costoUnitario ?? 0)}</td><td class="n">${x.sinCosto ? '—' : q(x.costoTotal ?? 0)}</td>` : ''}
+      <td class="mono">${esc(x.salidaSac)}</td>
+      <td>${x.fechaEntrega ? dia(x.fechaEntrega) : ''}</td>
+      <td>${x.entregado ? 'Entregado' : 'Pendiente'}</td>
+    </tr>`,
+    )
+    .join('')
+  const columnasMateriales = 8 + (conDinero ? 2 : 0)
 
   const filasPorOf = d.resumenPorOf
     .map(
@@ -90,6 +120,7 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <td>${esc(x.talla)}</td>
       <td class="n">${x.cantidad ?? ''}</td>
       <td>${esc(x.impresora)}</td>
+      <td class="mono">${esc(x.rollo)}</td>
       <td class="n">${yd(x.consumoYd)}</td>
       <td class="n">${yd(x.enguiamientoYd)}</td>
       <td class="n b">${yd(x.totalYd)}</td>
@@ -108,6 +139,7 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <td>${esc(x.departamento)}</td>
       <td>${esc(x.defecto)}</td>
       <td>${esc(x.impresora)}</td>
+      <td class="mono">${esc(x.rollo)}</td>
       <td class="n">${yd(x.yardasPapel)}</td>
       <td>${esc(x.tela)}</td>
       <td class="n">${yd(x.yardasTela)}</td>
@@ -149,8 +181,9 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
     <thead><tr>
       <th>OP</th><th>Cliente</th><th>OF</th><th>Factura</th><th class="n">Impresión</th><th class="n">Enguiamiento</th>
       <th class="n">En blanco</th><th class="n">Reposiciones</th><th class="n">Total papel</th><th class="n">Tela</th>
+      <th class="n">Materiales</th>${conDinero ? '<th class="n">Materiales Q</th>' : ''}
     </tr></thead>
-    <tbody>${filasResumen || '<tr><td colspan="10">Sin consumo en el rango.</td></tr>'}${avisoTope(d.resumen.length, 10)}</tbody>
+    <tbody>${filasResumen || `<tr><td colspan="${columnasResumen}">Sin consumo en el rango.</td></tr>`}${avisoTope(d.resumen.length, columnasResumen)}</tbody>
     <tfoot><tr>
       <td colspan="4">TOTAL</td>
       <td class="n">${yd(d.totales.impresionYd)}</td>
@@ -159,6 +192,8 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
       <td class="n">${yd(d.totales.reposicionYd)}</td>
       <td class="n">${yd(d.totales.totalPapelYd)}</td>
       <td class="n">${yd(d.totales.telaYd)}</td>
+      <td class="n">${celdaMateriales(d.totales.materialesItems, d.totales.materialesSinCosto)}</td>
+      ${conDinero ? `<td class="n">${q(d.totales.materialesQ ?? 0)}</td>` : ''}
     </tr></tfoot>
   </table>
 
@@ -175,18 +210,28 @@ export function imprimirReporteConsumo(d: ReporteConsumo, marca: MarcaEmpresa) {
   <table>
     <thead><tr>
       <th>Fecha</th><th>OP</th><th>Item</th><th>Producto</th><th>Subcliente</th><th>Talla</th><th class="n">Cant.</th>
-      <th>Impresora</th><th class="n">Consumo</th><th class="n">Enguiam.</th><th class="n">Total</th>
+      <th>Impresora</th><th>Rollo</th><th class="n">Consumo</th><th class="n">Enguiam.</th><th class="n">Total</th>
     </tr></thead>
-    <tbody>${filasImpresion || '<tr><td colspan="11">Sin impresiones en el rango.</td></tr>'}${avisoTope(d.detalleImpresion.length, 11)}</tbody>
+    <tbody>${filasImpresion || '<tr><td colspan="12">Sin impresiones en el rango.</td></tr>'}${avisoTope(d.detalleImpresion.length, 12)}</tbody>
   </table>
 
   <h2>Detalle de reposiciones</h2>
   <table>
     <thead><tr>
       <th>Fecha</th><th>OP</th><th>No. repo</th><th>Tipo</th><th>Departamento</th><th>Defecto</th>
-      <th>Impresora</th><th class="n">Yd papel</th><th>Tela</th><th class="n">Yd tela</th><th>Materiales</th><th>Prendas</th>
+      <th>Impresora</th><th>Rollo</th><th class="n">Yd papel</th><th>Tela</th><th class="n">Yd tela</th><th>Materiales</th><th>Prendas</th>
     </tr></thead>
-    <tbody>${filasRepo || '<tr><td colspan="12">Sin reposiciones en el rango.</td></tr>'}${avisoTope(d.detalleReposiciones.length, 12)}</tbody>
+    <tbody>${filasRepo || '<tr><td colspan="13">Sin reposiciones en el rango.</td></tr>'}${avisoTope(d.detalleReposiciones.length, 13)}</tbody>
+  </table>
+
+  <h2>Materiales de las órdenes</h2>
+  <table>
+    <thead><tr>
+      <th>OP</th><th>Orden plan.</th><th>Fecha plan.</th><th>Insumo</th><th class="n">Cantidad</th>
+      ${conDinero ? '<th class="n">Costo unit.</th><th class="n">Costo total</th>' : ''}
+      <th>Salida</th><th>Entrega</th><th>Estado</th>
+    </tr></thead>
+    <tbody>${filasMateriales || `<tr><td colspan="${columnasMateriales + 1}">Ninguna de estas órdenes tiene materiales cargados.</td></tr>`}${avisoTope(d.detalleMateriales.length, columnasMateriales + 1)}</tbody>
   </table>
 </body></html>`)
 }

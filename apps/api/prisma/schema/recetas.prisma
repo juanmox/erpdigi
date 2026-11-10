@@ -226,6 +226,7 @@ model Insumo {
   reposicionInsumosCosteo       ReposicionInsumo[]
   costosCosteo                  InsumoCosto[]
   ofInsumoCosteo                OfInsumo[]
+  materialesOpCosteo            MaterialOp[]
   plantillaInsumoDetalleCosteo  PlantillaInsumoDetalle[]
 
   desarrolloInsumos DesarrolloInsumo[]

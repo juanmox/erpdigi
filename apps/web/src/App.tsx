@@ -13,6 +13,7 @@ import { RollosPage } from '@/features/costeo-rollos/rollos-page'
 import { InicioPage } from '@/features/inicio/inicio-page'
 import { CotizacionPage } from '@/features/recetas/cotizacion-page'
 import { OrdenesFacturacionPage } from '@/features/costeo-facturacion/ordenes-facturacion-page'
+import { MaterialesPage } from '@/features/costeo-materiales/materiales-page'
 import { ReportesPage } from '@/features/costeo-reportes/reportes-page'
 import { TablerosPage } from '@/features/bi/tableros-page'
 import { BitacoraPage } from '@/features/auditoria/bitacora-page'
@@ -159,6 +160,14 @@ function App() {
               element={
                 <RutaConPermiso permisos={['costeo.of.ver']}>
                   <OrdenesFacturacionPage />
+                </RutaConPermiso>
+              }
+            />
+            <Route
+              path="costeo/materiales"
+              element={
+                <RutaConPermiso permisos={['costeo.material.ver']}>
+                  <MaterialesPage />
                 </RutaConPermiso>
               }
             />

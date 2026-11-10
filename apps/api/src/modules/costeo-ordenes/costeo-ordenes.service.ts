@@ -12,6 +12,7 @@ import { mensajeOpNoEncontrada } from '../../common/op-otra-empresa';
 import { separarCantidad } from '../../common/cantidad-linea';
 import { PrismaService } from '../../prisma/prisma.service';
 import { parcialesDeServicio } from '../../common/servicio-parcial';
+import { ligarMaterialesPendientes } from '../costeo-materiales/costeo-materiales.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import {
   FilaPreviewLinea,
@@ -1173,6 +1174,12 @@ export class CosteoOrdenesService {
           });
         }
       }
+
+      // Los materiales (explosión) que se cargaron ANTES que su OP quedaron
+      // sueltos, con el código como texto. Ahora que la OP existe se ligan, en
+      // la misma transacción: así el reporte de costeo los ve sin esperar nada.
+      if (ordenesCreadas > 0)
+        await ligarMaterialesPendientes(tx, idEmpresa, idUsuarioActor);
 
       return { ordenesCreadas, lineasCreadas };
     });

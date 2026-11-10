@@ -126,6 +126,21 @@ const PERMISOS_COSTEO = [
   // Lo sensible (costos) se exporta solo por reportes del ERP. Al vivir en
   // PERMISOS_COSTEO lo reciben ADMIN y ADMIN_IT_COSTEO; asignable desde /roles.
   'costeo.dashboard.exportar',
+  // Explosión de materiales por OP: lo que el planificador pide a bodega. `ver` abre
+  // la página; `importar` carga por plantilla y modifica o anula lo PROPIO mientras
+  // esté pendiente; `entregar` registra la salida y ajusta la fecha de entrega
+  // (bodega); `editar_ajenos` toca lo de otros y lo ya entregado; `valorizar`
+  // congela el costo de lo que se cargó sin precio. Los dos últimos viven solo acá,
+  // así que los reciben ADMIN y ADMIN_IT_COSTEO — asignables desde /roles.
+  // ⚠️ NO hay un rol "Planificador" sembrado a propósito: ese rol ya lo creó el
+  // usuario desde /roles (personalizado, con sus usuarios y sus permisos de OP y
+  // rollos), y sembrar otro con el mismo código lo habría pisado o duplicado.
+  // `ver` + `importar` se le asignan a ese rol desde la pantalla de Roles.
+  'costeo.material.ver',
+  'costeo.material.importar',
+  'costeo.material.entregar',
+  'costeo.material.editar_ajenos',
+  'costeo.material.valorizar',
 ]
 
 // Los roles granulares que sugiere PROMPT_CLAUDE_CODE.md §7, ajustados tras
@@ -186,8 +201,15 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
   [
     'BODEGUERO',
     'Bodeguero',
-    ['costeo.rollo.ver', 'costeo.rollo.ingresar'],
+    [
+      'costeo.rollo.ver',
+      'costeo.rollo.ingresar',
+      // Ve la explosión de materiales y registra las salidas (la entrega).
+      'costeo.material.ver',
+      'costeo.material.entregar',
+    ],
   ],
+
   [
     'DISENO',
     'Diseño',
@@ -240,6 +262,9 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.reposicion.ver',
       'costeo.dashboard.ver',
       'costeo.dashboard.ver_financiero',
+      'costeo.material.ver',
+      'costeo.material.importar',
+      'costeo.material.valorizar',
     ],
   ],
   [
@@ -264,6 +289,8 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.of.editar',
       'costeo.estandar.ver',
       'costeo.dashboard.ver',
+      'costeo.material.ver',
+      'costeo.material.entregar',
     ],
   ],
   [
@@ -287,6 +314,7 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'recetas.catalogo.ver',
       'costeo.dashboard.ver',
       'costeo.dashboard.ver_financiero',
+      'costeo.material.ver',
     ],
   ],
   ['ADMIN_IT_COSTEO', 'Administrador IT — Costeo', [...PERMISOS_COSTEO]],
@@ -680,6 +708,17 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
   'costeo.dashboard.ver_financiero': 'Ver las cifras financieras de los dashboards',
   'costeo.dashboard.exportar':
     'Mostrar el menú de descarga (Excel, CSV, imagen) en los gráficos de los dashboards',
+
+  // ── Costeo: explosión de materiales ──
+  'costeo.material.ver': 'Ver la explosión de materiales por OP (lo que se pide a bodega)',
+  'costeo.material.importar':
+    'Cargar la explosión de materiales por plantilla, y modificar o anular lo que uno mismo cargó mientras esté pendiente de entrega',
+  'costeo.material.entregar':
+    'Registrar la entrega de materiales (salida SAC), corregir la fecha de entrega y revertir una entrega',
+  'costeo.material.editar_ajenos':
+    'EXCEPCIÓN: modificar o anular materiales cargados por otra persona, y los que ya fueron entregados',
+  'costeo.material.valorizar':
+    'Congelar el costo de los materiales que se cargaron sin precio, cuando el insumo ya lo tiene',
 }
 
 async function upsertPermiso(codigo: string) {

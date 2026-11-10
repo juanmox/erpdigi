@@ -11,6 +11,7 @@ import { PermissionsGuard } from './modules/auth/guards/permissions.guard';
 import { CosteoConsumoPapelModule } from './modules/costeo-consumo-papel/costeo-consumo-papel.module';
 import { CosteoEstandarModule } from './modules/costeo-estandar/costeo-estandar.module';
 import { CosteoFacturacionModule } from './modules/costeo-facturacion/costeo-facturacion.module';
+import { CosteoMaterialesModule } from './modules/costeo-materiales/costeo-materiales.module';
 import { CosteoOrdenesModule } from './modules/costeo-ordenes/costeo-ordenes.module';
 import { CosteoReposicionesModule } from './modules/costeo-reposiciones/costeo-reposiciones.module';
 import { BiModule } from './modules/bi/bi.module';
@@ -57,6 +58,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CosteoConsumoPapelModule,
     CosteoEstandarModule,
     CosteoFacturacionModule,
+    CosteoMaterialesModule,
     BiModule,
   ],
   controllers: [AppController],

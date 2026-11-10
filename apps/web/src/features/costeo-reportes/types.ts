@@ -13,6 +13,12 @@ export interface ResumenOrdenConsumo {
   fechaOf: string | null
   numeroFactura: string | null
   fechaFactura: string | null
+  /** Ítems vigentes de la explosión de materiales de esta OP. */
+  materialesItems: number
+  /** Cuántos de esos ítems no tienen costo congelado (el insumo estaba sin precio). */
+  materialesSinCosto: number
+  /** Costo congelado de los materiales. null sin el permiso financiero. */
+  materialesQ: number | null
 }
 
 export interface ResumenPorOf {
@@ -33,6 +39,9 @@ export interface TotalesConsumo {
   reposicionYd: number
   totalPapelYd: number
   telaYd: number
+  materialesItems: number
+  materialesSinCosto: number
+  materialesQ: number | null
 }
 
 export interface DetalleImpresion {
@@ -46,6 +55,8 @@ export interface DetalleImpresion {
   cantidad: number | null
   impresora: string
   tipoPapel: string
+  /** Rollo del que salió el papel (factura-total-secuencia). */
+  rollo: string | null
   /** Incluye el papel en blanco: el detalle ya no tiene columna propia. */
   consumoYd: number
   enguiamientoYd: number
@@ -68,6 +79,7 @@ export interface DetalleReposicion {
   defecto: string
   impresora: string | null
   tipoPapel: string | null
+  rollo: string | null
   yardasPapel: number
   tela: string | null
   yardasTela: number
@@ -80,6 +92,22 @@ export interface DetalleReposicion {
   materiales: MaterialRequisado[]
   /** Prendas que cubre (producto + talla + pieza + cantidad). Vacío en las migradas del legacy. */
   prendas: { producto: string; estilo: string | null; talla: string; pieza: string; cantidad: number }[]
+}
+
+export interface DetalleMaterial {
+  fechaPlanificador: string
+  ordenPlanificacion: string
+  orden: string
+  insumo: string
+  descripcion: string
+  unidad: string
+  cantidad: number
+  sinCosto: boolean
+  costoUnitario: number | null
+  costoTotal: number | null
+  salidaSac: string | null
+  fechaEntrega: string | null
+  entregado: boolean
 }
 
 export interface ReporteConsumo {
@@ -114,6 +142,7 @@ export interface ReporteConsumo {
   totales: TotalesConsumo
   detalleImpresion: DetalleImpresion[]
   detalleReposiciones: DetalleReposicion[]
+  detalleMateriales: DetalleMaterial[]
 }
 
 export interface FiltrosConsumo {

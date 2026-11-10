@@ -890,6 +890,97 @@ import reconozca"): en un servicio de sublimación continua no hay prendas, la c
     `v_ordenes` pasa PENDIENTE → IMPRESA; la base rechaza una tanda repetida. En navegador a 1500 y 390 px sin
     desborde ni errores de consola.
 
+## Explosión de materiales por OP (2026-11-06, SOLO LOCAL, sin commitear)
+Lo que el planificador **pide a bodega** para cada OP. Hoy se carga por plantilla Excel (la misma hoja del SAC:
+`FECHA · CODIGO · DESCRIPCION · OP · CANTIDAD · SALIDA · COMENTARIO · PLANIFICADOR`); **es transitoria**: cuando
+exista el módulo de Inventario, las salidas las generará él. Página `/costeo/materiales` ("Explosión de materiales",
+ítem de sidebar `EM`), módulo `apps/api/src/modules/costeo-materiales/`, front en `features/costeo-materiales/`.
+- **Tres fechas, no una**: `fecha_planificador` (columna FECHA, la del SAC: nunca es el día de la subida),
+  `creado_en` (fecha de carga, automática) y `fecha_entrega` (**vacía mientras esté pendiente**; bodega la llena al
+  registrar la salida). Un ítem que ya trae SALIDA nace ENTREGADO con `fecha_entrega = fecha_planificador`.
+- **La salida ES la entrega**: sin SALIDA el ítem es PENDIENTE. Un CHECK (`ck_material_op_entrega`) exige que
+  `salida_sac`, `fecha_entrega`, `entregado_en` y `entregado_por` vayan juntos o ninguno. Un mismo número de salida
+  cubre varios ítems y varias OP.
+- **Contrato con Inventario**: `material_op.origen` (`PLANTILLA` | `INVENTARIO`). Inventario escribirá filas con
+  `origen='INVENTARIO'` y sin `id_carga_material`; la página y el reporte no cambian. Al diseñarlo conviene que el
+  costo salga del kardex al despachar y se agregue una FK al movimiento (`salida_sac` se conserva para el histórico).
+- **Costo congelado al cargar** (`costo_unitario` = `costo_promedio` de ese momento). Si el insumo no tiene precio
+  queda NULL = **"sin costo"** (no se inventa un 0) y `PATCH /congelar-costos` lo congela después. `costo_total` es
+  columna generada (`@default(dbgenerated())` en Prisma, nunca en `data:`).
+- **OP inexistente: se carga igual** con `codigo_op` como texto; `ligarMaterialesPendientes()` los liga cuando el
+  import de Órdenes crea la OP (dentro de su misma transacción). El reporte de costeo busca por **código**, así que
+  también cubre los todavía no ligados.
+- **Duplicados**: firma `(planificador, OP, insumo, cantidad)` por **multiplicidad** contra lo vigente, en el preview
+  y dentro de la transacción del aplicar. ⚠️ **La salida NO entra en la firma** a propósito: re-subir el mismo archivo
+  del SAC cuando ya le pusieron SALIDA no debe duplicar lo que se cargó sin ella.
+- **Regla de dueño**: solo quien cargó modifica/anula, salvo `costeo.material.editar_ajenos`; un ítem ya entregado
+  solo lo toca quien tenga ese permiso. La fecha de entrega la corrige quien tenga `entregar`. Todo se valida en el
+  servidor (`puedeTocarMaterial`), el botón solo se oculta.
+- **Permisos** (`PERMISOS_COSTEO`): `costeo.material.ver|importar|entregar|editar_ajenos|valorizar`. De fábrica: ADMIN y
+  ADMIN_IT todos; BODEGUERO ver+entregar; ANALISTA ver+importar+valorizar; SUPERVISOR ver+entregar; GERENCIA ver.
+  ⚠️ **No se siembra un rol PLANIFICADOR**: ya existe uno **personalizado** (el seed no le toca los permisos), así que
+  hay que darle `costeo.material.ver` + `importar` desde `/roles`. Corre el seed y los usuarios deben volver a entrar.
+- **Reporte de costeo** (`costeo-reportes`): sección y hoja Excel "Materiales", columnas "Materiales (ítems)" /
+  "sin costo" y, **solo con `costeo.dashboard.ver_financiero`**, el dinero (`verDinero(usuario)` en el controlador;
+  sin el permiso el servidor manda `null`). Las cantidades **no se suman** entre insumos (unidades distintas).
+  Además, **columna "Rollo"** (factura-total-secuencia, mismo formato que `v_rollo_codigo`) en el detalle de
+  impresión, el de reposiciones y el Consolidado, resuelta en una sola consulta. Las filas migradas del legacy
+  no tienen montaje, así que su Rollo va vacío. Vista `analitica.v_materiales_op` en la migración.
+- Migración `20261106120000_explosion_materiales` (+ rollback): `costeo.carga_material` y `costeo.material_op`.
+- **Verificado**: API (preview/aplicar, duplicados, dueño, entrega por lote, ligado de OP), Excel leído de vuelta, rollo
+  cotejado contra SQL (`714570005-48-3`), dinero ausente con un rol sin `ver_financiero`, y navegador a 1500 y 390 px
+  sin desborde ni errores de consola. Datos y usuarios de prueba borrados.
+- **Pendiente**: desplegar (respaldo, correr el seed, usuarios vuelven a entrar). Si en Superset ya existe un dataset
+  de analitica, el nuevo `v_materiales_op` hay que registrarlo a mano.
+
+- **Historial de cambios por ítem y Excel de la explosión (2026-11-09, SOLO LOCAL, sin commitear).** Pedido tras
+  las pruebas del usuario: ver qué se modificó, quién, cuándo y por qué, y exportar a Excel con resúmenes.
+  - **Tabla propia `costeo.material_op_historial`** (migración `20261109120000_material_op_historial` + rollback),
+    una fila por ítem y por acto, escrita **en la misma transacción** que el cambio. No se usó `core.auditoria`:
+    ahí `id_entidad` no es uniforme (entrega y anulación cubren una LISTA de ids separada por comas), no hay motivo
+    y el "antes" no siempre existe. Acciones: `EDITAR · ANULAR · ENTREGAR · CORREGIR_FECHA · REVERTIR ·
+    COSTO_CONGELADO · LIGAR_OP`. `cambios` es JSONB `[{campo, antes, despues}]` con los valores ya como texto.
+    `usuario_nombre` va como TEXTO y la FK a `core.usuarios` es SET NULL: si la persona se retira, lo que hizo
+    sobrevive (mismo criterio que la bitácora, al revés de `montaje_rollo.desmontado_por`). **Sin backfill**: la
+    explosión no está en producción.
+  - **Motivo obligatorio** donde alguien corrige (CHECK en la base, además del DTO): editar, anular, revertir
+    entrega y corregir fecha de entrega. Entregar (flujo normal de bodega) y lo automático (congelar costo, ligar
+    OP) no lo piden. `PATCH /:id` ahora **exige `motivo`** y, si no cambia nada de verdad, responde
+    `modificado:false` sin escribir ni mover `modificado_en`.
+  - **Dinero**: los cambios de `costoUnitario` se quitan del historial sin `costeo.dashboard.ver_financiero`
+    (`sinDinero()`), igual que en el listado y el Excel.
+  - **Rutas** (`costeo.material.ver`): `GET /costeo/materiales/:id/historial` (la carga + cada cambio, del más
+    antiguo al más reciente; la carga la arma el servidor desde el propio ítem), `GET .../historial` (global, con
+    filtros de fecha **del cambio**, acción, usuario, OP, planificación e insumo; tope 500 con `truncado`) y
+    `GET .../exportar`. El listado devuelve `modificaciones` y `ultimaModificacion` por ítem (un `groupBy`) y el
+    filtro de estado gana **`modificados`**.
+  - **Pantalla**: pestañas "Ítems" / "Historial de cambios", botón "Historial" por ítem (modal con la línea de
+    tiempo), marca "Modificado ×N", botón "Exportar a Excel", y el modal de edición pide el motivo. "Revertir
+    entrega" y "Corregir fecha" ahora abren el diálogo con motivo.
+  - **Excel** (`materiales-excel.ts`, función pura sobre datos ya resueltos): exporta **lo que se ve con los
+    filtros aplicados**, pero con el estado "todos" **incluye los anulados, marcados** (un reporte de control
+    tiene que mostrarlos; la página no). Hojas: Resumen (estado, alcance, tiempos, antigüedad de pendientes en
+    tramos, y dinero solo con `ver_financiero`) · Por planificador · Por fecha (planificado/cargado/entregado
+    cada día, para ver el desfase) · Por estado · Por insumo (único lugar donde se suman cantidades: misma
+    unidad) · Por OP · Por salida SAC · Por carga (qué archivo trajo qué) · Por usuario (quién cargó, entregó,
+    modificó, anuló) · Detalle · Historial de cambios. Sin fila TOTAL dentro de las tablas (se colaría en
+    filtros y tablas dinámicas); los totales viven en Resumen. Tope 20,000 ítems con aviso si corta.
+  - **Ligar la OP también deja historial** (`ligarMaterialesPendientes` ahora recibe `idUsuario` y lo anota con
+    una sola sentencia CTE: ligado + rastro no se separan), a nombre de quien importó las OP.
+  - **Verificado**: API con usuarios desechables ADMIN/BODEGUERO/ANALISTA_COSTOS (motivo faltante → 400, sin
+    cambios → `modificado:false`, regla de dueño, entrega/corregir/revertir/anular/congelar con su rastro, el
+    bodeguero no ve dinero en el historial ni en el Excel, filtros del historial global); Excel leído de vuelta
+    celda por celda (12 × 44.6762 = 536.1144); navegador a 1500, 820 y 390 px sin desborde ni errores de consola.
+    Datos y usuarios de prueba borrados; los 52 ítems reales de local quedaron intactos.
+  - ⚠️ **Dos tropiezos de proceso, no de código**: (1) enviar acentos con `curl -d` desde Git Bash en Windows
+    guarda `�` (bytes ANSI, no UTF-8): la app respeta UTF-8, el problema era la prueba; para probar textos con
+    tildes usar el navegador o un archivo UTF-8. (2) Un `eslint --fix` lanzado en segundo plano **reescribió un
+    archivo después de mi edición** y revirtió un cambio de tipos en silencio: el watcher de Nest vio el error de
+    compilación, **no reinició el proceso** y siguió sirviendo el código viejo. Si la API "no refleja" un cambio,
+    mirar la salida del watcher antes de sospechar del código; y nunca editar mientras corre un `--fix`.
+  - **Al desplegar**: aplicar la migración nueva (solo toca `costeo`), `prisma generate`, sin permisos nuevos (todo
+    cuelga de `costeo.material.ver`). El frontend y la API cambian juntos: el DTO de editar ahora exige `motivo`.
+
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
 código en él.** Al empezar cualquier sesión de trabajo aquí:
