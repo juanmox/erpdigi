@@ -1105,10 +1105,21 @@ reposiciones por día** en producción (las crean gabriela y marjorie), así que
         (sin internet, con solo DNS público la planta no resolvería `erp.lan`); (3) `COOKIE_SECURE=true` + redirección del 80
         + cerrar el 8088; todos vuelven a iniciar sesión una vez; (4) `client_max_body_size 20m` en el bloque del puerto 80
         (hoy usa el 1 MB por defecto y un import grande daría 413; el bloque HTTPS ya lo trae).
-- ⚠️ **Al desplegar, el flujo arranca de inmediato**: lo que se cree después queda en el paso 2 y **no descuenta papel
-  ni llega a los Sheets/Dashboards hasta que alguien lo autorice**. Antes (o junto) hay que crear los usuarios de
-  cada paso (Gary, Álvaro, Roger, Vilma y los de Calidad no existen), asignar los roles `REPOSICION_*` (jaqueline,
-  yurick, lissette; gabriela/marjorie pasan a auditoría), correr el seed y que todos vuelvan a entrar.
+- ✅ **Desplegado en producción el 2026-11-22 (`a0d634c`)**, junto con `e731a59` (infra HTTPS). Respaldo previo de
+  `core`+`costeo`+`analitica` en `~/backups/reposiciones-flujo-antes-20261122-092904.sql`. La migración se había
+  ensayado antes sobre una copia de producción (las 7,821 reposiciones quedaron `HISTORICA`). `deploy.sh` llegó a
+  "Listo", el seed corrió aparte y la API arrancó con **171 rutas**, todas declarando su acceso.
+  - **Usuarios creados** con una contraseña inicial provisoria que **hay que cambiar desde `/usuarios`**: gary, alvaro,
+    roger (responsable), rosalinda (calidad), vilma (administración), vanesa (`OPERADOR_TRANSFERENCIA`, ahora la ÚNICA
+    que crea). Asignaciones: gabriela y marjorie → `REPOSICION_AUDITORIA` (y se les **desactivó**
+    `OPERADOR_TRANSFERENCIA`, reversible con `activo = true`); jaqueline → `REPOSICION_ADMINISTRACION`; yurick →
+    `REPOSICION_AUTORIZACION`; erick y luismox → `REPOSICION_DESPACHO`. Lissette no estaba en la lista y **no se
+    tocó**. El script fue idempotente (2ª corrida sin cambios).
+  - Verificado: login real de gary, rosalinda y vanesa con los permisos esperados en el token. No se creó ninguna
+    reposición (escribiría en los Sheets reales al autorizarse).
+  - **Pendiente**: que todos cierren sesión y vuelvan a entrar; subir el cierre por inactividad de los roles
+    `REPOSICION_*` en `/roles` (con 15 min los validadores pierden la sesión y dejan de recibir avisos); `metricas`
+    a GERENCIA_COSTEO a mano.
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
