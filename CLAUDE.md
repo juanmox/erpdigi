@@ -1117,9 +1117,12 @@ reposiciones por día** en producción (las crean gabriela y marjorie), así que
     tocó**. El script fue idempotente (2ª corrida sin cambios).
   - Verificado: login real de gary, rosalinda y vanesa con los permisos esperados en el token. No se creó ninguna
     reposición (escribiría en los Sheets reales al autorizarse).
-  - **Pendiente**: que todos cierren sesión y vuelvan a entrar; subir el cierre por inactividad de los roles
-    `REPOSICION_*` en `/roles` (con 15 min los validadores pierden la sesión y dejan de recibir avisos); `metricas`
-    a GERENCIA_COSTEO a mano.
+  - **Ajustes posteriores (2026-11-22, por SQL con rastro en la bitácora)**: lissette recibió `REPOSICION_AUTORIZACION`
+    (autoriza junto con yurick); los 7 roles `REPOSICION_*` quedaron con **180 min** de inactividad (en vez de los 15 por
+    defecto, para que los validadores sigan recibiendo avisos); GERENCIA_COSTEO recibió `costeo.reposicion.metricas`
+    (sigue `personalizado`). Idempotente.
+  - **Pendiente**: que todos cierren sesión y vuelvan a entrar y cambiar la contraseña provisoria de los 6 usuarios nuevos
+    desde `/usuarios`.
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
