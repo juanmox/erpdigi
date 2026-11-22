@@ -11,6 +11,7 @@
  *
  * Variables (en local salen de infra/bi/.env.local):
  *   SUPERSET_URL, SUPERSET_ADMIN_USER, SUPERSET_ADMIN_PASSWORD, ERP_ORIGEN
+ *   (opcional) ERP_ORIGENES: varios orígenes separados por coma; si no, vale ERP_ORIGEN
  *
  * Uso:
  *   node --env-file=infra/bi/.env.local infra/bi/tableros/construir-tableros.mjs [--recrear clave|todos] [--escribir-env ruta]
@@ -19,6 +20,9 @@ const URL_BASE = (process.env.SUPERSET_URL ?? 'http://localhost:8088').replace(/
 const USUARIO = process.env.SUPERSET_ADMIN_USER;
 const CLAVE = process.env.SUPERSET_ADMIN_PASSWORD;
 const ORIGEN_ERP = process.env.ERP_ORIGEN ?? 'http://localhost:5173';
+// Orígenes desde los que se puede incrustar cada tablero (durante la migración a HTTPS el
+// ERP se sirve por dos direcciones a la vez).
+const ORIGENES_ERP = (process.env.ERP_ORIGENES ?? ORIGEN_ERP).split(',').map((o) => o.trim()).filter(Boolean);
 const iRec = process.argv.indexOf('--recrear');
 const RECREAR = iRec >= 0 ? process.argv[iRec + 1] : null;
 if (!USUARIO || !CLAVE) {
@@ -229,7 +233,7 @@ for (const def of TABLEROS) {
 // ── Incrustación: un UUID por tablero ───────────────────────────────
 const uuids = {};
 for (const def of TABLEROS) {
-  const e = await api(`/api/v1/dashboard/${resultado[def.clave]}/embedded`, { m: 'POST', body: { allowed_domains: [ORIGEN_ERP] } });
+  const e = await api(`/api/v1/dashboard/${resultado[def.clave]}/embedded`, { m: 'POST', body: { allowed_domains: ORIGENES_ERP } });
   if (!e.ok) throw new Error(`Incrustación de ${def.clave}: ${JSON.stringify(e.j)}`);
   uuids[def.clave] = e.j.result.uuid;
 }

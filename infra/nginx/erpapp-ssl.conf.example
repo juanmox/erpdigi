@@ -1,0 +1,101 @@
+# ERP por HTTPS — fase B de la migración a HTTPS (2026-11-20).
+# Va en /etc/nginx/sites-available/erpapp-ssl (enlazado en sites-enabled).
+#
+# ⚠️ EL NOMBRE DEL ARCHIVO IMPORTA. Nginx carga sites-enabled en orden
+# alfabético y el primer server de un puerto sin `default_server` explícito pasa
+# a ser el de por defecto para ese puerto. `digitexsa-helpdesk-ssl` es hoy el
+# único del 443 y atiende `https://192.168.2.13` (sin SNI); este archivo tiene
+# que cargarse DESPUÉS para no quitarle ese lugar, y además el helpdesk lleva
+# `default_server` explícito (ver el README de la fase B / los comandos de
+# instalación).
+#
+# Certificado: comodín *.lan.digitexsa.com (Let's Encrypt, DNS-01 por Route 53).
+# Certbot lo renueva solo y recarga Nginx con
+# /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh.
+#
+# El puerto 80 (`erpapp`) NO se toca: http://192.168.2.13/erp sigue funcionando
+# igual durante la convivencia.
+
+# ── ERP ─────────────────────────────────────────────────────────────
+server {
+    listen 443 ssl;
+    server_name erp.lan.digitexsa.com;
+
+    ssl_certificate     /etc/letsencrypt/live/lan.digitexsa.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/lan.digitexsa.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # La API acepta cuerpos JSON de hasta 20 MB (imports masivos de Excel). Sin
+    # esto Nginx usa 1 MB por defecto y responde 413 antes de llegar a la API.
+    client_max_body_size 20m;
+
+    access_log /var/log/nginx/erpapp-ssl-access.log;
+    error_log  /var/log/nginx/erpapp-ssl-error.log;
+
+    location /erp/api/ {
+        proxy_pass http://127.0.0.1:4001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Mismas reglas de caché que el server del puerto 80: los assets llevan hash
+    # (un año, inmutables; inexistente = 404 y no index.html) e index.html se
+    # revalida siempre.
+    location /erp/assets/ {
+        alias /home/erpadmin/digitexsa-erp/apps/web/dist/assets/;
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    location /erp/ {
+        alias /home/erpadmin/digitexsa-erp/apps/web/dist/;
+        try_files $uri $uri/ /erp/index.html;
+        add_header Cache-Control "no-cache";
+    }
+
+    location / {
+        return 302 /erp/;
+    }
+}
+
+# ── Superset (tableros incrustados en el ERP) ───────────────────────
+# Una página HTTPS no puede incrustar un iframe HTTP (contenido mixto), así que
+# Superset sale por HTTPS en su propio nombre. Mientras el ERP también se use por
+# http://192.168.2.13 no hay problema: HTTP puede incrustar HTTPS.
+server {
+    listen 443 ssl;
+    server_name bi.lan.digitexsa.com;
+
+    ssl_certificate     /etc/letsencrypt/live/lan.digitexsa.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/lan.digitexsa.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # Red de planta y, desde el 2026-11-22, también 192.168.1.0/24 (la VPN llega como
+# 192.168.1.1). Ojo: la regla de ufw del 8088 sigue solo con 192.168.2.0/24:
+    # el navegador de cada usuario carga el tablero directamente desde acá.
+    allow 192.168.2.0/24;
+    allow 192.168.1.0/24;   # VPN y red 192.168.1.x (ver CLAUDE.md, 2026-11-22)
+    allow 127.0.0.1;
+    deny all;
+
+    access_log /var/log/nginx/erpapp-bi-access.log;
+    error_log  /var/log/nginx/erpapp-bi-error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:8088;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        # gunicorn tiene --timeout 120: Nginx no debe cortar antes que él.
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+}

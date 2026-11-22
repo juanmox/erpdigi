@@ -53,6 +53,13 @@ GUEST_TOKEN_HEADER_NAME = "X-GuestToken"
 GUEST_TOKEN_JWT_EXP_SECONDS = 300
 
 ERP_ORIGEN = os.environ.get("ERP_ORIGEN", "http://localhost:5173")
+# Todos los orígenes desde los que se puede incrustar Superset, separados por coma.
+# Durante la migración a HTTPS el ERP se sirve por DOS direcciones a la vez
+# (http://192.168.2.13 y https://erp.lan.digitexsa.com); sin lista, una de las dos
+# quedaría bloqueada. Si no se define, vale solo ERP_ORIGEN (local, sin cambios).
+ERP_ORIGENES = [
+    o.strip() for o in os.environ.get("ERP_ORIGENES", ERP_ORIGEN).split(",") if o.strip()
+]
 
 # Quién puede enmarcar Superset en un iframe: solo el ERP.
 TALISMAN_ENABLED = True
@@ -66,7 +73,7 @@ TALISMAN_CONFIG = {
         "object-src": "'none'",
         "style-src": ["'self'", "'unsafe-inline'"],
         "script-src": ["'self'", "'strict-dynamic'"],
-        "frame-ancestors": ["'self'", ERP_ORIGEN],
+        "frame-ancestors": ["'self'", *ERP_ORIGENES],
     },
     "content_security_policy_nonce_in": ["script-src"],
     "force_https": False,
@@ -80,8 +87,26 @@ CORS_OPTIONS = {
     "supports_credentials": True,
     "allow_headers": ["*"],
     "resources": ["*"],
-    "origins": [ERP_ORIGEN],
+    "origins": ERP_ORIGENES,
 }
+
+# ── Detrás de Nginx con HTTPS (solo el servidor: SUPERSET_HTTPS_PROXY=1) ─────────
+# En el servidor Superset sale por https://bi.lan.digitexsa.com, con Nginx delante.
+#  - ProxyFix: que Superset crea las cabeceras X-Forwarded-* de Nginx y genere sus
+#    enlaces y redirecciones con https y el nombre real, no con http://127.0.0.1.
+#  - Cookies SameSite=None + Secure: mientras el ERP se use también por
+#    http://192.168.2.13, ese origen y bi.lan son de SITIOS distintos, y una cookie
+#    SameSite=Lax no viaja dentro del iframe (el tablero necesita su sesión para el
+#    token CSRF). Cuando todo pase a erp.lan/bi.lan (mismo sitio) seguiría
+#    funcionando igual.
+# Local no lo activa: ahí Superset va por http://localhost sin proxy.
+if os.environ.get("SUPERSET_HTTPS_PROXY") == "1":
+    ENABLE_PROXY_FIX = True
+    PROXY_FIX_CONFIG = {"x_for": 1, "x_proto": 1, "x_host": 1, "x_port": 0, "x_prefix": 0}
+    SESSION_COOKIE_SAMESITE = "None"
+    SESSION_COOKIE_SECURE = True
+    TALISMAN_CONFIG["session_cookie_secure"] = True
+    TALISMAN_CONFIG["session_cookie_samesite"] = "None"
 
 # ── Exportación ─────────────────────────────────────────────────────
 # Tope de filas por descarga (CSV/Excel). El volumen total del ERP es chico
