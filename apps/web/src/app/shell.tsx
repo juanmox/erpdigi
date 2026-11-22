@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/features/auth/auth-context'
 import { useInactividad } from '@/features/auth/use-inactividad'
+import { AvisosReposiciones } from '@/features/costeo-reposiciones/avisos'
 import { Button } from '@/components/ui/button'
 import { Sidebar } from './sidebar'
 
@@ -65,6 +66,8 @@ export function Shell() {
 
   return (
     <div className="flex min-h-svh bg-surface-paper">
+      {/* Aviso global de reposiciones por validar (toast + título de la pestaña). */}
+      <AvisosReposiciones />
       {/* Aviso antes de cerrar: sin él, alguien que estaba leyendo una pantalla
           o con un formulario a medio llenar pierde el trabajo sin entender por
           qué. El botón devuelve el contador a cero sin tocar nada más. */}

@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,7 +26,8 @@ import { SeccionMateriales, type LineaMaterial } from './components/seccion-mate
 import { ModalPiezas } from './components/modal-piezas'
 import { SeccionPrendas, type LineaPrenda } from './components/seccion-prendas'
 import { useMarcaEmpresa } from '@/app/marca-empresa'
-import { imprimirReposicion } from './imprimir'
+import { etiquetaEstado, claseEstado } from './flujo'
+import { imprimirReposicion, imprimirRequisiciones } from './imprimir'
 import type { Reposicion } from './types'
 
 const HORA_LOCAL = () => {
@@ -73,7 +75,16 @@ export function ReposicionesPage() {
   const queryClient = useQueryClient()
   const { usuario, tienePermiso } = useAuth()
   const puedeAnular = tienePermiso('costeo.reposicion.anular')
-  const puedeImpresoraSinRollo = tienePermiso('costeo.reposicion.impresora_sin_rollo')
+  const puedeCrear = tienePermiso('costeo.reposicion.crear')
+  const puedeImprimirReq = tienePermiso('costeo.reposicion.imprimir_requisicion')
+  const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
+  // Modo corrección: ?corregir=<id> carga una reposición devuelta en el mismo
+  // formulario para corregirla y reenviarla al paso 2.
+  const idCorregir = Number(params.get('corregir')) || null
+  const [enCorreccion, setEnCorreccion] = useState<Reposicion | null>(null)
+  const [motivoDevolucion, setMotivoDevolucion] = useState<{ usuario: string; motivo: string | null; paso: number } | null>(null)
+  const [nota, setNota] = useState('')
   const puedeAdministrarPiezas = tienePermiso('costeo.pieza.administrar')
   const [modalPiezas, setModalPiezas] = useState(false)
 
@@ -170,6 +181,94 @@ export function ReposicionesPage() {
     queryFn: () => costeoReposicionesApi.listar(ordenInfo!.idOrdenProduccion),
     enabled: !!ordenInfo,
   })
+  // Cuántas de las mías están devueltas esperando corrección (aviso arriba).
+  const { data: misDevueltas } = useQuery({
+    queryKey: ['costeo-reposiciones', 'seguimiento', 'mis-devueltas'],
+    queryFn: () => costeoReposicionesApi.seguimiento({ estado: 'devueltas', soloMias: true, porPagina: 1 }),
+    enabled: puedeCrear,
+    refetchInterval: 120_000,
+  })
+
+  // Modo corrección: carga la reposición en el formulario.
+  useEffect(() => {
+    if (!idCorregir) {
+      setEnCorreccion(null)
+      setMotivoDevolucion(null)
+      return
+    }
+    let vivo = true
+    ;(async () => {
+      try {
+        const [r, eventos] = await Promise.all([
+          costeoReposicionesApi.obtener(idCorregir),
+          costeoReposicionesApi.eventos(idCorregir),
+        ])
+        if (!vivo) return
+        const orden = await costeoOrdenesApi.buscarPorCodigo(r.ordenProduccion.codigo)
+        if (!vivo) return
+        setOrdenInfo({ idOrdenProduccion: orden.idOrdenProduccion, cliente: orden.cliente?.nombre ?? null, estilos: orden.estilos })
+        setOpBuscada(orden.codigo)
+        setCodigoOp(orden.codigo)
+        setErrorOp(null)
+        const local = new Date(r.fecha)
+        local.setMinutes(local.getMinutes() - local.getTimezoneOffset())
+        const yp = String(Number(r.yardasPapel) || '')
+        const yt = r.insumoTela ? String(Number(r.yardasTela)) : ''
+        setCampos({
+          fecha: local.toISOString().slice(0, 16),
+          idDepartamento: String(r.departamento.idDepartamento),
+          idDefecto: String(r.defecto.idDefecto),
+          bodegaSac: r.bodegaSac ?? '',
+          idImpresora: r.impresora ? String(r.impresora.idImpresora) : '',
+          yardasPapel: yp,
+          idCalandra: r.calandra ? String(r.calandra.idCalandra) : '',
+          idInsumoTela: r.insumoTela ? String(r.insumoTela.idInsumo) : '',
+          yardasTela: yt,
+          comentario: r.comentario ?? '',
+        })
+        setTelaTocada(yt !== yp)
+        setEsMateriales(r.tipo === 'MATERIALES')
+        setMateriales(
+          r.reposicionInsumos.map((m) => ({
+            idInsumo: m.insumo.idInsumo,
+            codigo: m.insumo.codigo,
+            descripcion: m.insumo.descripcion,
+            unidad: m.insumo.unidad.nombre,
+            cantidad: String(Number(m.cantidad)),
+          })),
+        )
+        setPrendas(
+          r.prendas.map((p) => ({
+            idProducto: p.producto.idProducto,
+            codigo: p.producto.codigo,
+            idTalla: p.talla.idTalla,
+            talla: p.talla.nombre,
+            idPieza: p.pieza.idPieza,
+            pieza: p.pieza.nombre,
+            cantidad: p.cantidad,
+          })),
+        )
+        const dev = [...eventos].reverse().find((e) => e.accion === 'DEVOLVER')
+        setMotivoDevolucion(r.estado === 'DEVUELTA' && dev ? { usuario: dev.usuario, motivo: dev.motivo, paso: dev.paso } : null)
+        setNota('')
+        setEnCorreccion(r)
+      } catch (err) {
+        avisarError(err instanceof ApiError ? err.message : 'No se pudo cargar la reposición a corregir')
+        setParams({}, { replace: true })
+      }
+    })()
+    return () => {
+      vivo = false
+    }
+  }, [idCorregir, setParams])
+
+  function salirDeCorreccion() {
+    setParams({}, { replace: true })
+    limpiarFormulario()
+    setOpBuscada(null)
+    setOrdenInfo(null)
+    setCodigoOp('')
+  }
 
   // El selector solo ofrece impresoras con un rollo montado AHORA: elegir una
   // sin rollo terminaba siempre en un 409 al guardar, porque el servidor
@@ -180,9 +279,10 @@ export function ReposicionesPage() {
   const idsConRollo = new Set(
     (panelRollos ?? []).filter((p) => p.montaje).map((p) => p.impresora.idImpresora),
   )
-  const impresorasElegibles = puedeImpresoraSinRollo
-    ? (impresoras ?? [])
-    : (impresoras ?? []).filter((i) => idsConRollo.has(i.idImpresora))
+  // Desde el flujo de validaciones el rollo se resuelve al AUTORIZAR (paso 6),
+  // no al registrar, así que se ofrecen todas las impresoras activas. El panel
+  // de la derecha sigue mostrando cuáles tienen rollo ahora, como referencia.
+  const impresorasElegibles = impresoras ?? []
 
   async function buscarOp() {
     if (!codigoOp.trim()) return
@@ -291,10 +391,9 @@ export function ReposicionesPage() {
     try {
       // Los campos del otro tipo no se mandan vacíos sino que no se mandan:
       // el servidor exige que una MATERIALES no traiga nada de papel ni tela.
-      const resultado = await costeoReposicionesApi.crear({
+      const cuerpo = {
         fecha: new Date(campos.fecha).toISOString(),
-        codigoOp: opBuscada,
-        tipo: esMateriales ? 'MATERIALES' : 'REIMPRESION',
+        tipo: esMateriales ? ('MATERIALES' as const) : ('REIMPRESION' as const),
         idDepartamento: Number(campos.idDepartamento),
         idDefecto: Number(campos.idDefecto),
         bodegaSac: campos.bodegaSac || undefined,
@@ -323,11 +422,23 @@ export function ReposicionesPage() {
               idInsumoTela: Number(campos.idInsumoTela),
               yardasTela: Number(campos.yardasTela),
             }),
+      }
+      if (enCorreccion) {
+        const r = await costeoReposicionesApi.corregir(enCorreccion.idReposicion, { ...cuerpo, nota: nota.trim() || undefined })
+        avisarExito(`Reposición ${r.codigoRepo} corregida y reenviada: vuelve a la validación del responsable del área.`)
+        queryClient.invalidateQueries({ queryKey: ['costeo-reposiciones'] })
+        salirDeCorreccion()
+        navigate('/costeo/reposiciones/seguimiento')
+        return
+      }
+      const resultado = await costeoReposicionesApi.crear({ ...cuerpo, codigoOp: opBuscada })
+      // Ya no se imprime al registrar: la requisición sale después de la
+      // autorización (paso 6 del flujo de validaciones).
+      avisarExito(`Reposición ${resultado.codigoRepo} registrada. Queda esperando la validación del responsable del área.`, {
+        etiqueta: 'Ver seguimiento',
+        onClick: () => navigate('/costeo/reposiciones/seguimiento'),
       })
-      avisarExito(`Reposición ${resultado.codigoRepo} registrada correctamente.`, {
-        etiqueta: 'Imprimir',
-        onClick: () => imprimirReposicion(resultado, usuario?.nombreCompleto ?? '', marca),
-      })
+      queryClient.invalidateQueries({ queryKey: ['costeo-reposiciones', 'seguimiento'] })
       limpiarFormulario()
       queryClient.invalidateQueries({ queryKey: ['costeo-reposiciones', 'siguiente-numero'] })
       queryClient.invalidateQueries({ queryKey: ['costeo-rollos'] })
@@ -346,7 +457,44 @@ export function ReposicionesPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-4">
-      <h1 className="mb-4 text-xl font-semibold text-ink">Reposiciones</h1>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold text-ink">{enCorreccion ? 'Corregir reposición' : 'Reposiciones'}</h1>
+        <Button asChild variant="outline" size="sm">
+          <Link to="/costeo/reposiciones/seguimiento">Ver seguimiento</Link>
+        </Button>
+      </div>
+
+      {!enCorreccion && (misDevueltas?.total ?? 0) > 0 && (
+        <Alert className="mb-4 border-amber-500/40 bg-amber-500/10">
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Tenés <b>{misDevueltas!.total}</b> reposición(es) devuelta(s) esperando tu corrección.
+            </span>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/costeo/reposiciones/seguimiento?tab=reposiciones&estado=devueltas">Ver devueltas</Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {enCorreccion && (
+        <Alert className="mb-4 border-amber-500/40 bg-amber-500/10">
+          <AlertDescription className="space-y-1">
+            <div>
+              Corrigiendo <b className="font-mono">{enCorreccion.ordenProduccion.codigo}-{enCorreccion.codigoRepo}</b>. Al
+              reenviarla vuelve a empezar desde la validación del responsable del área.
+            </div>
+            {motivoDevolucion && (
+              <div className="text-sm">
+                <b>La devolvió {motivoDevolucion.usuario}</b> (paso {motivoDevolucion.paso}): {motivoDevolucion.motivo}
+              </div>
+            )}
+            <Button size="sm" variant="ghost" className="px-0" onClick={salirDeCorreccion}>
+              Cancelar la corrección
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
       {/* `min-w-0`: un item de grid no baja de su ancho de contenido sin esto,
@@ -367,8 +515,10 @@ export function ReposicionesPage() {
               onKeyDown={(e) => e.key === 'Enter' && buscarOp()}
               className="max-w-xs font-mono"
               autoFocus
+              // En corrección la OP no se cambia: cambiar de orden es anular y crear otra.
+              disabled={!!enCorreccion}
             />
-            <Button variant="outline" disabled={buscandoOp} onClick={buscarOp}>
+            <Button variant="outline" disabled={buscandoOp || !!enCorreccion} onClick={buscarOp}>
               {buscandoOp ? 'Buscando…' : 'Buscar'}
             </Button>
           </div>
@@ -387,7 +537,7 @@ export function ReposicionesPage() {
                 <div className="text-ink-faint">Estilo</div>
                 <div className="font-medium text-ink">{ordenInfo.estilos.length > 0 ? ordenInfo.estilos.join(' · ') : '—'}</div>
               </div>
-              {siguienteNumero && (
+              {siguienteNumero && !enCorreccion && (
                 <div className="col-span-2 text-xs text-ink-faint">
                   Siguiente número sugerido: <span className="font-mono font-medium text-ink">R{String(siguienteNumero.siguienteNumero).padStart(2, '0')}</span>
                 </div>
@@ -549,15 +699,14 @@ export function ReposicionesPage() {
                           {impresorasElegibles.map((i) => (
                             <SelectItem key={i.idImpresora} value={String(i.idImpresora)}>
                               {i.codigo}
-                              {puedeImpresoraSinRollo && !idsConRollo.has(i.idImpresora) && ' · sin rollo'}
+                              {!idsConRollo.has(i.idImpresora) && ' · sin rollo ahora'}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                       <p className="mt-1 text-[11px] text-ink-faint">
-                        {puedeImpresoraSinRollo
-                          ? 'El tipo de papel se autocompleta del rollo montado en esa impresora al guardar. Las marcadas "sin rollo" solo resuelven si la fecha apunta a un momento en que sí lo tenían.'
-                          : 'Solo se listan las impresoras con un rollo montado. El tipo de papel se autocompleta de ese rollo al guardar.'}
+                        El papel se descuenta del rollo montado en esa impresora cuando se AUTORIZA la
+                        reposición (paso 6 del flujo), no al registrarla. Ahí se resuelve también el tipo de papel.
                       </p>
                     </div>
                     <div>
@@ -662,14 +811,36 @@ export function ReposicionesPage() {
               />
             </div>
 
-            <div className="flex gap-2 pt-2">
-              <Button className="flex-1" disabled={guardando} onClick={() => registrar(true)}>
-                {guardando ? 'Guardando…' : 'Registrar y capturar otra'}
-              </Button>
-              <Button variant="outline" className="flex-1" disabled={guardando} onClick={() => registrar(false)}>
-                Registrar y salir
-              </Button>
-            </div>
+            {enCorreccion ? (
+              <>
+                <div>
+                  <Label className="mb-1 block text-xs">Nota para los validadores (opcional)</Label>
+                  <Textarea
+                    value={nota}
+                    onChange={(e) => setNota(e.target.value)}
+                    placeholder="Qué se corrigió, en respuesta a la devolución"
+                    rows={2}
+                  />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Button className="flex-1" disabled={guardando} onClick={() => registrar(false)}>
+                    {guardando ? 'Guardando…' : 'Corregir y reenviar'}
+                  </Button>
+                  <Button variant="outline" disabled={guardando} onClick={salirDeCorreccion}>
+                    Cancelar
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="flex gap-2 pt-2">
+                <Button className="flex-1" disabled={guardando} onClick={() => registrar(true)}>
+                  {guardando ? 'Guardando…' : 'Registrar y capturar otra'}
+                </Button>
+                <Button variant="outline" className="flex-1" disabled={guardando} onClick={() => registrar(false)}>
+                  Registrar y salir
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -728,18 +899,45 @@ export function ReposicionesPage() {
                         : `${r.yardasPapel} yd papel · ${r.yardasTela} yd tela`}
                     </TableCell>
                     <TableCell>
-                      {r.anuladoEn ? <Badge variant="secondary">Anulada</Badge> : <Badge>Activa</Badge>}
+                      <Badge variant="outline" className={`whitespace-nowrap ${claseEstado(r)}`}>
+                        {etiquetaEstado(r)}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => imprimirReposicion(r, usuario?.nombreCompleto ?? '', marca)}
-                        >
-                          Imprimir
-                        </Button>
-                        {!r.anuladoEn && puedeAnular && (
+                        {/* Las anteriores al flujo se imprimen como siempre; las del
+                            flujo, solo desde su requisición (después de autorizar). */}
+                        {r.estado === 'HISTORICA' && !r.anuladoEn && (
+                          <Button variant="ghost" size="sm" onClick={() => imprimirReposicion(r, usuario?.nombreCompleto ?? '', marca)}>
+                            Imprimir
+                          </Button>
+                        )}
+                        {r.requisicion && !r.anuladoEn && puedeImprimirReq && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                const res = await costeoReposicionesApi.imprimirRequisiciones([r.idReposicion])
+                                if (res.fallidas.length > 0) avisarError(res.fallidas[0].motivo)
+                                else imprimirRequisiciones(res.reposiciones, usuario?.nombreCompleto ?? '', marca)
+                                refetchReposiciones()
+                              } catch (err) {
+                                avisarError(err instanceof ApiError ? err.message : 'No se pudo imprimir')
+                              }
+                            }}
+                          >
+                            Reimprimir
+                          </Button>
+                        )}
+                        {puedeCrear &&
+                          !r.anuladoEn &&
+                          (r.estado === 'DEVUELTA' || (r.estado === 'EN_VALIDACION' && r.pasoPendiente === 2)) && (
+                            <Button variant="ghost" size="sm" onClick={() => setParams({ corregir: String(r.idReposicion) })}>
+                              Corregir
+                            </Button>
+                          )}
+                        {!r.anuladoEn && puedeAnular && r.estado !== 'DESPACHADA' && (
                           <Button variant="ghost" size="sm" onClick={() => setReposicionAnular(r)}>
                             Anular
                           </Button>

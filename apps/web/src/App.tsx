@@ -9,6 +9,7 @@ import { ConsumoPage } from '@/features/costeo-consumo/consumo-page'
 import { EstandarPage } from '@/features/costeo-estandar/estandar-page'
 import { OrdenesPage } from '@/features/costeo-ordenes/ordenes-page'
 import { ReposicionesPage } from '@/features/costeo-reposiciones/reposiciones-page'
+import { SeguimientoReposicionesPage } from '@/features/costeo-reposiciones/seguimiento/seguimiento-page'
 import { RollosPage } from '@/features/costeo-rollos/rollos-page'
 import { InicioPage } from '@/features/inicio/inicio-page'
 import { CotizacionPage } from '@/features/recetas/cotizacion-page'
@@ -128,6 +129,14 @@ function App() {
               element={
                 <RutaConPermiso permisos={['costeo.reposicion.ver']}>
                   <ReposicionesPage />
+                </RutaConPermiso>
+              }
+            />
+            <Route
+              path="costeo/reposiciones/seguimiento"
+              element={
+                <RutaConPermiso permisos={['costeo.reposicion.ver']}>
+                  <SeguimientoReposicionesPage />
                 </RutaConPermiso>
               }
             />

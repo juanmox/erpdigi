@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ESTADOS_AUTORIZADOS } from '../costeo-reposiciones/flujo';
 import * as ExcelJS from 'exceljs';
 import { resumirPrendas } from '../../common/prendas-texto';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -179,6 +180,8 @@ export class CosteoReportesService {
     const filas = await this.prisma.reposicion.findMany({
       where: {
         anuladoEn: null,
+        // Solo lo autorizado consumió (ver costeo-reposiciones/flujo.ts).
+        estado: { in: ESTADOS_AUTORIZADOS },
         fecha: rangoFecha,
         idOrdenProduccion: { in: ops.mezcladas },
         ...(idImpresora ? { idImpresora } : {}),
@@ -335,6 +338,9 @@ export class CosteoReportesService {
       this.prisma.reposicion.findMany({
         where: {
           anuladoEn: null,
+          // Las que esperan validación todavía no consumieron nada: el reporte
+          // cuenta solo las autorizadas (y las anteriores al flujo).
+          estado: { in: ESTADOS_AUTORIZADOS },
           fecha: rangoFecha,
           ordenProduccion: ordenDeLaEmpresa,
           ...(f.idImpresora ? { idImpresora: f.idImpresora } : {}),

@@ -981,6 +981,135 @@ exista el módulo de Inventario, las salidas las generará él. Página `/costeo
   - **Al desplegar**: aplicar la migración nueva (solo toca `costeo`), `prisma generate`, sin permisos nuevos (todo
     cuelga de `costeo.material.ver`). El frontend y la API cambian juntos: el DTO de editar ahora exige `motivo`.
 
+## Reposiciones: seguimiento y flujo de validaciones (2026-11-18, SOLO LOCAL, sin commitear)
+Antes una reposición nacía terminada: al guardarla descontaba papel y escribía en Sheets, sin revisión, y lo
+cargado solo se veía por OP o en el reporte de costeo (que solo ven roles con `costeo.dashboard.ver`). Ahora pasa por
+un flujo secuencial y hay una página propia de seguimiento. Volumen real que condicionó el diseño: **100-200
+reposiciones por día** en producción (las crean gabriela y marjorie), así que todo se valida **por lote**.
+- **El flujo** (`apps/api/src/modules/costeo-reposiciones/flujo.ts`, ÚNICA fuente de la secuencia; espejo de nombres
+  en `apps/web/src/features/costeo-reposiciones/flujo.ts`): 1 creación/corrección (`crear`) → 2 responsable del área
+  (`validar_responsable`: Gary/Álvaro/Roger) → 3 calidad (`validar_calidad`) → 4 auditoría (`validar_auditoria`:
+  Gaby/Marjorie) → 5 administración (`validar_administracion`: Jacky/Vilma) → 6 autorización de despacho
+  (`autorizar`: Yurick/Lissette) → 7 impresión de la requisición (`imprimir_requisicion`) → 8 despacho en bodega
+  (`despachar`). Todos `costeo.reposicion.*`. La secuencia va fija en código a propósito (cambiar pasos con
+  reposiciones a mitad de camino es ambiguo).
+- **Decisiones del usuario**: si un validador no está de acuerdo, **solo "Devolver"** (con motivo) a quien la creó; al
+  corregirla vuelve al **paso 2** (las validaciones previas dejan de contar: cambiaron los datos). Basta **cualquiera**
+  del paso. Gaby/Marjorie dejan de crear (solo auditan). **El papel se descuenta al AUTORIZAR (paso 6)**, no al crear:
+  la reimpresión física se hace después. Tiempo en **corrido**. Correlativo: **los dos** (RQ del ERP + talonario
+  opcional, para decidir después). Bodega marca "Despachada" en el ERP. Los creadores ven todo, con "Solo las mías"
+  marcado por defecto.
+- **Reglas del servidor** (`motivoNoPuedeValidar`, mismas para habilitar el botón y para actuar): solo el paso
+  pendiente; **quien la creó no la valida**; **una persona no valida dos pasos de la misma reposición** en el ciclo
+  vigente (importa porque ADMIN recibe todos los permisos). Devolver solo en pasos 2-6. Una transacción por
+  reposición con `SELECT … FOR UPDATE` (dos validadores simultáneos no pasan dos veces); un lote con fallas
+  parciales devuelve `{hechas, fallidas[]}`.
+- **Paso 6**: `fn_rollo_en(impresora, now())` → crea el `consumo_papel` (`origen='REPOSICION'`), fija tipo de papel y
+  montaje, estado `POR_IMPRIMIR`, y **recién ahí se espeja a Sheets** (`reposiciones-espejo.ts`; FECHA = la de la
+  reposición, NRollo = el resuelto al autorizar). Sin rollo montado ahora falla con `motivo: 'SIN_ROLLO_MONTADO'` y la
+  cola ofrece reintentar con otra impresora con rollo (el cambio queda en el evento). Por eso crear ya **no** exige
+  rollo montado y el selector ofrece todas las impresoras activas; `costeo.reposicion.impresora_sin_rollo` quedó sin uso.
+- **Migración `20261117120000_reposicion_flujo_validacion`** (+ rollback):
+  - `reposicion.estado` (`EN_VALIDACION · DEVUELTA · POR_IMPRIMIR · POR_DESPACHAR · DESPACHADA · HISTORICA`),
+    `paso_pendiente` (2..6 solo en validación) y `estado_desde`, con CHECKs. Anulada sigue siendo `anulado_en`.
+  - ⚠️ **Ninguna fila existente se toca con UPDATE**: `ck_reposicion_tipo_regla` es `NOT VALID` y hay filas que lo
+    violan (9 en local); un UPDATE lo reevaluaría y abortaría. `estado` entra con `DEFAULT 'HISTORICA'` (ADD COLUMN
+    con constante no reescribe) y después el default pasa a `EN_VALIDACION`; `estado_desde` queda NULL en las
+    históricas. **Todas las anteriores quedan HISTORICA** (ya consumieron) y no entran al flujo.
+  - `ck_reposicion_tipo_regla` reescrita: la REIMPRESION exige tipo de papel solo fuera de `EN_VALIDACION/DEVUELTA`.
+  - `costeo.reposicion_evento`: la línea de tiempo y la fuente de las métricas, escrita en la misma transacción.
+    `desde` (cuándo quedó pendiente ese paso) y `segundos` GENERATED. Nombre en texto + FK SET NULL (como la bitácora).
+  - `costeo.requisicion_reposicion` (1:1): `numero` correlativo **por empresa** (`UNIQUE (id_empresa, numero)`,
+    asignado en la primera impresión; reintento ante choque), `impresiones` (≥2 = COPIA), `numero_talonario`
+    opcional, despacho. Tabla aparte porque `codigo_repo` (R07) se repite en cada OP y la reposición no lleva empresa.
+  - Vistas `v_reposiciones`, `v_reposicion_prendas` y el CTE de `v_ordenes` cuentan solo las autorizadas
+    (`POR_IMPRIMIR · POR_DESPACHAR · DESPACHADA · HISTORICA`); nueva `analitica.v_reposicion_tiempos`.
+- **Reporte de costeo**: la consulta de reposiciones y `reposicionesAmbiguas` filtran por `ESTADOS_AUTORIZADOS`: una
+  pendiente todavía no consumió. El saldo del rollo no cambió (cuenta `consumo_papel`, que nace al autorizar).
+- **Anular**: en cualquier estado salvo `DESPACHADA` (los materiales ya salieron); si estaba autorizada, el papel
+  vuelve al rollo. HISTORICA se sigue pudiendo anular, como siempre.
+- **Página `/costeo/reposiciones/seguimiento`** (sidebar `SR`, `costeo.reposicion.ver`; el ítem `RE` del formulario
+  ahora pide `crear`): pestañas **Reposiciones** (filtros por estado/paso/OP/producto/creador/defecto/departamento/
+  tipo/fechas/texto, chips por paso, paginación en servidor, Excel, detalle con línea de tiempo y duraciones),
+  **Por validar** (una cola por paso que el usuario tiene, lo más viejo primero, selección por lote, Validar/Devolver/
+  Autorizar/Imprimir requisiciones/Marcar despachadas) y **Tiempos** (`costeo.reposicion.metricas`: esperando ahora con
+  semáforo 24/48 h, promedio/mediana/p90 por paso, por validador, devoluciones por creador, ciclo completo, Excel).
+- **Formulario**: ya no imprime al registrar; aviso "Tenés N devueltas"; **modo corrección** `?corregir=<id>` (mismo
+  formulario precargado, motivo de la devolución arriba, nota opcional, "Corregir y reenviar"). Imprimir desde ahí solo
+  las HISTORICA (layout de siempre); las del flujo, por su requisición.
+- **Requisición impresa** (`imprimir.ts`, varias por documento): `RQ-000123` + la reposición, cadena de validaciones,
+  COPIA desde la segunda, casilla de talonario y firmas Solicitado/Autorizado/Entregado/Recibido.
+- **Roles sembrados** (ajustables en /roles), uno por paso, cada uno con `ver` + su permiso: `REPOSICION_RESPONSABLE`,
+  `_CALIDAD`, `_ADMINISTRACION`, `_DESPACHO` (paso 8), `_AUDITORIA` y `_AUTORIZACION` (+ `metricas` y `costeo.rollo.ver`: necesita ver qué
+  impresoras tienen rollo). **La impresión de la requisición (paso 7) la hace Auditoría** (decisión del usuario, 2026-11-22: Gaby y
+  Marjorie): `REPOSICION_AUDITORIA` trae `imprimir_requisicion`, y `REPOSICION_IMPRESION` (solo `ver` + imprimir) sirve para dárselo a
+  cualquier otra persona desde /usuarios. Ni BODEGUERO ni AUTORIZACION lo traen (Autorización sí saca COPIAS: `PERMISOS_COPIA_REQUISICION`).
+  ⚠️ **En producción BODEGUERO, OPERADOR_TRANSFERENCIA, ANALISTA_COSTOS y GERENCIA_COSTEO están `personalizado`** (alguien los editó desde
+  /roles): el seed NO les toca permisos, así que lo nuevo no les llega solo. Por eso el despacho es un rol aparte (`REPOSICION_DESPACHO`)
+  y no va dentro de BODEGUERO, y GERENCIA_COSTEO no recibe `metricas` hasta que se lo den a mano.
+- **Verificado**: migración en una base desechable copia de local (con las 9 filas que violan el CHECK), cada CHECK
+  probado a propósito, rollback y reaplicación. 45 pruebas por API con 10 usuarios desechables (secuencia, permisos,
+  misma persona en dos pasos, devolver/corregir con cambios registrados, autorizar descontando del rollo correcto y
+  fallando sin rollo, reasignar impresora, RQ correlativos y COPIA, despacho con talonario, anular, MATERIALES sin
+  papel, colas, métricas, Excel, reporte sin pendientes). Navegador a 1500/820/390 px con 4 roles: sin desborde y
+  consola limpia (encontró y se corrigieron un `<div>` dentro de `<p>` y 3 consultas al panel de rollos sin permiso).
+  Espejo probado en instancia aislada (puerto 4055, ids falsos): crear y pasos 2-5 no escriben; autorizar sí.
+  Datos y usuarios de prueba borrados.
+- *Tropiezo propio*: la limpieza borró por `username LIKE 'qa\_%'` y se llevó también a `qa_admin`/`qa_cotiz` (ids
+  34/35, los de agosto que no se tocan). Se restauraron idénticos (mismo id, hash y roles) desde
+  `C:\Users\PETER\backups-erp\local-pre-bi-20261025.dump`. *Lección*: borrar usuarios de prueba por id explícito,
+  nunca por patrón.
+- **Aviso de pendientes (2026-11-19)**: `GET /costeo/reposiciones/seguimiento/avisos` (dos consultas agregadas:
+  la cola del usuario por paso y sus devueltas, cada una con `masReciente` = máximo `estado_desde`). El navegador la
+  consulta **cada minuto, también en segundo plano** (`features/costeo-reposiciones/use-avisos.ts`), y
+  `avisos.tsx`, montado una vez en el Shell, muestra un toast **sin vencimiento** que se actualiza en el lugar, el
+  contador rojo en el menú (SR = su cola, RE = sus devueltas; punto con el panel colapsado) y `(N) Digitexsa ERP`
+  en la pestaña. Cerrado, no vuelve hasta que llegue algo **más nuevo** (por `masReciente`, no por el total: si
+  validan 2 y llegan 2 el total no cambia). Agrupado a propósito: uno por reposición se silenciaría en un día.
+  - **Notificación de Windows**: misma lógica, solo si el ERP no está a la vista y solo en **contexto seguro**. En
+    `http://192.168.2.13` no existe (`isSecureContext` falso) y ni se ofrece; en localhost y con HTTPS el toast trae
+    "Avisarme también con notificaciones de Windows". Sin push del servidor: con la pestaña cerrada no llega.
+  - El cierre por inactividad la apaga (sin sesión no hay consulta): para los roles de validación conviene subirlo
+    en `/roles`.
+  - Verificado en navegador con dos usuarios desechables: toast al entrar, no se va solo, cerrado no reaparece,
+    reaparece al llegar una nueva (53 s), notificación simulada sin foco con su `tag`, título, contador, "Ir a
+    validar" abre la cola, y el creador ve sus devueltas; sin desborde a 390 px y consola limpia. Datos borrados.
+  - **HTTPS en curso** para habilitar la notificación de Windows: subdominio `lan.digitexsa.com` delegado desde
+    GoDaddy (el DNS del dominio está ahí, `domaincontrol.com`) a Route 53, comodín `*.lan.digitexsa.com` con
+    `certbot-dns-route53` (DNS-01, sin abrir puertos). Nombres `erp.lan` y `bi.lan`. Fases A (AWS/GoDaddy/Certbot)
+    → B (443 en paralelo, Superset a `bi.lan`) → C (corte, `COOKIE_SECURE=true`) → D (HSTS). **Antes del corte**, el
+    registro también en el DNS local de UniFi: con solo DNS público, sin internet la planta no entraría al ERP.
+    - **Avance 2026-11-19**: zona `lan.digitexsa.com` creada en Route 53 con A `erp`/`bi` → 192.168.2.13 (TTL 300),
+      política IAM `certbot-lan-digitexsa` (solo TXT `_acme-challenge` de esa zona) y usuario `certbot-erp`, y los 4 NS en
+      GoDaddy. Verificado: el DNS de Intelcom delega y **devuelve la IP privada** (no la bloquea), y
+      `http://erp.lan.digitexsa.com/erp/` ya carga el ERP desde la red (catch-all del puerto 80). Costo: ~USD 0.50/mes.
+    - **Fase A y B hechas (2026-11-20/22), el corte (C) NO**. Certificado comodín `*.lan.digitexsa.com` emitido
+      (vence 2027-02-18; `snap.certbot.renew.timer` + hook `reload-nginx.sh`; llave de AWS en `/root/.aws`, solo TXT
+      `_acme-challenge`). Nginx: archivo `erpapp-ssl` (ejemplo en `infra/nginx/erpapp-ssl.conf.example`) con `erp.lan` y
+      `bi.lan` en 443, **el puerto 80 no se tocó**. ⚠️ **El nombre del archivo importa**: Nginx carga `sites-enabled` en
+      orden alfabético y el primer server de un puerto es el default; `digitexsa-helpdesk-ssl` va primero y además lleva
+      `default_server` explícito, para que `https://192.168.2.13` siga siendo el helpdesk. RRHH (8081) y helpdesk no se
+      tocaron. Respaldo: `/root/nginx.bak-20261120` y `~/backups/https-fase-b-20261120/` (con `aplicar.sh`).
+      - **Superset** (`superset_config.py`, variables `ERP_ORIGENES` y `SUPERSET_HTTPS_PROXY=1` en `superset.env`): acepta
+        una LISTA de orígenes (`http://192.168.2.13` y `https://erp.lan.digitexsa.com`) en frame-ancestors, CORS y en
+        `embedded_dashboards.allow_domain_list` (columna de la base de Superset; los 6 tableros), ProxyFix y cookies
+        `SameSite=None; Secure` (mientras el ERP se use por HTTP, `192.168.2.13` y `bi.lan` son sitios distintos y una
+        cookie Lax no viaja en el iframe). La API usa `SUPERSET_PUBLIC_URL=https://bi.lan.digitexsa.com`. Verificado con
+        curl: Referer del ERP por HTTPS y por HTTP → 200, Referer ajeno → 403, cookie `Secure; SameSite=None`.
+        **Falta probar en navegador** los Dashboards por las dos direcciones (el caso crítico es página HTTP + tablero HTTPS).
+      - ⚠️ **Antes del corte (C)**: (1) el `ufw` del 443 ya admite `192.168.2.0/24` y `192.168.1.0/24` (el tráfico real viene de
+        las dos; **`192.168.1.1` es la VPN** — confirmado el 2026-11-22: todo el tráfico por VPN llega a Nginx con esa única IP,
+        y su ERP por HTTPS carga bien. **Actualización 2026-11-22: `bi.lan` ya admite `192.168.1.0/24`** (línea `allow` en `erpapp-ssl`; verificado por VPN: `/health` y la página incrustada dan 200). El helpdesk sigue en 403 por VPN a propósito. Lo que sigue: antes de esa actualización, por VPN el helpdesk y `bi.lan` daban 403 **a propósito** (`allow 192.168.2.0/24; deny all`;
+        antes el 8088 estaba cerrado igual por `ufw`): quien pruebe los Dashboards por VPN verá el tablero vacío/403. Abrirlo
+        es agregar `allow 192.168.1.0/24;` al bloque `bi.lan` de `erpapp-ssl`); (2) registro local en el DNS de UniFi
+        (sin internet, con solo DNS público la planta no resolvería `erp.lan`); (3) `COOKIE_SECURE=true` + redirección del 80
+        + cerrar el 8088; todos vuelven a iniciar sesión una vez; (4) `client_max_body_size 20m` en el bloque del puerto 80
+        (hoy usa el 1 MB por defecto y un import grande daría 413; el bloque HTTPS ya lo trae).
+- ⚠️ **Al desplegar, el flujo arranca de inmediato**: lo que se cree después queda en el paso 2 y **no descuenta papel
+  ni llega a los Sheets/Dashboards hasta que alguien lo autorice**. Antes (o junto) hay que crear los usuarios de
+  cada paso (Gary, Álvaro, Roger, Vilma y los de Calidad no existen), asignar los roles `REPOSICION_*` (jaqueline,
+  yurick, lissette; gabriela/marjorie pasan a auditoría), correr el seed y que todos vuelvan a entrar.
+
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
 código en él.** Al empezar cualquier sesión de trabajo aquí:

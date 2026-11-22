@@ -1,4 +1,4 @@
-import { CosteoReposicionesService } from './costeo-reposiciones.service';
+import { espejarReposicionEnSheets } from './reposiciones-espejo';
 
 /**
  * La fila que el espejo manda a los Google Sheets legacy. Lo que importa acá es
@@ -22,11 +22,6 @@ function armar(comentario: string | null, conPrendas: boolean) {
         }),
     },
   };
-  const servicio = new CosteoReposicionesService(
-    prisma as never,
-    {} as never,
-    sheets as never,
-  );
   const detalle = {
     fecha: new Date('2026-10-27T15:00:00Z'),
     idOrdenProduccion: 1,
@@ -63,11 +58,12 @@ function armar(comentario: string | null, conPrendas: boolean) {
   return {
     filas,
     correr: () =>
-      (
-        servicio as unknown as {
-          espejarEnGoogleSheets: (d: unknown, n: string) => Promise<void>;
-        }
-      ).espejarEnGoogleSheets(detalle, '777-10-3'),
+      espejarReposicionEnSheets(
+        prisma as never,
+        sheets as never,
+        detalle,
+        '777-10-3',
+      ),
   };
 }
 

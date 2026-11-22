@@ -91,6 +91,17 @@ const PERMISOS_COSTEO = [
   // Al vivir en PERMISOS_COSTEO lo reciben ADMIN y ADMIN_IT_COSTEO, y ningún
   // rol de planta (esos listan sus permisos uno por uno).
   'costeo.reposicion.impresora_sin_rollo',
+  // Flujo de validaciones de una reposición (2026-11-17). Un permiso por paso, en
+  // el orden de la jerarquía; el servidor exige que el paso anterior esté validado.
+  // Los roles REPOSICION_* de abajo traen cada uno el suyo; asignables desde /roles.
+  'costeo.reposicion.validar_responsable',
+  'costeo.reposicion.validar_calidad',
+  'costeo.reposicion.validar_auditoria',
+  'costeo.reposicion.validar_administracion',
+  'costeo.reposicion.autorizar',
+  'costeo.reposicion.imprimir_requisicion',
+  'costeo.reposicion.despachar',
+  'costeo.reposicion.metricas',
   // Mantenimiento del catálogo de piezas de una prenda (cuello, manga…) que se
   // elige en Reposiciones. Lo reciben ADMIN, ADMIN_IT_COSTEO y los roles que
   // listan el permiso abajo; asignable a otro rol desde /roles.
@@ -207,6 +218,66 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       // Ve la explosión de materiales y registra las salidas (la entrega).
       'costeo.material.ver',
       'costeo.material.entregar',
+      // Paso 8 del flujo de reposiciones: marca el despacho de lo autorizado. La
+      // IMPRESIÓN de la requisición (paso 7) no es de bodega: la hace Auditoría de
+      // Reposiciones o quien tenga el rol REPOSICION_IMPRESION.
+      'costeo.reposicion.ver',
+      'costeo.reposicion.despachar',
+    ],
+  ],
+  // Un rol por paso del flujo de validaciones de reposiciones. Cada uno ve el
+  // seguimiento y valida (o devuelve) SOLO su paso.
+  [
+    'REPOSICION_RESPONSABLE',
+    'Reposiciones — Responsable del área (paso 2)',
+    ['costeo.reposicion.ver', 'costeo.reposicion.validar_responsable'],
+  ],
+  [
+    'REPOSICION_CALIDAD',
+    'Reposiciones — Calidad (paso 3)',
+    ['costeo.reposicion.ver', 'costeo.reposicion.validar_calidad'],
+  ],
+  [
+    'REPOSICION_AUDITORIA',
+    'Reposiciones — Auditoría (paso 4) e impresión de requisiciones (paso 7)',
+    [
+      'costeo.reposicion.ver',
+      'costeo.reposicion.validar_auditoria',
+      // Decisión del usuario (2026-11-22): quien imprime la requisición es Auditoría
+      // (Gaby y Marjorie). Para darle esto a otra persona sin hacerla auditora, ver el
+      // rol REPOSICION_IMPRESION.
+      'costeo.reposicion.imprimir_requisicion',
+    ],
+  ],
+  // Solo el privilegio de imprimir requisiciones, para asignárselo a cualquier
+  // persona (Auditoría ya lo trae). Se asigna desde /usuarios.
+  [
+    'REPOSICION_IMPRESION',
+    'Reposiciones — Impresión de requisiciones (paso 7)',
+    ['costeo.reposicion.ver', 'costeo.reposicion.imprimir_requisicion'],
+  ],
+  [
+    'REPOSICION_ADMINISTRACION',
+    'Reposiciones — Administración (paso 5)',
+    ['costeo.reposicion.ver', 'costeo.reposicion.validar_administracion'],
+  ],
+  // Paso 8: bodega marca lo despachado. Rol aparte (y no dentro de BODEGUERO) porque en
+  // producción BODEGUERO fue personalizado desde /roles y el seed ya no le toca permisos.
+  [
+    'REPOSICION_DESPACHO',
+    'Reposiciones — Despacho en bodega (paso 8)',
+    ['costeo.reposicion.ver', 'costeo.reposicion.despachar'],
+  ],
+  [
+    'REPOSICION_AUTORIZACION',
+    'Reposiciones — Autorización de despacho (paso 6)',
+    [
+      'costeo.reposicion.ver',
+      'costeo.reposicion.autorizar',
+      'costeo.reposicion.metricas',
+      // Al autorizar se descuenta del rollo montado: necesita ver qué impresoras
+      // tienen rollo, para reasignar las que fallan por no tenerlo.
+      'costeo.rollo.ver',
     ],
   ],
 
@@ -315,6 +386,7 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.dashboard.ver',
       'costeo.dashboard.ver_financiero',
       'costeo.material.ver',
+      'costeo.reposicion.metricas',
     ],
   ],
   ['ADMIN_IT_COSTEO', 'Administrador IT — Costeo', [...PERMISOS_COSTEO]],
@@ -675,11 +747,24 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
     'Editar o eliminar una orden de producción o un ítem ya cargado, para corregir una carga mal hecha',
 
   // ── Costeo: reposiciones ──
-  'costeo.reposicion.ver': 'Ver las reposiciones de una orden',
-  'costeo.reposicion.crear': 'Registrar reposiciones',
-  'costeo.reposicion.anular': 'Anular una reposición ya registrada',
+  'costeo.reposicion.ver': 'Ver las reposiciones y su seguimiento',
+  'costeo.reposicion.crear': 'Registrar reposiciones y corregir las devueltas',
+  'costeo.reposicion.anular': 'Anular una reposición (si ya estaba autorizada, el papel vuelve al rollo)',
   'costeo.reposicion.impresora_sin_rollo':
-    'EXCEPCIÓN: elegir una impresora que no tiene rollo montado en este momento',
+    'SIN USO desde el flujo de validaciones: el rollo se resuelve al autorizar',
+  'costeo.reposicion.validar_responsable':
+    'Paso 2 del flujo: validar (o devolver) como responsable del área — visto bueno de por qué y para qué',
+  'costeo.reposicion.validar_calidad': 'Paso 3 del flujo: validar (o devolver) los defectos, como Calidad',
+  'costeo.reposicion.validar_auditoria':
+    'Paso 4 del flujo: auditar causas, consumos y responsables contra las prendas físicas',
+  'costeo.reposicion.validar_administracion':
+    'Paso 5 del flujo: validar que los consumos sean coherentes con el producto y la talla',
+  'costeo.reposicion.autorizar':
+    'Paso 6 del flujo: autorizar el despacho de bodega (aquí se descuenta el papel del rollo)',
+  'costeo.reposicion.imprimir_requisicion':
+    'Paso 7 del flujo: imprimir la requisición de bodega de lo autorizado (la primera impresión le asigna su número RQ). Por defecto lo tiene Auditoría de Reposiciones; se puede dar a otros con el rol REPOSICION_IMPRESION',
+  'costeo.reposicion.despachar': 'Paso 8 del flujo: marcar como despachados los materiales de la requisición',
+  'costeo.reposicion.metricas': 'Ver las métricas de tiempo del flujo de reposiciones (por paso y por validador)',
   'costeo.pieza.administrar':
     'Agregar, renombrar y retirar piezas del catálogo (cuello, manga, frontal…) que se eligen al registrar una reposición',
 

@@ -592,8 +592,20 @@ model Reposicion {
   anuladoEn         DateTime? @map("anulado_en") @db.Timestamptz(3)
   anuladoPor        Int?      @map("anulado_por")
   motivoAnulacion   String?   @map("motivo_anulacion")
+  /// Flujo de validaciones (migración 20261117120000): EN_VALIDACION · DEVUELTA ·
+  /// POR_IMPRIMIR · POR_DESPACHAR · DESPACHADA · HISTORICA. Las anteriores al flujo
+  /// son HISTORICA. La anulación sigue siendo `anuladoEn`, en cualquier estado.
+  // + SQL: CHECK de estado, de paso_pendiente (2..6 solo en EN_VALIDACION) y de
+  //   estado_desde (obligatorio salvo HISTORICA).
+  estado            String    @default("EN_VALIDACION") @db.VarChar(20)
+  /// Paso que espera validación (2..6) mientras está EN_VALIDACION.
+  pasoPendiente     Int?      @map("paso_pendiente") @db.SmallInt
+  /// Desde cuándo está en el estado/paso actual: base del "esperando hace X".
+  estadoDesde       DateTime? @map("estado_desde") @db.Timestamptz(3)
 
   ordenProduccion OrdenProduccion @relation(fields: [idOrdenProduccion], references: [idOrdenProduccion])
+  eventos         ReposicionEvento[]
+  requisicion     RequisicionReposicion?
   departamento    Departamento    @relation(fields: [idDepartamento], references: [idDepartamento])
   empleado        Empleado?       @relation(fields: [idEmpleado], references: [idEmpleado])
   defecto         Defecto         @relation(fields: [idDefecto], references: [idDefecto])
@@ -615,6 +627,60 @@ model Reposicion {
   @@index([fecha(sort: Desc)])
   @@index([idDefecto])
   @@map("reposicion")
+  @@schema("costeo")
+}
+
+/// Línea de tiempo del flujo de una reposición: una fila por acto, escrita en la
+/// misma transacción que el cambio. Es la fuente de las métricas de tiempo.
+model ReposicionEvento {
+  idEvento      Int      @id @default(autoincrement()) @map("id_evento")
+  idEmpresa     Int      @map("id_empresa")
+  idReposicion  Int      @map("id_reposicion")
+  /// CREAR · VALIDAR · DEVOLVER · CORREGIR · IMPRIMIR · REIMPRIMIR · DESPACHAR · ANULAR
+  accion        String   @db.VarChar(20)
+  /// 1 creación/corrección · 2..6 validaciones · 7 impresión · 8 despacho
+  paso          Int      @db.SmallInt
+  /// Cuándo quedó pendiente ese paso.
+  desde         DateTime @db.Timestamptz(3)
+  creadoEn      DateTime @default(now()) @map("creado_en") @db.Timestamptz(3)
+  // GENERATED ALWAYS AS (creado_en - desde) STORED, en segundos.
+  segundos      Int      @default(dbgenerated())
+  motivo        String?
+  /// [{ campo, antes, despues }] con los valores ya como texto.
+  cambios       Json     @default("[]")
+  // FK SET NULL hacia core.usuarios: el nombre en texto sobrevive al usuario.
+  idUsuario     Int?     @map("id_usuario")
+  usuarioNombre String   @map("usuario_nombre") @db.VarChar(80)
+
+  reposicion Reposicion @relation(fields: [idReposicion], references: [idReposicion], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([idReposicion, creadoEn])
+  @@index([idEmpresa, accion, paso, creadoEn(sort: Desc)])
+  @@index([idUsuario])
+  @@map("reposicion_evento")
+  @@schema("costeo")
+}
+
+/// Requisición de bodega de una reposición autorizada (1:1). El número es
+/// correlativo POR EMPRESA y se asigna al imprimirla por primera vez.
+model RequisicionReposicion {
+  idRequisicion     Int       @id @default(autoincrement()) @map("id_requisicion")
+  idEmpresa         Int       @map("id_empresa")
+  numero            Int
+  idReposicion      Int       @unique @map("id_reposicion")
+  impresaEn         DateTime  @default(now()) @map("impresa_en") @db.Timestamptz(3)
+  impresaPor        Int       @map("impresa_por")
+  impresiones       Int       @default(1) @db.SmallInt
+  ultimaImpresionEn DateTime  @default(now()) @map("ultima_impresion_en") @db.Timestamptz(3)
+  /// Número del talonario físico, opcional: por ahora conviven los dos.
+  numeroTalonario   String?   @map("numero_talonario") @db.VarChar(30)
+  despachadaEn      DateTime? @map("despachada_en") @db.Timestamptz(3)
+  despachadaPor     Int?      @map("despachada_por")
+
+  reposicion Reposicion @relation(fields: [idReposicion], references: [idReposicion], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([idEmpresa, numero], map: "uq_requisicion_reposicion_numero")
+  @@map("requisicion_reposicion")
   @@schema("costeo")
 }
 

@@ -4,6 +4,7 @@ import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/features/auth/auth-context'
 import { useTablerosBi } from '@/features/bi/api'
+import { useAvisosReposiciones } from '@/features/costeo-reposiciones/use-avisos'
 import { MODULOS } from './modulos'
 
 const CLAVE_COLAPSADO = 'digitexsa.sidebar.colapsado'
@@ -14,6 +15,8 @@ interface NavItemInfo {
   etiqueta: string
   /** Solo para los items de fin, si aplica end-matching (ej. "Inicio" en "/"). */
   end?: boolean
+  /** Trabajo esperando (ej. reposiciones por validar). 0 o ausente: sin marca. */
+  contador?: number
 }
 
 function ItemNav({ item, colapsado }: { item: NavItemInfo; colapsado: boolean }) {
@@ -34,13 +37,25 @@ function ItemNav({ item, colapsado }: { item: NavItemInfo; colapsado: boolean })
         <>
           <span
             className={cn(
-              'flex size-[22px] shrink-0 items-center justify-center rounded-md bg-black/[0.04] text-[10px] font-bold text-ink-faint dark:bg-white/[0.06]',
+              'relative flex size-[22px] shrink-0 items-center justify-center rounded-md bg-black/[0.04] text-[10px] font-bold text-ink-faint dark:bg-white/[0.06]',
               isActive && 'bg-accent-brand text-white',
             )}
           >
             {item.codigo}
+            {/* Con el panel colapsado no hay lugar para el número: un punto. */}
+            {colapsado && !!item.contador && (
+              <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-red-600 ring-2 ring-card" />
+            )}
           </span>
-          {!colapsado && item.etiqueta}
+          {!colapsado && <span className="min-w-0 flex-1">{item.etiqueta}</span>}
+          {!colapsado && !!item.contador && (
+            <span
+              className="ml-auto min-w-[20px] rounded-full bg-red-600 px-1.5 text-center text-[11px] leading-[18px] font-bold text-white tabular-nums"
+              aria-label={`${item.contador} pendientes`}
+            >
+              {item.contador > 99 ? '99+' : item.contador}
+            </span>
+          )}
         </>
       )}
     </NavLink>
@@ -50,6 +65,7 @@ function ItemNav({ item, colapsado }: { item: NavItemInfo; colapsado: boolean })
 export function Sidebar() {
   const { empresasDisponibles, idEmpresa, tienePermiso } = useAuth()
   const { data: tablerosBi } = useTablerosBi()
+  const { data: avisosRepos } = useAvisosReposiciones()
   const [colapsado, setColapsado] = useState(() => localStorage.getItem(CLAVE_COLAPSADO) === '1')
 
   useEffect(() => {
@@ -70,7 +86,10 @@ export function Sidebar() {
       : []),
     ...(tienePermiso('costeo.rollo.ver') ? [{ to: '/costeo/rollos', codigo: 'CR', etiqueta: 'Gestión de Rollos' }] : []),
     ...(tienePermiso('costeo.orden.ver') ? [{ to: '/costeo/ordenes', codigo: 'OP', etiqueta: 'Órdenes de Producción' }] : []),
-    ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones', codigo: 'RE', etiqueta: 'Reposiciones' }] : []),
+    // El formulario es para quien registra; los validadores trabajan desde el
+    // seguimiento (`SR`, libre: IN RC CR OP RE IO CE RS OF EM DB).
+    ...(tienePermiso('costeo.reposicion.crear') ? [{ to: '/costeo/reposiciones', codigo: 'RE', etiqueta: 'Reposiciones', end: true, contador: avisosRepos?.devueltas.cantidad }] : []),
+    ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones/seguimiento', codigo: 'SR', etiqueta: 'Seguimiento de reposiciones', contador: avisosRepos?.total }] : []),
     ...(tienePermiso('costeo.consumo.ver') ? [{ to: '/costeo/consumo', codigo: 'IO', etiqueta: 'Impresión de OPs' }] : []),
     ...(tienePermiso('costeo.estandar.ver') ? [{ to: '/costeo/estandar', codigo: 'CE', etiqueta: 'Consumo Estándar' }] : []),
     // "Reportes de Costeo" y no "Reportes" a secas: el mosaico de Inicio ya
