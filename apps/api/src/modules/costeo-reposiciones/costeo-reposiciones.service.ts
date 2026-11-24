@@ -14,6 +14,7 @@ import { nombreParaHistorial } from '../costeo-materiales/materiales-historial';
 import { AnularReposicionDto } from './dto/anular-reposicion.dto';
 import { CrearReposicionDto } from './dto/crear-reposicion.dto';
 import { CorregirReposicionDto } from './dto/flujo-reposicion.dto';
+import { ReposicionesFlujoService } from './reposiciones-flujo.service';
 import {
   type CambioReposicion,
   crearEventosReposicion,
@@ -99,6 +100,7 @@ export class CosteoReposicionesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditoria: AuditoriaService,
+    private readonly flujo: ReposicionesFlujoService,
   ) {}
 
   listarDepartamentos() {
@@ -500,12 +502,23 @@ export class CosteoReposicionesService {
    * escribe en Google Sheets: eso pasa al autorizar (paso 6), cuando se resuelve
    * el rollo montado en ese momento. Por eso tampoco se exige acá que la
    * impresora tenga rollo.
+   *
+   * EXCEPCIÓN — modo transitorio sin validaciones (2026-11-24): si la empresa lo
+   * tiene prendido, la reposición se autoriza en el mismo acto, como antes del
+   * flujo: se descuenta el papel del rollo, queda `HISTORICA` (se imprime con el
+   * formato de siempre) y se espeja a Sheets. Es un interruptor para la
+   * capacitación de quienes validan, no un reemplazo del flujo.
    */
   async crear(
     dto: CrearReposicionDto,
     idUsuarioActor: number,
     idEmpresa: number,
+    permisos: string[] = [],
   ) {
+    const sinValidacion = await this.flujo.modoSinValidacion(idEmpresa);
+    const puedeSinRollo = permisos.includes(
+      'costeo.reposicion.impresora_sin_rollo',
+    );
     const orden = await this.resolverOrden(
       dto.codigoOp,
       idEmpresa,
@@ -517,6 +530,9 @@ export class CosteoReposicionesService {
       idUsuarioActor,
     );
 
+    const directa: { nrollo: string } | null = sinValidacion
+      ? { nrollo: '' }
+      : null;
     const idReposicion = await this.prisma.$transaction(async (tx) => {
       // MAX+1 calculado dentro de la misma transacción — el UNIQUE
       // (id_orden_produccion, numero_repo) es la garantía real ante
@@ -553,8 +569,38 @@ export class CosteoReposicionesService {
           usuarioNombre,
         },
       ]);
+      if (directa) {
+        const aut = await this.flujo.autorizarEnTx(tx, reposicion, {
+          idUsuario: idUsuarioActor,
+          momento: reposicion.fecha,
+          ahora,
+          estadoFinal: 'HISTORICA',
+          idImpresoraNueva: null,
+          exigirRolloAhora: !puedeSinRollo,
+        });
+        directa.nrollo = aut.nrollo;
+        await crearEventosReposicion(tx, [
+          {
+            idEmpresa,
+            idReposicion: reposicion.idReposicion,
+            accion: 'SIN_VALIDACION',
+            paso: 6,
+            desde: ahora,
+            ahora,
+            motivo: 'Registrada sin validaciones (modo transitorio)',
+            cambios: aut.cambios,
+            idUsuario: idUsuarioActor,
+            usuarioNombre,
+          },
+        ]);
+      }
       return reposicion.idReposicion;
     });
+    if (directa)
+      void this.flujo.espejar(
+        [{ idReposicion, nrollo: directa.nrollo }],
+        idEmpresa,
+      );
 
     await this.auditoria.registrar({
       idUsuario: idUsuarioActor,
@@ -579,6 +625,37 @@ export class CosteoReposicionesService {
     });
 
     return this.obtener(idReposicion, idEmpresa);
+  }
+
+  /** Estado del modo transitorio sin validaciones, para la pantalla. */
+  async obtenerConfiguracion(idEmpresa: number) {
+    return { sinValidacion: await this.flujo.modoSinValidacion(idEmpresa) };
+  }
+
+  /**
+   * Prende o apaga el modo transitorio sin validaciones. Apagarlo no toca lo ya
+   * registrado: las reposiciones autorizadas en ese modo quedan como están.
+   */
+  async configurar(
+    sinValidacion: boolean,
+    idUsuarioActor: number,
+    idEmpresa: number,
+  ) {
+    const antes = await this.flujo.modoSinValidacion(idEmpresa);
+    await this.prisma.empresa.update({
+      where: { idEmpresa },
+      data: { reposicionesConValidacion: !sinValidacion },
+    });
+    if (antes !== sinValidacion)
+      await this.auditoria.registrar({
+        idUsuario: idUsuarioActor,
+        entidad: 'core.empresas',
+        idEntidad: String(idEmpresa),
+        accion: 'UPDATE',
+        datosAnteriores: { reposicionesSinValidacion: antes },
+        datosNuevos: { reposicionesSinValidacion: sinValidacion },
+      });
+    return { sinValidacion };
   }
 
   /**

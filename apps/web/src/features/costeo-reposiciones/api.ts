@@ -2,6 +2,7 @@ import { apiFetch, descargarArchivo } from '@/lib/api'
 import type {
   AvisosReposiciones,
   Calandra,
+  ConfiguracionReposiciones,
   Defecto,
   Departamento,
   EventoReposicion,
@@ -87,6 +88,18 @@ export const costeoReposicionesApi = {
     apiFetch<ResultadoLote>('/costeo/reposiciones/validar', {
       method: 'POST',
       body: JSON.stringify({ ids, paso, ...(idImpresora ? { idImpresora } : {}) }),
+    }),
+  // Modo transitorio sin validaciones.
+  configuracion: () => apiFetch<ConfiguracionReposiciones>('/costeo/reposiciones/configuracion'),
+  configurar: (sinValidacion: boolean) =>
+    apiFetch<ConfiguracionReposiciones>('/costeo/reposiciones/configuracion', {
+      method: 'PATCH',
+      body: JSON.stringify({ sinValidacion }),
+    }),
+  autorizarDirecto: (ids: number[]) =>
+    apiFetch<ResultadoLote>('/costeo/reposiciones/autorizar-directo', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
     }),
   devolver: (ids: number[], paso: number, motivo: string) =>
     apiFetch<ResultadoLote>('/costeo/reposiciones/devolver', {

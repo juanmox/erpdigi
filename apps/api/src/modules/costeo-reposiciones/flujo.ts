@@ -128,7 +128,8 @@ export type AccionEvento =
   | 'IMPRIMIR'
   | 'REIMPRIMIR'
   | 'DESPACHAR'
-  | 'ANULAR';
+  | 'ANULAR'
+  | 'SIN_VALIDACION';
 
 export interface CambioReposicion {
   campo: string;

@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsInt,
   IsOptional,
   IsString,
@@ -103,4 +104,20 @@ export class DespacharRequisicionesDto {
   @ValidateNested({ each: true })
   @Type(() => DespachoItemDto)
   items!: DespachoItemDto[];
+}
+
+/** Autorizar de una vez lo que quedó esperando validación (modo sin validaciones). */
+export class AutorizarDirectoDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(TOPE_LOTE)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  ids!: number[];
+}
+
+/** Prender o apagar el modo transitorio sin validaciones. */
+export class ConfigurarReposicionesDto {
+  @IsBoolean()
+  sinValidacion!: boolean;
 }

@@ -6,9 +6,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMarcaEmpresa } from '@/app/marca-empresa'
 import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
-import { avisarError } from '@/lib/avisos'
+import { avisarError, avisarExito } from '@/lib/avisos'
 import { costeoReposicionesApi } from '../api'
 import { ModalAnular } from '../components/modal-anular'
+import { AvisoModoSinValidacion, InterruptorModoSinValidacion } from '../components/modo-sin-validacion'
 import { PERMISO_PASO } from '../flujo'
 import { imprimirReposicion, imprimirRequisiciones } from '../imprimir'
 import type { FilaSeguimiento, Reposicion } from '../types'
@@ -57,8 +58,25 @@ export function SeguimientoReposicionesPage() {
     }
   }
 
+  async function autorizarSinValidacion(f: FilaSeguimiento) {
+    try {
+      const r = await costeoReposicionesApi.autorizarDirecto([f.idReposicion])
+      if (r.fallidas.length > 0) avisarError(r.fallidas[0].motivo)
+      else avisarExito(`Reposición ${f.codigo} autorizada sin validaciones: ya se puede imprimir.`)
+      qc.invalidateQueries({ queryKey: ['costeo-reposiciones'] })
+      qc.invalidateQueries({ queryKey: ['costeo-rollos'] })
+    } catch (e) {
+      avisarError(e instanceof ApiError ? e.message : 'No se pudo autorizar')
+    }
+  }
+
   const acciones = (f: FilaSeguimiento) => (
     <>
+      {f.acciones.autorizarDirecto && (
+        <Button size="sm" variant="outline" onClick={() => autorizarSinValidacion(f)}>
+          Autorizar sin validación
+        </Button>
+      )}
       {f.acciones.corregir && (
         <Button size="sm" variant="outline" onClick={() => navigate(`/costeo/reposiciones?corregir=${f.idReposicion}`)}>
           Corregir
@@ -84,6 +102,9 @@ export function SeguimientoReposicionesPage() {
         Lo registrado y dónde está en el flujo: responsable del área → calidad → auditoría → administración → autorización →
         requisición → despacho.
       </p>
+
+      <AvisoModoSinValidacion className="mb-3" />
+      <InterruptorModoSinValidacion />
 
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
         <TabsList>

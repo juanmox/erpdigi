@@ -126,6 +126,15 @@ type FilaListado = Prisma.ReposicionGetPayload<{
 export class ReposicionesSeguimientoService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** ¿La empresa tiene prendido el modo transitorio sin validaciones? */
+  private async sinValidacion(idEmpresa: number): Promise<boolean> {
+    const e = await this.prisma.empresa.findUnique({
+      where: { idEmpresa },
+      select: { reposicionesConValidacion: true },
+    });
+    return e ? !e.reposicionesConValidacion : false;
+  }
+
   /** Lo que el usuario puede mover AHORA según sus permisos. */
   /**
    * `incluirPropias`: la cola de la pantalla muestra también lo que el usuario
@@ -225,7 +234,7 @@ export class ReposicionesSeguimientoService {
     return { AND: y };
   }
 
-  mapear(r: FilaListado, u: UsuarioActor) {
+  mapear(r: FilaListado, u: UsuarioActor, modoSinValidacion = false) {
     const ciclo = eventosDelCiclo(r.eventos);
     const devolucion =
       r.estado === 'DEVUELTA'
@@ -277,6 +286,8 @@ export class ReposicionesSeguimientoService {
       creadoPor: r.creadoPor,
       creadoPorNombre: crear?.usuarioNombre ?? null,
       esMia: r.creadoPor === u.sub,
+      // Autorizada en el modo transitorio sin validaciones (quedó HISTORICA).
+      sinValidacion: r.eventos.some((e) => e.accion === 'SIN_VALIDACION'),
       validaciones: ciclo
         .filter((e) => e.accion === 'VALIDAR')
         .map((e) => ({
@@ -320,6 +331,13 @@ export class ReposicionesSeguimientoService {
           vivo &&
           u.permisos.includes(PERMISO_DESPACHAR) &&
           r.estado === 'POR_DESPACHAR',
+        // Modo transitorio sin validaciones: lo que quedó esperando se puede
+        // autorizar de una vez (la devuelta se corrige primero).
+        autorizarDirecto:
+          vivo &&
+          modoSinValidacion &&
+          u.permisos.includes('costeo.reposicion.crear') &&
+          r.estado === 'EN_VALIDACION',
         anular:
           vivo &&
           u.permisos.includes('costeo.reposicion.anular') &&
@@ -330,6 +348,7 @@ export class ReposicionesSeguimientoService {
 
   async listar(f: FiltrosSeguimiento, u: UsuarioActor, idEmpresa: number) {
     const where = this.where(f, u, idEmpresa);
+    const modoSinValidacion = await this.sinValidacion(idEmpresa);
     const [total, filas] = await Promise.all([
       this.prisma.reposicion.count({ where }),
       this.prisma.reposicion.findMany({
@@ -348,7 +367,7 @@ export class ReposicionesSeguimientoService {
       pagina: f.pagina,
       porPagina: f.porPagina,
       paginas: Math.max(1, Math.ceil(total / f.porPagina)),
-      filas: filas.map((r) => this.mapear(r, u)),
+      filas: filas.map((r) => this.mapear(r, u, modoSinValidacion)),
       resumen: await this.resumen(u, idEmpresa),
     };
   }
@@ -720,6 +739,7 @@ export class ReposicionesSeguimientoService {
   ) {
     const TOPE = 20_000;
     const where = this.where(f, u, idEmpresa);
+    const modoSinValidacion = await this.sinValidacion(idEmpresa);
     const filas = await this.prisma.reposicion.findMany({
       where,
       include: INCLUDE_LISTADO,
@@ -727,7 +747,9 @@ export class ReposicionesSeguimientoService {
       take: TOPE + 1,
     });
     const truncado = filas.length > TOPE;
-    const mapeadas = filas.slice(0, TOPE).map((r) => this.mapear(r, u));
+    const mapeadas = filas
+      .slice(0, TOPE)
+      .map((r) => this.mapear(r, u, modoSinValidacion));
     const buffer = await construirExcelSeguimiento({
       filas: mapeadas,
       truncado,

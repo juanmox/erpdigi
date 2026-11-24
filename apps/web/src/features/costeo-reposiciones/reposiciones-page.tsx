@@ -27,7 +27,9 @@ import { ModalPiezas } from './components/modal-piezas'
 import { SeccionPrendas, type LineaPrenda } from './components/seccion-prendas'
 import { useMarcaEmpresa } from '@/app/marca-empresa'
 import { etiquetaEstado, claseEstado } from './flujo'
+import { AvisoModoSinValidacion } from './components/modo-sin-validacion'
 import { imprimirReposicion, imprimirRequisiciones } from './imprimir'
+import { useModoSinValidacion } from './use-modo-sin-validacion'
 import type { Reposicion } from './types'
 
 const HORA_LOCAL = () => {
@@ -282,7 +284,13 @@ export function ReposicionesPage() {
   // Desde el flujo de validaciones el rollo se resuelve al AUTORIZAR (paso 6),
   // no al registrar, así que se ofrecen todas las impresoras activas. El panel
   // de la derecha sigue mostrando cuáles tienen rollo ahora, como referencia.
-  const impresorasElegibles = impresoras ?? []
+  // Modo sin validaciones: el papel sale al registrar, así que vale la regla de
+  // siempre — solo impresoras con rollo montado ahora, salvo que el usuario tenga
+  // el permiso de excepción. El servidor valida lo mismo.
+  const sinValidacion = useModoSinValidacion()
+  const puedeSinRollo = tienePermiso('costeo.reposicion.impresora_sin_rollo')
+  const impresorasElegibles =
+    sinValidacion && !puedeSinRollo && panelRollos ? (impresoras ?? []).filter((i) => idsConRollo.has(i.idImpresora)) : (impresoras ?? [])
 
   async function buscarOp() {
     if (!codigoOp.trim()) return
@@ -432,12 +440,20 @@ export function ReposicionesPage() {
         return
       }
       const resultado = await costeoReposicionesApi.crear({ ...cuerpo, codigoOp: opBuscada })
-      // Ya no se imprime al registrar: la requisición sale después de la
-      // autorización (paso 6 del flujo de validaciones).
-      avisarExito(`Reposición ${resultado.codigoRepo} registrada. Queda esperando la validación del responsable del área.`, {
-        etiqueta: 'Ver seguimiento',
-        onClick: () => navigate('/costeo/reposiciones/seguimiento'),
-      })
+      if (resultado.estado === 'HISTORICA') {
+        // Modo sin validaciones: quedó autorizada y se imprime como siempre.
+        avisarExito(`Reposición ${resultado.codigoRepo} registrada correctamente.`, {
+          etiqueta: 'Imprimir',
+          onClick: () => imprimirReposicion(resultado, usuario?.nombreCompleto ?? '', marca),
+        })
+      } else {
+        // Con el flujo activo no se imprime al registrar: la requisición sale
+        // después de la autorización (paso 6).
+        avisarExito(`Reposición ${resultado.codigoRepo} registrada. Queda esperando la validación del responsable del área.`, {
+          etiqueta: 'Ver seguimiento',
+          onClick: () => navigate('/costeo/reposiciones/seguimiento'),
+        })
+      }
       queryClient.invalidateQueries({ queryKey: ['costeo-reposiciones', 'seguimiento'] })
       limpiarFormulario()
       queryClient.invalidateQueries({ queryKey: ['costeo-reposiciones', 'siguiente-numero'] })
@@ -457,6 +473,7 @@ export function ReposicionesPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-4">
+      <AvisoModoSinValidacion className="mb-3" />
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold text-ink">{enCorreccion ? 'Corregir reposición' : 'Reposiciones'}</h1>
         <Button asChild variant="outline" size="sm">
@@ -705,8 +722,9 @@ export function ReposicionesPage() {
                         </SelectContent>
                       </Select>
                       <p className="mt-1 text-[11px] text-ink-faint">
-                        El papel se descuenta del rollo montado en esa impresora cuando se AUTORIZA la
-                        reposición (paso 6 del flujo), no al registrarla. Ahí se resuelve también el tipo de papel.
+                        {sinValidacion
+                          ? 'Modo sin validaciones: el papel se descuenta del rollo montado en esa impresora al registrar la reposición.'
+                          : 'El papel se descuenta del rollo montado en esa impresora cuando se AUTORIZA la reposición (paso 6 del flujo), no al registrarla. Ahí se resuelve también el tipo de papel.'}
                       </p>
                     </div>
                     <div>

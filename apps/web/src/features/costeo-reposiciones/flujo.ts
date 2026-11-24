@@ -34,8 +34,14 @@ const ETIQUETA: Record<EstadoReposicion, string> = {
   HISTORICA: 'Histórica',
 }
 
-export function etiquetaEstado(r: { estado: EstadoReposicion; pasoPendiente: number | null; anuladoEn: string | null }) {
+export function etiquetaEstado(r: {
+  estado: EstadoReposicion
+  pasoPendiente: number | null
+  anuladoEn: string | null
+  sinValidacion?: boolean
+}) {
   if (r.anuladoEn) return 'Anulada'
+  if (r.estado === 'HISTORICA' && r.sinValidacion) return 'Sin validaciones'
   if (r.estado === 'EN_VALIDACION') return `Paso ${r.pasoPendiente}: ${NOMBRE_PASO[r.pasoPendiente ?? 2]}`
   return ETIQUETA[r.estado]
 }

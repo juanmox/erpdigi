@@ -16,6 +16,7 @@ const ACCION: Record<string, { texto: string; clase: string }> = {
   REIMPRIMIR: { texto: 'Reimprimió (copia)', clase: 'border-border' },
   DESPACHAR: { texto: 'Despachó', clase: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' },
   ANULAR: { texto: 'Anuló', clase: 'border-destructive/40 bg-destructive/10 text-destructive' },
+  SIN_VALIDACION: { texto: 'Autorizó sin validaciones', clase: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400' },
 }
 
 function Dato({ etiqueta, valor }: { etiqueta: string; valor: React.ReactNode }) {

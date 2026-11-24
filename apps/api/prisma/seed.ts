@@ -102,6 +102,7 @@ const PERMISOS_COSTEO = [
   'costeo.reposicion.imprimir_requisicion',
   'costeo.reposicion.despachar',
   'costeo.reposicion.metricas',
+  'costeo.reposicion.configurar',
   // Mantenimiento del catálogo de piezas de una prenda (cuello, manga…) que se
   // elige en Reposiciones. Lo reciben ADMIN, ADMIN_IT_COSTEO y los roles que
   // listan el permiso abajo; asignable a otro rol desde /roles.
@@ -765,6 +766,7 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
     'Paso 7 del flujo: imprimir la requisición de bodega de lo autorizado (la primera impresión le asigna su número RQ). Por defecto lo tiene Auditoría de Reposiciones; se puede dar a otros con el rol REPOSICION_IMPRESION',
   'costeo.reposicion.despachar': 'Paso 8 del flujo: marcar como despachados los materiales de la requisición',
   'costeo.reposicion.metricas': 'Ver las métricas de tiempo del flujo de reposiciones (por paso y por validador)',
+  'costeo.reposicion.configurar': 'Activar o desactivar el modo transitorio sin validaciones de las reposiciones',
   'costeo.pieza.administrar':
     'Agregar, renombrar y retirar piezas del catálogo (cuello, manga, frontal…) que se eligen al registrar una reposición',
 

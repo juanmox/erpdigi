@@ -636,7 +636,7 @@ model ReposicionEvento {
   idEvento      Int      @id @default(autoincrement()) @map("id_evento")
   idEmpresa     Int      @map("id_empresa")
   idReposicion  Int      @map("id_reposicion")
-  /// CREAR · VALIDAR · DEVOLVER · CORREGIR · IMPRIMIR · REIMPRIMIR · DESPACHAR · ANULAR
+  /// CREAR · VALIDAR · DEVOLVER · CORREGIR · IMPRIMIR · REIMPRIMIR · DESPACHAR · ANULAR · SIN_VALIDACION
   accion        String   @db.VarChar(20)
   /// 1 creación/corrección · 2..6 validaciones · 7 impresión · 8 despacho
   paso          Int      @db.SmallInt

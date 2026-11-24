@@ -186,6 +186,8 @@ export interface FilaSeguimiento {
   creadoPor: number
   creadoPorNombre: string | null
   esMia: boolean
+  /** Autorizada en el modo transitorio sin validaciones. */
+  sinValidacion: boolean
   validaciones: ValidacionHecha[]
   devolucion: { paso: number; usuario: string; fecha: string; motivo: string | null } | null
   requisicion: Requisicion | null
@@ -195,8 +197,15 @@ export interface FilaSeguimiento {
     corregir: boolean
     imprimir: boolean
     despachar: boolean
+    /** Modo sin validaciones prendido y la reposición sigue esperando validación. */
+    autorizarDirecto: boolean
     anular: boolean
   }
+}
+
+export interface ConfiguracionReposiciones {
+  /** true = modo transitorio: las reposiciones se autorizan al registrarse. */
+  sinValidacion: boolean
 }
 
 export interface ResumenSeguimiento {

@@ -7,7 +7,8 @@ import type { FilaSeguimiento } from '../types'
  * que faltan (vacíos). El detalle de quién validó va en el `title` de cada punto.
  */
 export function PasosMini({ fila }: { fila: FilaSeguimiento }) {
-  if (fila.estado === 'HISTORICA') return <span className="text-[11px] text-ink-faint">Anterior al flujo</span>
+  if (fila.estado === 'HISTORICA')
+    return <span className="text-[11px] text-ink-faint">{fila.sinValidacion ? 'Sin validaciones' : 'Anterior al flujo'}</span>
   const actual = pasoEnCurso(fila)
   const validacion = (paso: number) => fila.validaciones.find((v) => v.paso === paso)
   return (

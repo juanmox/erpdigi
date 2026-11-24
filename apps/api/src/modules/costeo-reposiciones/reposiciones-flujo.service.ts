@@ -215,66 +215,16 @@ export class ReposicionesFlujoService {
       });
     } else {
       // ── Paso 6: autorización. Acá sale el papel del rollo. ──
-      const datos: Prisma.ReposicionUncheckedUpdateInput = {
-        estado: 'POR_IMPRIMIR',
-        pasoPendiente: null,
-        estadoDesde: ahora,
-      };
-      if (r.tipo === 'REIMPRESION' && Number(r.yardasPapel) > 0) {
-        let idImpresora = r.idImpresora!;
-        if (dto.idImpresora != null && dto.idImpresora !== idImpresora) {
-          const [antes, despues] = await Promise.all([
-            tx.impresora.findUnique({ where: { idImpresora } }),
-            tx.impresora.findUnique({
-              where: { idImpresora: dto.idImpresora },
-            }),
-          ]);
-          if (!despues || !despues.activo)
-            throw new ConflictException(
-              'Esa impresora no existe o está retirada.',
-            );
-          cambios.push({
-            campo: 'Impresora',
-            antes: antes?.codigo ?? null,
-            despues: despues.codigo,
-          });
-          idImpresora = dto.idImpresora;
-          datos.idImpresora = idImpresora;
-        }
-        const res = await tx.$queryRaw<{ id_montaje: number | null }[]>`
-          SELECT costeo.fn_rollo_en(${idImpresora}, ${ahora}::timestamptz) AS id_montaje`;
-        const idMontajeRollo = res[0]?.id_montaje ?? null;
-        if (idMontajeRollo == null) {
-          const imp = await tx.impresora.findUnique({ where: { idImpresora } });
-          throw new ConflictException({
-            message: `La ${imp?.codigo ?? 'impresora'} no tiene ningún rollo montado ahora: montá uno, o autorizá eligiendo otra impresora que sí lo tenga.`,
-            motivo: 'SIN_ROLLO_MONTADO',
-            idImpresora,
-          });
-        }
-        const montaje = await tx.montajeRollo.findUniqueOrThrow({
-          where: { idMontajeRollo },
-          include: { rolloPapel: { include: { facturaPapel: true } } },
-        });
-        // Mismo formato que costeo.v_rollo_codigo (el NRollo de los Sheets).
-        nrollo = `${montaje.rolloPapel.facturaPapel.numeroFactura}-${montaje.rolloPapel.facturaPapel.totalRollos}-${montaje.rolloPapel.secuencia}`;
-        datos.idMontajeRollo = idMontajeRollo;
-        datos.idTipoPapel = montaje.rolloPapel.idTipoPapel;
-        await tx.consumoPapel.create({
-          data: {
-            fecha: ahora,
-            origen: 'REPOSICION',
-            idOrdenProduccion: r.idOrdenProduccion,
-            idReposicion: id,
-            idImpresora,
-            idMontajeRollo,
-            idTipoPapel: montaje.rolloPapel.idTipoPapel,
-            consumoYd: r.yardasPapel,
-            creadoPor: usuario.sub,
-          },
-        });
-      }
-      await tx.reposicion.update({ where: { idReposicion: id }, data: datos });
+      const aut = await this.autorizarEnTx(tx, r, {
+        idUsuario: usuario.sub,
+        momento: ahora,
+        ahora,
+        estadoFinal: 'POR_IMPRIMIR',
+        idImpresoraNueva: dto.idImpresora ?? null,
+        exigirRolloAhora: false,
+      });
+      nrollo = aut.nrollo;
+      cambios.push(...aut.cambios);
     }
 
     await crearEventosReposicion(tx, [
@@ -293,7 +243,209 @@ export class ReposicionesFlujoService {
     return { autorizada: dto.paso === PASO_AUTORIZACION, nrollo };
   }
 
-  private async espejar(
+  /**
+   * Deja una reposición autorizada: resuelve el rollo montado, descuenta el papel
+   * (crea el `consumo_papel`) y la pasa a su estado final. Lo comparten el paso 6
+   * del flujo (estado `POR_IMPRIMIR`) y el modo transitorio sin validaciones
+   * (estado `HISTORICA`, que se imprime y se anula como siempre).
+   *
+   * `momento` es el instante contra el que se resuelve el rollo y se fecha el
+   * consumo. `exigirRolloAhora` replica la regla de antes del flujo: sin el
+   * permiso de excepción la impresora tiene que tener rollo montado AHORA, no solo
+   * en la fecha que se mandó (si no, se esquivaría retrocediendo la fecha).
+   */
+  async autorizarEnTx(
+    tx: TxCliente,
+    r: {
+      idReposicion: number;
+      idOrdenProduccion: number;
+      tipo: string;
+      yardasPapel: Prisma.Decimal | number;
+      idImpresora: number | null;
+    },
+    o: {
+      idUsuario: number;
+      momento: Date;
+      ahora: Date;
+      estadoFinal: 'POR_IMPRIMIR' | 'HISTORICA';
+      idImpresoraNueva: number | null;
+      exigirRolloAhora: boolean;
+    },
+  ): Promise<{ nrollo: string; cambios: CambioReposicion[] }> {
+    const cambios: CambioReposicion[] = [];
+    let nrollo = '';
+    const datos: Prisma.ReposicionUncheckedUpdateInput = {
+      estado: o.estadoFinal,
+      pasoPendiente: null,
+      estadoDesde: o.ahora,
+    };
+    if (r.tipo === 'REIMPRESION' && Number(r.yardasPapel) > 0) {
+      let idImpresora = r.idImpresora!;
+      if (o.idImpresoraNueva != null && o.idImpresoraNueva !== idImpresora) {
+        const [antes, despues] = await Promise.all([
+          tx.impresora.findUnique({ where: { idImpresora } }),
+          tx.impresora.findUnique({
+            where: { idImpresora: o.idImpresoraNueva },
+          }),
+        ]);
+        if (!despues || !despues.activo)
+          throw new ConflictException(
+            'Esa impresora no existe o está retirada.',
+          );
+        cambios.push({
+          campo: 'Impresora',
+          antes: antes?.codigo ?? null,
+          despues: despues.codigo,
+        });
+        idImpresora = o.idImpresoraNueva;
+        datos.idImpresora = idImpresora;
+      }
+      const sinRollo = async () => {
+        const imp = await tx.impresora.findUnique({ where: { idImpresora } });
+        return new ConflictException({
+          message: `La ${imp?.codigo ?? 'impresora'} no tiene ningún rollo montado ahora: montá uno, o elegí otra impresora que sí lo tenga.`,
+          motivo: 'SIN_ROLLO_MONTADO',
+          idImpresora,
+        });
+      };
+      if (o.exigirRolloAhora) {
+        const ahoraRes = await tx.$queryRaw<{ id_montaje: number | null }[]>`
+          SELECT costeo.fn_rollo_en(${idImpresora}, now()) AS id_montaje`;
+        if ((ahoraRes[0]?.id_montaje ?? null) == null) throw await sinRollo();
+      }
+      const res = await tx.$queryRaw<{ id_montaje: number | null }[]>`
+        SELECT costeo.fn_rollo_en(${idImpresora}, ${o.momento}::timestamptz) AS id_montaje`;
+      const idMontajeRollo = res[0]?.id_montaje ?? null;
+      if (idMontajeRollo == null) throw await sinRollo();
+      const montaje = await tx.montajeRollo.findUniqueOrThrow({
+        where: { idMontajeRollo },
+        include: { rolloPapel: { include: { facturaPapel: true } } },
+      });
+      // Mismo formato que costeo.v_rollo_codigo (el NRollo de los Sheets).
+      nrollo = `${montaje.rolloPapel.facturaPapel.numeroFactura}-${montaje.rolloPapel.facturaPapel.totalRollos}-${montaje.rolloPapel.secuencia}`;
+      datos.idMontajeRollo = idMontajeRollo;
+      datos.idTipoPapel = montaje.rolloPapel.idTipoPapel;
+      await tx.consumoPapel.create({
+        data: {
+          fecha: o.momento,
+          origen: 'REPOSICION',
+          idOrdenProduccion: r.idOrdenProduccion,
+          idReposicion: r.idReposicion,
+          idImpresora,
+          idMontajeRollo,
+          idTipoPapel: montaje.rolloPapel.idTipoPapel,
+          consumoYd: r.yardasPapel,
+          creadoPor: o.idUsuario,
+        },
+      });
+    }
+    await tx.reposicion.update({
+      where: { idReposicion: r.idReposicion },
+      data: datos,
+    });
+    return { nrollo, cambios };
+  }
+
+  /** ¿La empresa tiene prendido el modo transitorio sin validaciones? */
+  async modoSinValidacion(idEmpresa: number): Promise<boolean> {
+    const e = await this.prisma.empresa.findUnique({
+      where: { idEmpresa },
+      select: { reposicionesConValidacion: true },
+    });
+    return e ? !e.reposicionesConValidacion : false;
+  }
+
+  /**
+   * Autoriza de una vez lo que ya estaba esperando validación cuando se prendió el
+   * modo sin validaciones (la reposición que se quedó a mitad de camino). Solo
+   * funciona con el modo prendido, y es del mismo nivel de confianza que crear en
+   * ese modo: el permiso es `costeo.reposicion.crear`.
+   */
+  async autorizarDirectoLote(
+    ids: number[],
+    usuario: { sub: number; permisos: string[] },
+    idEmpresa: number,
+  ) {
+    if (!(await this.modoSinValidacion(idEmpresa)))
+      throw new ConflictException(
+        'El modo sin validaciones está apagado: las reposiciones siguen el flujo de validaciones.',
+      );
+    const usuarioNombre = await nombreParaHistorial(this.prisma, usuario.sub);
+    const puedeSinRollo = usuario.permisos.includes(
+      'costeo.reposicion.impresora_sin_rollo',
+    );
+    const unicos = [...new Set(ids)];
+    const codigos = await this.codigos(unicos);
+    const hechas: number[] = [];
+    const autorizadas: { idReposicion: number; nrollo: string }[] = [];
+    const fallidas: FallaLote[] = [];
+
+    for (const id of unicos) {
+      try {
+        const nrollo = await this.prisma.$transaction(
+          async (tx) => {
+            const r = await this.bloquear(tx, id, idEmpresa);
+            if (r.anuladoEn)
+              throw new ConflictException('La reposición está anulada.');
+            if (r.estado === 'DEVUELTA')
+              throw new ConflictException(
+                'Está devuelta: corregila primero y después se autoriza.',
+              );
+            if (r.estado !== 'EN_VALIDACION')
+              throw new ConflictException('Ya no está esperando validación.');
+            const ahora = new Date();
+            const aut = await this.autorizarEnTx(tx, r, {
+              idUsuario: usuario.sub,
+              momento: r.fecha,
+              ahora,
+              estadoFinal: 'HISTORICA',
+              idImpresoraNueva: null,
+              exigirRolloAhora: !puedeSinRollo,
+            });
+            await crearEventosReposicion(tx, [
+              {
+                idEmpresa,
+                idReposicion: id,
+                accion: 'SIN_VALIDACION',
+                paso: PASO_AUTORIZACION,
+                desde: r.estadoDesde ?? r.creadoEn,
+                ahora,
+                motivo: 'Autorizada sin validaciones (modo transitorio)',
+                cambios: aut.cambios,
+                idUsuario: usuario.sub,
+                usuarioNombre,
+              },
+            ]);
+            return aut.nrollo;
+          },
+          { timeout: 20_000 },
+        );
+        hechas.push(id);
+        autorizadas.push({ idReposicion: id, nrollo });
+      } catch (e) {
+        fallidas.push({
+          idReposicion: id,
+          codigo: codigos.get(id) ?? null,
+          motivo: mensajeDe(e),
+          ...(esSinRollo(e) ? { sinRollo: true } : {}),
+        });
+      }
+    }
+
+    if (hechas.length > 0) {
+      await this.auditoria.registrar({
+        idUsuario: usuario.sub,
+        entidad: 'costeo.reposicion',
+        idEntidad: hechas.join(','),
+        accion: 'UPDATE',
+        datosNuevos: { autorizadasSinValidacion: hechas.length },
+      });
+      void this.espejar(autorizadas, idEmpresa);
+    }
+    return { hechas: hechas.length, idsHechas: hechas, fallidas };
+  }
+
+  async espejar(
     autorizadas: { idReposicion: number; nrollo: string }[],
     idEmpresa: number,
   ) {

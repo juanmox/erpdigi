@@ -19,6 +19,8 @@ import { CosteoReposicionesService } from './costeo-reposiciones.service';
 import { AnularReposicionDto } from './dto/anular-reposicion.dto';
 import { CrearReposicionDto } from './dto/crear-reposicion.dto';
 import {
+  AutorizarDirectoDto,
+  ConfigurarReposicionesDto,
   CorregirReposicionDto,
   DespacharRequisicionesDto,
   DevolverReposicionesDto,
@@ -193,6 +195,34 @@ export class CosteoReposicionesController {
   // en @RequirePermissions (que exige todos los que lista): el servicio verifica
   // el del paso pedido. El decorador deja la puerta en `ver`.
 
+  // Modo transitorio sin validaciones (capacitación). Leerlo lo necesita cualquiera
+  // que registre o mire reposiciones; cambiarlo, solo quien tenga `configurar`.
+  @RequirePermissions('costeo.reposicion.ver')
+  @Get('configuracion')
+  obtenerConfiguracion(@EmpresaActual() idEmpresa: number) {
+    return this.service.obtenerConfiguracion(idEmpresa);
+  }
+
+  @RequirePermissions('costeo.reposicion.configurar')
+  @Patch('configuracion')
+  configurar(
+    @Body() dto: ConfigurarReposicionesDto,
+    @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
+  ) {
+    return this.service.configurar(dto.sinValidacion, usuario.sub, idEmpresa);
+  }
+
+  @RequirePermissions('costeo.reposicion.crear')
+  @Post('autorizar-directo')
+  autorizarDirecto(
+    @Body() dto: AutorizarDirectoDto,
+    @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
+  ) {
+    return this.flujo.autorizarDirectoLote(dto.ids, usuario, idEmpresa);
+  }
+
   @RequirePermissions('costeo.reposicion.ver')
   @Post('validar')
   validar(
@@ -296,7 +326,7 @@ export class CosteoReposicionesController {
     @CurrentUser() usuario: JwtPayload,
     @EmpresaActual() idEmpresa: number,
   ) {
-    return this.service.crear(dto, usuario.sub, idEmpresa);
+    return this.service.crear(dto, usuario.sub, idEmpresa, usuario.permisos);
   }
 
   @RequirePermissions('costeo.reposicion.crear')
