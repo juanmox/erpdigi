@@ -44,6 +44,46 @@ async function subirArchivo<T>(path: string, archivo: File): Promise<T> {
   return apiFetch<T>(path, { method: 'POST', body: archivo })
 }
 
+export type OperadorComparacion = 'eq' | 'ne' | 'gte' | 'lte'
+
+export interface FiltrosDesarrollos {
+  q?: string
+  estado?: 'BORRADOR' | 'APROBADO' | 'todos'
+  idCliente?: number
+  idTallaBase?: number
+  sinProducto?: boolean
+  producto?: 'con' | 'sin'
+  /// Número de insumos de la receta: operador + valor (sin valor no filtra).
+  insumosOp?: OperadorComparacion
+  insumosN?: number
+  /// Costo unitario (GTQ): operador + valor.
+  costoOp?: OperadorComparacion
+  costoN?: number
+  incluirInactivos?: boolean
+  limit?: number
+}
+
+function queryDesarrollos(p: FiltrosDesarrollos): string {
+  const qs = new URLSearchParams()
+  if (p.q) qs.set('q', p.q)
+  if (p.estado) qs.set('estado', p.estado)
+  if (p.idCliente) qs.set('idCliente', String(p.idCliente))
+  if (p.idTallaBase) qs.set('idTallaBase', String(p.idTallaBase))
+  if (p.sinProducto) qs.set('sinProducto', 'true')
+  if (p.producto) qs.set('producto', p.producto)
+  if (p.insumosOp && p.insumosN !== undefined) {
+    qs.set('insumosOp', p.insumosOp)
+    qs.set('insumosN', String(p.insumosN))
+  }
+  if (p.costoOp && p.costoN !== undefined) {
+    qs.set('costoOp', p.costoOp)
+    qs.set('costoN', String(p.costoN))
+  }
+  if (p.incluirInactivos) qs.set('incluirInactivos', 'true')
+  if (p.limit) qs.set('limit', String(p.limit))
+  return qs.toString()
+}
+
 export const catalogoApi = {
   // referencias
   categoriasInsumo: () => apiFetch<CategoriaInsumo[]>('/recetas/categorias-insumo'),
@@ -105,24 +145,18 @@ export const catalogoApi = {
     apiFetch<{ creados: number }>('/recetas/productos/altas', { method: 'POST', body: JSON.stringify({ altas }) }),
 
   // desarrollos (dueños de la receta desde 2026-08-26)
-  listarDesarrollos: (params: {
-    q?: string
-    estado?: 'BORRADOR' | 'APROBADO' | 'todos'
-    idCliente?: number
-    sinProducto?: boolean
-    incluirInactivos?: boolean
-    limit?: number
-  } = {}) => {
-    const qs = new URLSearchParams()
-    if (params.q) qs.set('q', params.q)
-    if (params.estado) qs.set('estado', params.estado)
-    if (params.idCliente) qs.set('idCliente', String(params.idCliente))
-    if (params.sinProducto) qs.set('sinProducto', 'true')
-    if (params.incluirInactivos) qs.set('incluirInactivos', 'true')
-    if (params.limit) qs.set('limit', String(params.limit))
-    const s = qs.toString()
+  listarDesarrollos: (params: FiltrosDesarrollos = {}) => {
+    const s = queryDesarrollos(params)
     return apiFetch<{ desarrollos: Desarrollo[]; total: number; limit: number }>(
       `/recetas/desarrollos${s ? `?${s}` : ''}`,
+    )
+  },
+  /// Excel con los MISMOS filtros que la pantalla (el servidor arma el WHERE una sola vez).
+  exportarDesarrollos: (params: FiltrosDesarrollos = {}) => {
+    const s = queryDesarrollos({ ...params, limit: undefined })
+    return descargarArchivo(
+      `/recetas/desarrollos/export${s ? `?${s}` : ''}`,
+      `desarrollos_${new Date().toISOString().slice(0, 10)}.xlsx`,
     )
   },
   obtenerDesarrollo: (id: number) => apiFetch<DesarrolloDetalle>(`/recetas/desarrollos/${id}`),

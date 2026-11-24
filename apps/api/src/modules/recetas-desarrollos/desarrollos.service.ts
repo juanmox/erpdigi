@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import ExcelJS from 'exceljs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import {
@@ -13,7 +14,24 @@ import {
 } from '../recetas-productos/dto/linea-receta.dto';
 import { CrearDesarrolloDto } from './dto/crear-desarrollo.dto';
 import { EditarDesarrolloDto } from './dto/editar-desarrollo.dto';
-import { ListarDesarrollosDto } from './dto/listar-desarrollos.dto';
+import {
+  ListarDesarrollosDto,
+  OperadorComparacion,
+} from './dto/listar-desarrollos.dto';
+
+const AZUL_DIGITEXSA = 'FF203080';
+
+const SQL_OPERADOR: Record<OperadorComparacion, Prisma.Sql> = {
+  eq: Prisma.sql`=`,
+  ne: Prisma.sql`<>`,
+  gte: Prisma.sql`>=`,
+  lte: Prisma.sql`<=`,
+};
+
+/// Número de insumos de la receta. Una sola definición: el WHERE del listado, el
+/// del Excel y la columna que se muestra tienen que contar lo mismo.
+const SQL_LINEAS = Prisma.sql`(SELECT count(*) FROM recetas.desarrollo_insumos di
+               WHERE di.id_desarrollo = d.id_desarrollo)`;
 
 interface DesarrolloFila {
   id_desarrollo: number;
@@ -61,7 +79,9 @@ export class DesarrollosService {
 
   // ---------- Lectura ----------
 
-  async listar(dto: ListarDesarrollosDto) {
+  /// WHERE compartido por el listado y el Excel: lo que se exporta es
+  /// exactamente lo que la pantalla muestra con esos filtros.
+  private condiciones(dto: ListarDesarrollosDto): Prisma.Sql {
     const cond: Prisma.Sql[] = [];
     if (!dto.incluirInactivos) cond.push(Prisma.sql`d.activo = TRUE`);
     if (dto.estado && dto.estado !== 'todos')
@@ -69,14 +89,31 @@ export class DesarrollosService {
     if (dto.idCliente) cond.push(Prisma.sql`d.id_cliente = ${dto.idCliente}`);
     // "Sin producto" es lo que necesita el selector de Desarrollo al dar de
     // alta un producto: solo los que todavía no están tomados.
-    if (dto.sinProducto) cond.push(Prisma.sql`pr.id_producto IS NULL`);
+    if (dto.sinProducto || dto.producto === 'sin')
+      cond.push(Prisma.sql`pr.id_producto IS NULL`);
+    if (dto.producto === 'con')
+      cond.push(Prisma.sql`pr.id_producto IS NOT NULL`);
+    if (dto.idTallaBase)
+      cond.push(Prisma.sql`d.id_talla_base = ${dto.idTallaBase}`);
+    if (dto.insumosOp && dto.insumosN !== undefined)
+      cond.push(
+        Prisma.sql`${SQL_LINEAS} ${SQL_OPERADOR[dto.insumosOp]} ${dto.insumosN}`,
+      );
+    if (dto.costoOp && dto.costoN !== undefined)
+      cond.push(
+        Prisma.sql`round(v.costo_unitario, 4) ${SQL_OPERADOR[dto.costoOp]} ${dto.costoN}`,
+      );
     if (dto.q) {
       const like = `%${dto.q}%`;
       cond.push(
         Prisma.sql`(d.codigo ILIKE ${like} OR d.descripcion ILIKE ${like})`,
       );
     }
-    const where = cond.length ? Prisma.join(cond, ' AND ') : Prisma.sql`TRUE`;
+    return cond.length ? Prisma.join(cond, ' AND ') : Prisma.sql`TRUE`;
+  }
+
+  async listar(dto: ListarDesarrollosDto) {
+    const where = this.condiciones(dto);
     const limit = Math.min(dto.limit ?? 500, 2000);
 
     const filas = await this.prisma.$queryRaw<DesarrolloFila[]>`
@@ -88,8 +125,7 @@ export class DesarrollosService {
              round(v.costo_insumos, 4)   AS costo_insumos,
              round(v.costo_mano_obra, 4) AS costo_mano_obra,
              round(v.costo_unitario, 4)  AS costo_unitario,
-             (SELECT count(*)::int FROM recetas.desarrollo_insumos di
-               WHERE di.id_desarrollo = d.id_desarrollo) AS lineas
+             ${SQL_LINEAS}::int AS lineas
       FROM recetas.desarrollos d
       JOIN recetas.v_desarrollo_costo v ON v.id_desarrollo = d.id_desarrollo
       LEFT JOIN recetas.clientes c ON c.id_cliente = d.id_cliente
@@ -103,6 +139,7 @@ export class DesarrollosService {
     const [{ total }] = await this.prisma.$queryRaw<{ total: number }[]>`
       SELECT count(*)::int AS total
       FROM recetas.desarrollos d
+      JOIN recetas.v_desarrollo_costo v ON v.id_desarrollo = d.id_desarrollo
       LEFT JOIN recetas.productos pr ON pr.desarrollo = d.codigo
       WHERE ${where}
     `;
@@ -112,6 +149,111 @@ export class DesarrollosService {
       total,
       limit,
     };
+  }
+
+  /// Excel del listado con los mismos filtros de la pantalla (sin tope de filas).
+  async exportarExcel(dto: ListarDesarrollosDto): Promise<ExcelJS.Buffer> {
+    const where = this.condiciones(dto);
+    const filas = await this.prisma.$queryRaw<DesarrolloFila[]>`
+      SELECT d.id_desarrollo, d.codigo, d.descripcion, d.estado,
+             d.id_cliente, c.nombre AS cliente_nombre,
+             d.id_talla_base, t.nombre AS talla_base,
+             d.minutos_mo, d.costo_mo_minuto, d.notas, d.activo, d.aprobado_en,
+             pr.codigo AS producto_codigo, pr.activo AS producto_activo,
+             round(v.costo_insumos, 4)   AS costo_insumos,
+             round(v.costo_mano_obra, 4) AS costo_mano_obra,
+             round(v.costo_unitario, 4)  AS costo_unitario,
+             ${SQL_LINEAS}::int AS lineas
+      FROM recetas.desarrollos d
+      JOIN recetas.v_desarrollo_costo v ON v.id_desarrollo = d.id_desarrollo
+      LEFT JOIN recetas.clientes c ON c.id_cliente = d.id_cliente
+      LEFT JOIN recetas.tallas   t ON t.id_talla   = d.id_talla_base
+      LEFT JOIN recetas.productos pr ON pr.desarrollo = d.codigo
+      WHERE ${where}
+      ORDER BY d.codigo
+    `;
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Digitexsa ERP';
+    wb.created = new Date();
+    const ws = wb.addWorksheet('Desarrollos');
+    const COLUMNAS = 15;
+
+    ws.mergeCells(1, 1, 1, COLUMNAS);
+    ws.getCell('A1').value =
+      'Digital Textil, S.A. (Digitexsa) — Listado de desarrollos';
+    ws.getCell('A1').font = {
+      bold: true,
+      size: 14,
+      color: { argb: AZUL_DIGITEXSA },
+    };
+    ws.mergeCells(2, 1, 2, COLUMNAS);
+    ws.getCell('A2').value =
+      `Generado: ${new Date().toLocaleString('es-GT')}   |   Total: ${filas.length}`;
+    ws.getCell('A2').font = { size: 9, color: { argb: 'FF888888' } };
+
+    const encabezado = ws.getRow(4);
+    encabezado.values = [
+      'Código',
+      'Descripción',
+      'Cliente',
+      'Talla base',
+      'Estado',
+      'Insumos (nº)',
+      'Costo insumos (GTQ)',
+      'Costo mano de obra (GTQ)',
+      'Costo unitario (GTQ)',
+      'Minutos MO',
+      'Costo MO/min (GTQ)',
+      'Producto',
+      'Activo',
+      'Aprobado el',
+      'Notas',
+    ];
+    encabezado.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: AZUL_DIGITEXSA },
+      };
+      cell.alignment = { vertical: 'middle', wrapText: true };
+    });
+
+    for (const d of filas) {
+      ws.addRow([
+        d.codigo,
+        d.descripcion,
+        d.cliente_nombre,
+        d.talla_base,
+        d.estado === 'APROBADO' ? 'Aprobado' : 'Borrador',
+        d.lineas,
+        d.costo_insumos.toNumber(),
+        d.costo_mano_obra.toNumber(),
+        d.costo_unitario.toNumber(),
+        d.minutos_mo.toNumber(),
+        d.costo_mo_minuto.toNumber(),
+        d.producto_codigo,
+        d.activo ? 'Sí' : 'No',
+        d.aprobado_en,
+        d.notas,
+      ]);
+    }
+
+    [16, 48, 20, 11, 11, 11, 16, 18, 16, 11, 15, 18, 8, 13, 40].forEach(
+      (w, i) => (ws.getColumn(i + 1).width = w),
+    );
+    for (const c of [7, 8, 9]) ws.getColumn(c).numFmt = '#,##0.0000';
+    ws.getColumn(10).numFmt = '#,##0.00';
+    ws.getColumn(11).numFmt = '#,##0.0000';
+    ws.getColumn(14).numFmt = 'dd/mm/yyyy';
+    ws.views = [{ state: 'frozen', ySplit: 4 }];
+    ws.autoFilter = {
+      from: { row: 4, column: 1 },
+      to: { row: 4, column: COLUMNAS },
+    };
+
+    return wb.xlsx.writeBuffer();
   }
 
   async obtener(idDesarrollo: number) {

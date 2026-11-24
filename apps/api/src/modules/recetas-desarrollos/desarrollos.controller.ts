@@ -42,6 +42,23 @@ export class DesarrollosController {
     return this.desarrollos.listar(dto);
   }
 
+  // Antes de @Get(':id') a propósito: 'export' caería en el parámetro :id.
+  @RequirePermissions('recetas.catalogo.ver')
+  @Get('export')
+  async exportar(@Query() dto: ListarDesarrollosDto, @Res() res: Response) {
+    const buffer = await this.desarrollos.exportarExcel(dto);
+    const fecha = new Date().toISOString().slice(0, 10);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="desarrollos_${fecha}.xlsx"`,
+    );
+    res.send(buffer);
+  }
+
   @RequirePermissions('recetas.desarrollos.crear')
   @Post()
   crear(@Body() dto: CrearDesarrolloDto, @CurrentUser() usuario: JwtPayload) {
