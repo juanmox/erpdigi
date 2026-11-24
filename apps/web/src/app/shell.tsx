@@ -21,7 +21,7 @@ import { useAuth } from '@/features/auth/auth-context'
 import { useInactividad } from '@/features/auth/use-inactividad'
 import { AvisosReposiciones } from '@/features/costeo-reposiciones/avisos'
 import { Button } from '@/components/ui/button'
-import { Sidebar } from './sidebar'
+import { MenuMovil, Sidebar } from './sidebar'
 
 function inicialesDe(nombre: string | undefined): string {
   if (!nombre) return '??'
@@ -92,6 +92,9 @@ export function Shell() {
             encabezado, y cambia entera al cambiar de empresa. */}
         <div className="h-1 shrink-0 bg-accent-brand" style={colorEmpresa ? { backgroundColor: colorEmpresa } : undefined} />
         <header className="flex items-center justify-between gap-3 border-b border-border px-6 py-2.5 lg:px-9">
+          {/* Debajo de `lg` el panel lateral no existe: este botón abre el mismo
+              menú en un cajón. Sin él, en el móvil no había forma de navegar. */}
+          <MenuMovil />
           {/* Chip con el nombre de la empresa, teñido con su color. Redundante
               con la franja a propósito: una señal de color sola no sirve para
               quien no distingue bien los colores, así que el nombre va escrito. */}
