@@ -1097,6 +1097,17 @@ reposiciones por día** en producción (las crean gabriela y marjorie), así que
         cookie Lax no viaja en el iframe). La API usa `SUPERSET_PUBLIC_URL=https://bi.lan.digitexsa.com`. Verificado con
         curl: Referer del ERP por HTTPS y por HTTP → 200, Referer ajeno → 403, cookie `Secure; SameSite=None`.
         **Falta probar en navegador** los Dashboards por las dos direcciones (el caso crítico es página HTTP + tablero HTTPS).
+      - ✅ **Decisión del usuario (2026-11-23): NO hay corte (C). El acceso por IP (`http://192.168.2.13/erp`) queda como
+        respaldo PERMANENTE** y no se fuerza la redirección del 80 a HTTPS. Motivo medido: una PC de la red `192.168.1.0/24`
+        (IP fija `192.168.1.97`, gateway `192.168.1.250`) usa **DNS públicos `8.8.8.8`/`8.8.4.4`**, no el del UCG: los registros
+        locales de UniFi no los ve y resuelve `erp.lan` por el registro de Route 53, o sea **depende de Internet**. Forzar el
+        corte la dejaría sin ERP si cae Internet. Consecuencias: **`COOKIE_SECURE` se queda en `false`** (con `true` el login
+        por IP dejaría de funcionar); el correo a los usuarios dice "respaldo" y no "dejará de funcionar". Ya hechos: el
+        `client_max_body_size 20m` del puerto 80 (413 → 401 verificado) y `bi.lan` abierto a `192.168.1.0/24`.
+        **Falta (del usuario, en UniFi)**: registros A `erp.lan.digitexsa.com` y `bi.lan.digitexsa.com` → `192.168.2.13` en
+        Policy Engine → Policy Table → DNS, para que la red `192.168.2.0/24` resuelva sin Internet. Para `192.168.1.0/24`
+        solo sirve un DNS local en esas PCs o una entrada en `hosts` (opcional). Lo de abajo describe el plan original de corte,
+        ya descartado.
       - ⚠️ **Antes del corte (C)**: (1) el `ufw` del 443 ya admite `192.168.2.0/24` y `192.168.1.0/24` (el tráfico real viene de
         las dos; **`192.168.1.1` es la VPN** — confirmado el 2026-11-22: todo el tráfico por VPN llega a Nginx con esa única IP,
         y su ERP por HTTPS carga bien. **Actualización 2026-11-22: `bi.lan` ya admite `192.168.1.0/24`** (línea `allow` en `erpapp-ssl`; verificado por VPN: `/health` y la página incrustada dan 200). El helpdesk sigue en 403 por VPN a propósito. Lo que sigue: antes de esa actualización, por VPN el helpdesk y `bi.lan` daban 403 **a propósito** (`allow 192.168.2.0/24; deny all`;
@@ -1123,6 +1134,25 @@ reposiciones por día** en producción (las crean gabriela y marjorie), así que
     (sigue `personalizado`). Idempotente.
   - **Pendiente**: que todos cierren sesión y vuelvan a entrar y cambiar la contraseña provisoria de los 6 usuarios nuevos
     desde `/usuarios`.
+
+- **Modo transitorio "sin validaciones" (2026-11-23, desplegado el mismo día).** Tras el despliegue del flujo,
+  el equipo aún no estaba capacitado y la regla "quien crea no valida / nadie valida dos pasos" dejaba trabadas las
+  reposiciones (caso `26OP035797-R01`: la creó Gabriela y el paso 2 lo validó el administrador). Las reglas son
+  intencionales, así que la salida es un interruptor, no relajarlas.
+  - **Interruptor por empresa**: `core.empresas.reposiciones_con_validacion` (default `true`), migración
+    `20261124120000_reposicion_modo_sin_validacion` (+ rollback). Se cambia desde la casilla de Seguimiento de
+    reposiciones, con confirmación; permiso nuevo `costeo.reposicion.configurar` (solo ADMIN vía `PERMISOS_COSTEO`;
+    hay que correr el seed y volver a entrar).
+  - **Prendido, `crear()` autoriza al registrar**: usa `autorizarEnTx()` (la misma lógica del paso 6, extraída y
+    compartida), descuenta el papel del rollo montado en la fecha de la reposición, queda `HISTORICA` (se imprime con
+    el formato de siempre, anular devuelve el papel, las vistas la cuentan) y se espeja a Sheets. Sin el permiso
+    `impresora_sin_rollo` exige rollo montado AHORA, como antes del flujo.
+  - **Lo que quedó esperando validación** se libera con `POST /autorizar-directo` (botón "Autorizar sin validación";
+    solo con el modo prendido, una transacción por reposición, pide `costeo.reposicion.crear`).
+  - **Rastro**: evento `SIN_VALIDACION` (paso 6) además de `CREAR`; las métricas filtran por `VALIDAR`, así que no
+    se contaminan. La fila lleva `sinValidacion` y la pantalla dice "Sin validaciones". Se distingue de una
+    `HISTORICA` anterior al flujo porque esta tiene evento `CREAR`.
+  - **Apagarlo** devuelve lo nuevo al flujo; lo ya autorizado queda como está.
 
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
