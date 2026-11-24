@@ -113,6 +113,24 @@ export function duracion(segundos: number) {
   return `${Math.floor(h / 24)} d ${h % 24} h`
 }
 
+/** Tiempo total de una reposición, en corrido, desde que se registró.
+ *  El reloj se detiene al despachar (fin del flujo) o al anular; si no, sigue
+ *  corriendo y se mide contra ahora. Las anteriores al flujo (HISTORICA) no
+ *  tienen un recorrido que medir: nacieron ya autorizadas. */
+export function tiempoTotal(
+  f: { estado: string; creadoEn: string; anuladoEn: string | null; requisicion: { despachadaEn: string | null } | null },
+  ahora = Date.now(),
+): { segundos: number; cierre: 'despachada' | 'anulada' | 'en_curso' } | null {
+  if (f.estado === 'HISTORICA') return null
+  const inicio = new Date(f.creadoEn).getTime()
+  const fin = f.anuladoEn
+    ? { t: new Date(f.anuladoEn).getTime(), cierre: 'anulada' as const }
+    : f.requisicion?.despachadaEn
+      ? { t: new Date(f.requisicion.despachadaEn).getTime(), cierre: 'despachada' as const }
+      : { t: ahora, cierre: 'en_curso' as const }
+  return { segundos: Math.max(0, Math.round((fin.t - inicio) / 1000)), cierre: fin.cierre }
+}
+
 export const fechaHoraGT = (iso: string | null | undefined) =>
   iso
     ? new Date(iso).toLocaleString('es-GT', {

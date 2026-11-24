@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { costeoReposicionesApi } from '../api'
-import { duracion, fechaHoraGT } from '../flujo'
+import { claseSemaforo, duracion, fechaHoraGT, tiempoTotal } from '../flujo'
 import type { FilaSeguimiento } from '../types'
 import { PasosMini } from './pasos-mini'
 import { ChipEstado } from './tabla-seguimiento'
@@ -24,6 +25,29 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: React.ReactNode })
     <div>
       <div className="text-[11px] text-ink-faint">{etiqueta}</div>
       <div className="text-sm break-words text-ink">{valor || '—'}</div>
+    </div>
+  )
+}
+
+const TEXTO_CIERRE = {
+  despachada: 'desde el registro hasta el despacho',
+  anulada: 'desde el registro hasta la anulación',
+  en_curso: 'desde el registro, sigue corriendo',
+} as const
+
+/** El parámetro de medición inmediato: cuánto lleva (o llevó) la reposición entera. */
+function TiempoTotal({ fila }: { fila: FilaSeguimiento }) {
+  const t = tiempoTotal(fila)
+  if (!t) return null
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md border bg-muted/40 px-3 py-2">
+      <span className="text-xs font-medium text-ink-muted">Tiempo total</span>
+      <span
+        className={cn('text-lg font-bold tabular-nums', t.cierre === 'en_curso' ? claseSemaforo(t.segundos / 3600) : 'text-ink')}
+      >
+        {duracion(t.segundos)}
+      </span>
+      <span className="text-xs text-ink-faint">{TEXTO_CIERRE[t.cierre]}</span>
     </div>
   )
 }
@@ -55,6 +79,8 @@ export function ModalDetalleReposicion({ fila, onCerrar }: { fila: FilaSeguimien
               </DialogDescription>
               <PasosMini fila={fila} />
             </DialogHeader>
+
+            <TiempoTotal fila={fila} />
 
             {fila.anuladoEn && (
               <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
