@@ -287,7 +287,9 @@ export function ReposicionesPage() {
   // Modo sin validaciones: el papel sale al registrar, así que vale la regla de
   // siempre — solo impresoras con rollo montado ahora, salvo que el usuario tenga
   // el permiso de excepción. El servidor valida lo mismo.
-  const sinValidacion = useModoSinValidacion()
+  // Vale para toda la empresa (modo transitorio) o solo para esta persona: quien tiene
+  // `sin_validacion` registra y se autoriza en el acto, aunque la empresa use el flujo.
+  const sinValidacion = useModoSinValidacion() || tienePermiso('costeo.reposicion.sin_validacion')
   const puedeSinRollo = tienePermiso('costeo.reposicion.impresora_sin_rollo')
   const impresorasElegibles =
     sinValidacion && !puedeSinRollo && panelRollos ? (impresoras ?? []).filter((i) => idsConRollo.has(i.idImpresora)) : (impresoras ?? [])

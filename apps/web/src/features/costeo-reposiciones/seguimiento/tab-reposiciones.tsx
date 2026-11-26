@@ -13,6 +13,7 @@ import { avisarError } from '@/lib/avisos'
 import { cn } from '@/lib/utils'
 import { costeoReposicionesApi, type FiltrosSeguimiento } from '../api'
 import type { FilaSeguimiento } from '../types'
+import { CLAVE_CONFIGURACION } from '../use-modo-sin-validacion'
 import { TablaSeguimiento } from './tabla-seguimiento'
 
 const TODOS = '__todos__'
@@ -22,8 +23,9 @@ const ESTADOS: [string, string][] = [
   ['en_validacion', 'En validación'],
   ['devueltas', 'Devueltas'],
   ['por_imprimir', 'Por imprimir'],
-  ['por_despachar', 'Por despachar'],
-  ['despachadas', 'Despachadas'],
+  ['por_despachar', 'En bodega (por dejar lista)'],
+  ['por_recoger', 'Por recoger (lista, falta el solicitante)'],
+  ['despachadas', 'Entregadas'],
   ['historicas', 'Históricas (antes del flujo)'],
   ['anuladas', 'Anuladas'],
   ['todas', 'Todas'],
@@ -43,6 +45,10 @@ interface Borrador {
   desde: string
   hasta: string
   soloMias: boolean
+  /** Corte asignado: día y hora (la hora solo cuenta si hay día). */
+  corteDia: string
+  corteHora: string
+  ruta: string
 }
 
 export function TabReposiciones({
@@ -72,6 +78,9 @@ export function TabReposiciones({
     // Quien carga reposiciones abre viendo las suyas (decisión del usuario); puede
     // quitar el filtro y ver las del equipo.
     soloMias: creaReposiciones,
+    corteDia: '',
+    corteHora: '',
+    ruta: '',
   })
   const [b, setB] = useState<Borrador>(inicial)
   const [aplicados, setAplicados] = useState<Borrador>(b)
@@ -93,6 +102,9 @@ export function TabReposiciones({
     desde: aplicados.desde || undefined,
     hasta: aplicados.hasta || undefined,
     soloMias: aplicados.soloMias,
+    corteDia: aplicados.corteDia || undefined,
+    corteHora: aplicados.corteDia && aplicados.corteHora ? aplicados.corteHora : undefined,
+    ruta: aplicados.ruta === 'con' || aplicados.ruta === 'sin' ? aplicados.ruta : undefined,
     pagina,
     porPagina: 50,
   }
@@ -101,6 +113,13 @@ export function TabReposiciones({
     queryKey: ['costeo-reposiciones', 'seguimiento', filtros],
     queryFn: () => costeoReposicionesApi.seguimiento(filtros),
     placeholderData: keepPreviousData,
+    // El semáforo corre solo: se recalcula cada minuto, sin recargar la página.
+    refetchInterval: 60_000,
+  })
+  const { data: configuracion } = useQuery({
+    queryKey: CLAVE_CONFIGURACION,
+    queryFn: () => costeoReposicionesApi.configuracion(),
+    staleTime: 30_000,
   })
   const { data: defectos } = useQuery({ queryKey: ['costeo-reposiciones', 'defectos'], queryFn: () => costeoReposicionesApi.defectos() })
   const { data: departamentos } = useQuery({
@@ -138,7 +157,8 @@ export function TabReposiciones({
         })),
         { texto: 'Devueltas', n: r.devueltas, estado: 'devueltas', activo: aplicados.estado === 'devueltas' },
         { texto: 'Por imprimir', n: r.porImprimir, estado: 'por_imprimir', activo: aplicados.estado === 'por_imprimir' },
-        { texto: 'Por despachar', n: r.porDespachar, estado: 'por_despachar', activo: aplicados.estado === 'por_despachar' },
+        { texto: 'En bodega', n: r.porDespachar, estado: 'por_despachar', activo: aplicados.estado === 'por_despachar' },
+        { texto: 'Por recoger', n: r.porRecoger, estado: 'por_recoger', activo: aplicados.estado === 'por_recoger' },
       ]
     : []
 
@@ -289,6 +309,39 @@ export function TabReposiciones({
         <div>
           <Label className="mb-1 block text-xs">Hasta</Label>
           <Input type="date" value={b.hasta} onChange={(e) => set('hasta', e.target.value)} />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs">Corte (día)</Label>
+          <Input type="date" value={b.corteDia} onChange={(e) => setB((p) => ({ ...p, corteDia: e.target.value, corteHora: e.target.value ? p.corteHora : '' }))} />
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs">Corte (hora)</Label>
+          <Select value={b.corteHora || TODOS} onValueChange={(v) => set('corteHora', v === TODOS ? '' : v)} disabled={!b.corteDia}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODOS}>Todos los del día</SelectItem>
+              {configuracion?.cortes.map((c) => (
+                <SelectItem key={c.hora} value={c.hora}>
+                  {c.hora}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="mb-1 block text-xs">Ruta</Label>
+          <Select value={b.ruta || TODOS} onValueChange={(v) => set('ruta', v === TODOS ? '' : v)}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODOS}>Cualquiera</SelectItem>
+              <SelectItem value="con">Con validaciones</SelectItem>
+              <SelectItem value="sin">Sin validaciones</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="col-span-2 flex flex-wrap items-end justify-between gap-2 lg:col-span-4">
           <label className="flex items-center gap-2 text-sm">

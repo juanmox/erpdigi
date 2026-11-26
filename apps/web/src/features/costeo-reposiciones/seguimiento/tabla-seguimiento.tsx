@@ -3,7 +3,17 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import { claseEstado, claseSemaforo, etiquetaEstado, fechaHoraGT, horasDesde, tiempoDesde } from '../flujo'
+import {
+  claseEstado,
+  clasePuntoSemaforo,
+  claseSemaforo,
+  etiquetaCorte,
+  etiquetaEstado,
+  fechaHoraGT,
+  minutosTexto,
+  textoSemaforo,
+  tiempoDesde,
+} from '../flujo'
 import type { FilaSeguimiento } from '../types'
 import { PasosMini } from './pasos-mini'
 
@@ -20,11 +30,31 @@ const resumenMaterial = (f: FilaSeguimiento) =>
         .filter(Boolean)
         .join(' · ')
 
-/** Lo que espera la reposición y desde hace cuánto, con semáforo. */
+/**
+ * El semáforo del corte: antes del corte no tiene color (esperar es lo esperado); desde
+ * la hora del corte corre hasta que bodega la deja lista; después, la demora en recoger
+ * es de quien debe recoger. Los minutos que deciden el color los pone el servidor.
+ */
 function Espera({ f }: { f: FilaSeguimiento }) {
-  if (f.anuladoEn || f.estado === 'DESPACHADA' || f.estado === 'HISTORICA') return null
-  const t = tiempoDesde(f.estadoDesde)
-  return <span className={cn('text-[11px]', claseSemaforo(horasDesde(f.estadoDesde)))}>hace {t}</span>
+  if (f.anuladoEn || f.estado === 'HISTORICA') return null
+  const s = f.semaforo
+  if (!s) {
+    // Sin corte asignado (la empresa no tiene cortes configurados): solo el tiempo en el paso.
+    if (f.estado === 'DESPACHADA') return null
+    return <span className="text-[11px] text-ink-faint">hace {tiempoDesde(f.estadoDesde)}</span>
+  }
+  const detalle = [
+    s.procesoMin != null ? `Corte → lista: ${minutosTexto(s.procesoMin)}${s.procesoCerrado ? '' : ' (corriendo)'}` : null,
+    s.esperaMin != null ? `Lista → entrega: ${minutosTexto(s.esperaMin)} (le toca al solicitante)` : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+  return (
+    <span className={cn('inline-flex items-center gap-1 text-[11px]', claseSemaforo(s.color))} title={detalle || undefined}>
+      <span className={cn('inline-block size-2 shrink-0 rounded-full', clasePuntoSemaforo(s.color))} />
+      {etiquetaCorte(s.corteEn)} · {textoSemaforo(s)}
+    </span>
+  )
 }
 
 export function ChipEstado({ f }: { f: Pick<FilaSeguimiento, 'estado' | 'pasoPendiente' | 'anuladoEn'> }) {

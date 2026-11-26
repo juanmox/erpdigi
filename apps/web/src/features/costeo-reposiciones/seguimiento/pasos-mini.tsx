@@ -1,9 +1,9 @@
 import { cn } from '@/lib/utils'
-import { fechaHoraGT, NOMBRE_PASO, pasoEnCurso } from '../flujo'
+import { fechaHoraGT, NOMBRE_PASO, pasoEnCurso, TOTAL_PASOS } from '../flujo'
 import type { FilaSeguimiento } from '../types'
 
 /**
- * Los 8 pasos del flujo como puntos: hechos (llenos), el actual (resaltado) y los
+ * Los 9 pasos del flujo como puntos: hechos (llenos), el actual (resaltado) y los
  * que faltan (vacíos). El detalle de quién validó va en el `title` de cada punto.
  */
 export function PasosMini({ fila }: { fila: FilaSeguimiento }) {
@@ -12,9 +12,9 @@ export function PasosMini({ fila }: { fila: FilaSeguimiento }) {
   const actual = pasoEnCurso(fila)
   const validacion = (paso: number) => fila.validaciones.find((v) => v.paso === paso)
   return (
-    <div className="flex items-center gap-1" aria-label={`Paso actual: ${actual > 8 ? 'terminada' : NOMBRE_PASO[actual]}`}>
-      {[1, 2, 3, 4, 5, 6, 7, 8].map((p) => {
-        const hecho = p < actual || actual > 8 || (p === 1 && actual > 1)
+    <div className="flex items-center gap-1" aria-label={`Paso actual: ${actual > TOTAL_PASOS ? 'terminada' : NOMBRE_PASO[actual]}`}>
+      {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((p) => {
+        const hecho = p < actual || actual > TOTAL_PASOS || (p === 1 && actual > 1)
         const esActual = p === actual && !fila.anuladoEn
         const v = validacion(p)
         const titulo = `${p}. ${NOMBRE_PASO[p]}${v ? ` — ${v.usuario}, ${fechaHoraGT(v.fecha)}` : esActual ? ' — pendiente' : ''}`

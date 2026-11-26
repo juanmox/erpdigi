@@ -1,6 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { rangoDeDiasGT } from '../../common/dia-guatemala';
+import {
+  colorDeMinutos,
+  type ColorSemaforo,
+  type SemaforoConfig,
+  semaforoReposicion,
+} from '../../common/cortes-reposicion';
+import { inicioDelDiaGT, rangoDeDiasGT } from '../../common/dia-guatemala';
 import { parsearCodigoOp } from '../../common/op-codigo';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -18,6 +24,7 @@ import {
   construirExcelMetricas,
   construirExcelSeguimiento,
 } from './reposiciones-excel';
+import { ReposicionesConfigService } from './reposiciones-config.service';
 
 export const ESTADOS_FILTRO = [
   'en_curso',
@@ -25,6 +32,7 @@ export const ESTADOS_FILTRO = [
   'devueltas',
   'por_imprimir',
   'por_despachar',
+  'por_recoger',
   'despachadas',
   'historicas',
   'anuladas',
@@ -37,6 +45,11 @@ export interface FiltrosSeguimiento {
   paso?: number;
   soloMias: boolean;
   porValidar: boolean;
+  /** Corte al que quedó asignada: día `aaaa-mm-dd`, y opcionalmente su hora `HH:MM`. */
+  corteDia?: string;
+  corteHora?: string;
+  /** `con` = pasó por el flujo de validaciones; `sin` = se autorizó al registrarla. */
+  ruta?: 'con' | 'sin';
   codigoOp?: string;
   idCreador?: number;
   idDefecto?: number;
@@ -57,16 +70,19 @@ export interface UsuarioActor {
   permisos: string[];
 }
 
-/** Semáforo de "esperando hace…", en horas de tiempo corrido. */
-export const HORAS_AMARILLO = 24;
-export const HORAS_ROJO = 48;
-
 const ESTADO_DE_FILTRO: Partial<Record<EstadoFiltro, string[]>> = {
-  en_curso: ['EN_VALIDACION', 'DEVUELTA', 'POR_IMPRIMIR', 'POR_DESPACHAR'],
+  en_curso: [
+    'EN_VALIDACION',
+    'DEVUELTA',
+    'POR_IMPRIMIR',
+    'POR_DESPACHAR',
+    'POR_RECOGER',
+  ],
   en_validacion: ['EN_VALIDACION'],
   devueltas: ['DEVUELTA'],
   por_imprimir: ['POR_IMPRIMIR'],
   por_despachar: ['POR_DESPACHAR'],
+  por_recoger: ['POR_RECOGER'],
   despachadas: ['DESPACHADA'],
   historicas: ['HISTORICA'],
 };
@@ -124,7 +140,10 @@ type FilaListado = Prisma.ReposicionGetPayload<{
 
 @Injectable()
 export class ReposicionesSeguimientoService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ReposicionesConfigService,
+  ) {}
 
   /** ¿La empresa tiene prendido el modo transitorio sin validaciones? */
   private async sinValidacion(idEmpresa: number): Promise<boolean> {
@@ -141,9 +160,16 @@ export class ReposicionesSeguimientoService {
    * creó (deshabilitado y con su motivo) para que no parezca que "no llegó".
    * El contador de pendientes, en cambio, cuenta solo lo que sí puede mover.
    */
+  /**
+   * `incluirEntregas`: bodega también marca la ENTREGA de lo que ya dejó listo
+   * (POR_RECOGER). Está en la cola de trabajo de la pantalla, pero NO en el contador
+   * ni en el aviso: ahí la pelota está del lado del solicitante, y avisarle a bodega
+   * cada vez que deja algo listo sería ruido.
+   */
   private condicionPorValidar(
     u: UsuarioActor,
     incluirPropias = false,
+    incluirEntregas = false,
   ): Prisma.ReposicionWhereInput {
     const ors: Prisma.ReposicionWhereInput[] = [];
     const pasos = pasosQueValida(u.permisos);
@@ -157,7 +183,13 @@ export class ReposicionesSeguimientoService {
     if (u.permisos.includes(PERMISO_IMPRIMIR))
       ors.push({ estado: 'POR_IMPRIMIR' });
     if (u.permisos.includes(PERMISO_DESPACHAR))
-      ors.push({ estado: 'POR_DESPACHAR' });
+      ors.push({
+        estado: {
+          in: incluirEntregas
+            ? ['POR_DESPACHAR', 'POR_RECOGER']
+            : ['POR_DESPACHAR'],
+        },
+      });
     // Sin ningún permiso de paso: la cola está vacía, no "todo".
     return ors.length > 0
       ? { anuladoEn: null, OR: ors }
@@ -183,7 +215,29 @@ export class ReposicionesSeguimientoService {
 
     // "Por validar" se combina con el estado: así la pantalla arma una cola por
     // paso (estado=en_validacion&paso=3) o la de bodega (estado=por_imprimir).
-    if (f.porValidar) y.push(this.condicionPorValidar(u, true));
+    if (f.porValidar) y.push(this.condicionPorValidar(u, true, true));
+
+    // Corte al que quedó asignada: el día completo, o ese corte exacto si se da la hora.
+    if (f.corteDia) {
+      const inicio = inicioDelDiaGT(f.corteDia);
+      if (f.corteHora) {
+        const [hh, mm] = f.corteHora.split(':').map(Number);
+        y.push({
+          corteEn: new Date(inicio.getTime() + (hh * 60 + mm) * 60_000),
+        });
+      } else {
+        const rangoCorte = rangoDeDiasGT(f.corteDia, f.corteDia);
+        if (rangoCorte) y.push({ corteEn: rangoCorte });
+      }
+    }
+    // Ruta: con validaciones (flujo real) o autorizadas al registrarlas.
+    if (f.ruta === 'sin')
+      y.push({ eventos: { some: { accion: 'SIN_VALIDACION' } } });
+    else if (f.ruta === 'con')
+      y.push({
+        estado: { not: 'HISTORICA' },
+        eventos: { none: { accion: 'SIN_VALIDACION' } },
+      });
     if (f.estado === 'anuladas') y.push({ anuladoEn: { not: null } });
     else if (f.estado !== 'todas')
       y.push({ anuladoEn: null, estado: { in: ESTADO_DE_FILTRO[f.estado] } });
@@ -234,8 +288,25 @@ export class ReposicionesSeguimientoService {
     return { AND: y };
   }
 
-  mapear(r: FilaListado, u: UsuarioActor, modoSinValidacion = false) {
+  mapear(
+    r: FilaListado,
+    u: UsuarioActor,
+    modoSinValidacion: boolean,
+    cfg: SemaforoConfig,
+    ahora: Date,
+  ) {
     const ciclo = eventosDelCiclo(r.eventos);
+    const semaforo = semaforoReposicion(
+      {
+        corteEn: r.corteEn,
+        listaEn: r.requisicion?.listaEn ?? null,
+        despachadaEn: r.requisicion?.despachadaEn ?? null,
+        estado: r.estado,
+        anulada: !!r.anuladoEn,
+      },
+      cfg,
+      ahora,
+    );
     const devolucion =
       r.estado === 'DEVUELTA'
         ? [...r.eventos].reverse().find((e) => e.accion === 'DEVOLVER')
@@ -258,6 +329,8 @@ export class ReposicionesSeguimientoService {
       estado: r.estado,
       pasoPendiente: r.pasoPendiente,
       estadoDesde: r.estadoDesde,
+      corteEn: r.corteEn,
+      semaforo,
       anuladoEn: r.anuladoEn,
       motivoAnulacion: r.motivoAnulacion,
       departamento: r.departamento.nombre,
@@ -308,7 +381,9 @@ export class ReposicionesSeguimientoService {
             numero: r.requisicion.numero,
             impresiones: r.requisicion.impresiones,
             numeroTalonario: r.requisicion.numeroTalonario,
+            listaEn: r.requisicion.listaEn,
             despachadaEn: r.requisicion.despachadaEn,
+            recibidoPor: r.requisicion.recibidoPor,
           }
         : null,
       acciones: {
@@ -322,15 +397,26 @@ export class ReposicionesSeguimientoService {
         imprimir:
           vivo &&
           ((u.permisos.includes(PERMISO_IMPRIMIR) &&
-            ['POR_IMPRIMIR', 'POR_DESPACHAR', 'DESPACHADA'].includes(
-              r.estado,
-            )) ||
+            [
+              'POR_IMPRIMIR',
+              'POR_DESPACHAR',
+              'POR_RECOGER',
+              'DESPACHADA',
+            ].includes(r.estado)) ||
             (PERMISOS_COPIA_REQUISICION.some((p) => u.permisos.includes(p)) &&
-              ['POR_DESPACHAR', 'DESPACHADA'].includes(r.estado))),
-        despachar:
+              ['POR_DESPACHAR', 'POR_RECOGER', 'DESPACHADA'].includes(
+                r.estado,
+              ))),
+        // Bodega: dejar lista (y avisar) y, cuando el solicitante llega, entregar.
+        // Entregar también vale desde POR_DESPACHAR: la persona ya está en bodega.
+        preparar:
           vivo &&
           u.permisos.includes(PERMISO_DESPACHAR) &&
           r.estado === 'POR_DESPACHAR',
+        entregar:
+          vivo &&
+          u.permisos.includes(PERMISO_DESPACHAR) &&
+          (r.estado === 'POR_DESPACHAR' || r.estado === 'POR_RECOGER'),
         // Modo transitorio sin validaciones: lo que quedó esperando se puede
         // autorizar de una vez (la devuelta se corrige primero).
         autorizarDirecto:
@@ -348,15 +434,24 @@ export class ReposicionesSeguimientoService {
 
   async listar(f: FiltrosSeguimiento, u: UsuarioActor, idEmpresa: number) {
     const where = this.where(f, u, idEmpresa);
-    const modoSinValidacion = await this.sinValidacion(idEmpresa);
+    const [modoSinValidacion, cfg] = await Promise.all([
+      this.sinValidacion(idEmpresa),
+      this.config.semaforo(idEmpresa),
+    ]);
+    const ahora = new Date();
     const [total, filas] = await Promise.all([
       this.prisma.reposicion.count({ where }),
       this.prisma.reposicion.findMany({
         where,
         include: INCLUDE_LISTADO,
-        // La cola se trabaja de lo más viejo a lo más nuevo; el listado, al revés.
+        // La cola se trabaja por corte (se autoriza y despacha un corte completo) y,
+        // dentro de él, de lo más viejo a lo más nuevo; el listado, al revés.
         orderBy: f.porValidar
-          ? [{ estadoDesde: 'asc' }, { idReposicion: 'asc' }]
+          ? [
+              { corteEn: 'asc' },
+              { estadoDesde: 'asc' },
+              { idReposicion: 'asc' },
+            ]
           : [{ creadoEn: 'desc' }, { idReposicion: 'desc' }],
         skip: (f.pagina - 1) * f.porPagina,
         take: f.porPagina,
@@ -367,7 +462,8 @@ export class ReposicionesSeguimientoService {
       pagina: f.pagina,
       porPagina: f.porPagina,
       paginas: Math.max(1, Math.ceil(total / f.porPagina)),
-      filas: filas.map((r) => this.mapear(r, u, modoSinValidacion)),
+      generadoEn: ahora.toISOString(),
+      filas: filas.map((r) => this.mapear(r, u, modoSinValidacion, cfg, ahora)),
       resumen: await this.resumen(u, idEmpresa),
     };
   }
@@ -418,6 +514,7 @@ export class ReposicionesSeguimientoService {
       devueltas: cuenta('DEVUELTA'),
       porImprimir: cuenta('POR_IMPRIMIR'),
       porDespachar: cuenta('POR_DESPACHAR'),
+      porRecoger: cuenta('POR_RECOGER'),
       despachadas: cuenta('DESPACHADA'),
       porValidar,
       devueltasMias,
@@ -438,7 +535,7 @@ export class ReposicionesSeguimientoService {
    * último que ya avisó.
    */
   async avisos(u: UsuarioActor, idEmpresa: number) {
-    const [grupos, devueltas] = await Promise.all([
+    const [grupos, devueltas, porRecoger] = await Promise.all([
       this.prisma.reposicion.groupBy({
         by: ['estado', 'pasoPendiente'],
         where: {
@@ -460,12 +557,31 @@ export class ReposicionesSeguimientoService {
         _count: { _all: true },
         _max: { estadoDesde: true },
       }),
+      // Bodega ya dejó lista la requisición: avisa a quien la pidió y a su encargado
+      // de área (quien validó el paso 2). `estadoDesde` es el instante en que quedó lista.
+      this.prisma.reposicion.aggregate({
+        where: {
+          ordenProduccion: { idEmpresa },
+          anuladoEn: null,
+          estado: 'POR_RECOGER',
+          OR: [
+            { creadoPor: u.sub },
+            {
+              eventos: {
+                some: { accion: 'VALIDAR', paso: 2, idUsuario: u.sub },
+              },
+            },
+          ],
+        },
+        _count: { _all: true },
+        _max: { estadoDesde: true },
+      }),
     ]);
     const etiqueta = (estado: string, paso: number | null) =>
       estado === 'POR_IMPRIMIR'
         ? 'Requisiciones por imprimir'
         : estado === 'POR_DESPACHAR'
-          ? 'Por despachar en bodega'
+          ? 'En bodega por dejar lista'
           : `Paso ${paso} · ${NOMBRE_PASO[paso ?? 0] ?? ''}`;
     const orden = (g: { estado: string; pasoPendiente: number | null }) =>
       g.estado === 'EN_VALIDACION'
@@ -491,6 +607,10 @@ export class ReposicionesSeguimientoService {
       devueltas: {
         cantidad: devueltas._count._all,
         masReciente: maximo([devueltas._max.estadoDesde]),
+      },
+      porRecoger: {
+        cantidad: porRecoger._count._all,
+        masReciente: maximo([porRecoger._max.estadoDesde]),
       },
     };
   }
@@ -547,7 +667,7 @@ export class ReposicionesSeguimientoService {
         max(e.segundos)::float AS maximo
       FROM costeo.reposicion_evento e
       WHERE e.id_empresa = ${idEmpresa}
-        AND (e.accion IN ('VALIDAR', 'DEVOLVER', 'IMPRIMIR', 'DESPACHAR')
+        AND (e.accion IN ('VALIDAR', 'DEVOLVER', 'IMPRIMIR', 'PREPARAR', 'DESPACHAR')
              OR (e.accion = 'CORREGIR' AND e.paso = 1))
         ${condRango}
       GROUP BY e.paso, e.accion
@@ -571,7 +691,9 @@ export class ReposicionesSeguimientoService {
         max(e.segundos)::float AS maximo
       FROM costeo.reposicion_evento e
       WHERE e.id_empresa = ${idEmpresa}
-        AND e.accion IN ('VALIDAR', 'DEVOLVER', 'IMPRIMIR', 'DESPACHAR')
+        -- El DESPACHAR (paso 9) NO va por usuario: su tiempo es la espera del
+        -- solicitante y se le atribuiría, mal, a quien marcó la entrega en bodega.
+        AND e.accion IN ('VALIDAR', 'DEVOLVER', 'IMPRIMIR', 'PREPARAR')
         ${condRango}
       GROUP BY e.paso, e.usuario_nombre
       ORDER BY e.paso, avg(e.segundos) DESC`;
@@ -638,22 +760,30 @@ export class ReposicionesSeguimientoService {
       estado: string;
       paso_pendiente: number | null;
       segundos: number;
+      corte_en: Date | null;
+      lista_en: Date | null;
       creador: string | null;
     };
     // Lo que está esperando AHORA (no depende del rango).
     const enCurso = await this.prisma.$queryRaw<FilaEnCurso[]>`
       SELECT r.id_reposicion, op.codigo || '-' || r.codigo_repo AS codigo, r.estado, r.paso_pendiente,
         extract(epoch FROM (now() - r.estado_desde))::float AS segundos,
+        r.corte_en, q.lista_en,
         (SELECT c.usuario_nombre FROM costeo.reposicion_evento c
           WHERE c.id_reposicion = r.id_reposicion AND c.accion = 'CREAR' LIMIT 1) AS creador
       FROM costeo.reposicion r
       JOIN costeo.orden_produccion op ON op.id_orden_produccion = r.id_orden_produccion
+      LEFT JOIN costeo.requisicion_reposicion q ON q.id_reposicion = r.id_reposicion
       WHERE op.id_empresa = ${idEmpresa} AND r.anulado_en IS NULL
-        AND r.estado IN ('EN_VALIDACION', 'DEVUELTA', 'POR_IMPRIMIR', 'POR_DESPACHAR')
+        AND r.estado IN ('EN_VALIDACION', 'DEVUELTA', 'POR_IMPRIMIR', 'POR_DESPACHAR', 'POR_RECOGER')
       ORDER BY r.estado_desde ASC`;
 
+    const cfg = await this.config.semaforo(idEmpresa);
+    const ahora = new Date();
     const horas = (s: number | null) =>
       s == null ? null : Math.round((s / 3600) * 100) / 100;
+    const minutos = (s: number | null) =>
+      s == null ? null : Math.round((s / 60) * 10) / 10;
     const pasoDeEnCurso = (x: FilaEnCurso) =>
       x.estado === 'EN_VALIDACION'
         ? (x.paso_pendiente ?? 2)
@@ -661,28 +791,135 @@ export class ReposicionesSeguimientoService {
           ? 1
           : x.estado === 'POR_IMPRIMIR'
             ? 7
-            : 8;
-    const enCursoPorPaso = [1, 2, 3, 4, 5, 6, 7, 8].map((paso) => {
+            : x.estado === 'POR_DESPACHAR'
+              ? 8
+              : 9;
+    // El color de cada una sale del mismo semáforo que ve la tabla. Antes de su corte
+    // (recolección) no tiene color: esperar el corte es lo esperado, no una demora.
+    const colorDe = (x: FilaEnCurso): ColorSemaforo =>
+      semaforoReposicion(
+        {
+          corteEn: x.corte_en,
+          listaEn: x.lista_en,
+          despachadaEn: null,
+          estado: x.estado,
+          anulada: false,
+        },
+        cfg,
+        ahora,
+      )?.color ?? 'neutro';
+    const enCursoPorPaso = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((paso) => {
       const xs = enCurso.filter((x) => pasoDeEnCurso(x) === paso);
+      const colores = xs.map(colorDe);
+      const cuenta = (c: ColorSemaforo) =>
+        colores.filter((k) => k === c).length;
       return {
         paso,
-        nombre: paso === 1 ? 'Devueltas (corrección)' : NOMBRE_PASO[paso],
+        nombre:
+          paso === 1
+            ? 'Devueltas (corrección)'
+            : paso === 9
+              ? 'Por recoger'
+              : NOMBRE_PASO[paso],
         cantidad: xs.length,
         masAntiguaHoras: horas(xs[0]?.segundos ?? null),
-        mas24: xs.filter((x) => x.segundos >= HORAS_AMARILLO * 3600).length,
-        mas48: xs.filter((x) => x.segundos >= HORAS_ROJO * 3600).length,
+        verdes: cuenta('verde'),
+        amarillas: cuenta('amarillo'),
+        rojas: cuenta('rojo'),
+        enRecoleccion: cuenta('neutro'),
       };
     });
+
+    // ── Por corte ────────────────────────────────────────────────────────
+    // El rango filtra por la hora del CORTE (a qué corte pertenece cada una), no por
+    // cuándo ocurrió cada evento.
+    const condCorte = Prisma.sql`
+      ${rango?.gte ? Prisma.sql`AND r.corte_en >= ${rango.gte}` : Prisma.empty}
+      ${rango?.lt ? Prisma.sql`AND r.corte_en < ${rango.lt}` : Prisma.empty}`;
+    type FilaCorte = {
+      corte_en: Date;
+      estado: string;
+      lista_en: Date | null;
+      despachada_en: Date | null;
+      validada_en: Date | null;
+      autorizada_en: Date | null;
+    };
+    // Una fila por reposición, con los instantes que dividen el proceso; los colores
+    // se calculan en TS con los minutos configurados, sin duplicar la regla en SQL.
+    const filasCorte = await this.prisma.$queryRaw<FilaCorte[]>`
+      SELECT r.corte_en, r.estado, q.lista_en, q.despachada_en,
+        (SELECT max(e.creado_en) FROM costeo.reposicion_evento e
+          WHERE e.id_reposicion = r.id_reposicion AND e.accion = 'VALIDAR' AND e.paso = 5) AS validada_en,
+        (SELECT max(e.creado_en) FROM costeo.reposicion_evento e
+          WHERE e.id_reposicion = r.id_reposicion AND e.accion = 'VALIDAR' AND e.paso = 6) AS autorizada_en
+      FROM costeo.reposicion r
+      JOIN costeo.orden_produccion op ON op.id_orden_produccion = r.id_orden_produccion
+      LEFT JOIN costeo.requisicion_reposicion q ON q.id_reposicion = r.id_reposicion
+      WHERE op.id_empresa = ${idEmpresa} AND r.anulado_en IS NULL
+        AND r.corte_en IS NOT NULL AND r.estado <> 'HISTORICA'
+        ${condCorte}`;
+    const porCorte = agruparPorCorte(filasCorte, cfg, ahora);
+
+    type FilaAtraso = {
+      paso: number;
+      usuario: string;
+      total: bigint;
+      tardias: bigint;
+      atraso_prom_min: number | null;
+      atraso_max_min: number | null;
+    };
+    // Pasos 2 a 5: lo que importa es si la validación estaba lista PARA EL CORTE, no
+    // cuánto tardó en crudo (que castiga a quien recibe lo que se creó de noche).
+    const atrasoAlCorte = await this.prisma.$queryRaw<FilaAtraso[]>`
+      SELECT e.paso, e.usuario_nombre AS usuario, count(*) AS total,
+        count(*) FILTER (WHERE e.creado_en > r.corte_en) AS tardias,
+        avg(extract(epoch FROM (e.creado_en - r.corte_en)) / 60)
+          FILTER (WHERE e.creado_en > r.corte_en)::float AS atraso_prom_min,
+        max(extract(epoch FROM (e.creado_en - r.corte_en)) / 60)
+          FILTER (WHERE e.creado_en > r.corte_en)::float AS atraso_max_min
+      FROM costeo.reposicion_evento e
+      JOIN costeo.reposicion r ON r.id_reposicion = e.id_reposicion
+      WHERE e.id_empresa = ${idEmpresa} AND e.accion = 'VALIDAR'
+        AND e.paso BETWEEN 2 AND 5 AND r.corte_en IS NOT NULL
+        ${condCorte}
+      GROUP BY e.paso, e.usuario_nombre
+      ORDER BY e.paso, count(*) FILTER (WHERE e.creado_en > r.corte_en) DESC`;
 
     const c = ciclo[0];
     return {
       desde: desde ?? null,
       hasta: hasta ?? null,
-      horasAmarillo: HORAS_AMARILLO,
-      horasRojo: HORAS_ROJO,
+      // Los minutos que pintan los colores, para que la pantalla no tenga números propios.
+      semaforo: cfg,
+      porCorte,
+      atrasoAlCorte: atrasoAlCorte.map((a) => {
+        const total = Number(a.total);
+        const tardias = Number(a.tardias);
+        return {
+          paso: a.paso,
+          nombrePaso: NOMBRE_PASO[a.paso],
+          usuario: a.usuario,
+          total,
+          tardias,
+          pctTardias: total ? Math.round((tardias / total) * 1000) / 10 : 0,
+          atrasoPromedioMin:
+            a.atraso_prom_min == null
+              ? null
+              : Math.round(a.atraso_prom_min * 10) / 10,
+          atrasoMaximoMin:
+            a.atraso_max_min == null
+              ? null
+              : Math.round(a.atraso_max_min * 10) / 10,
+        };
+      }),
       porPaso: porPaso.map((p) => ({
         paso: p.paso,
-        nombre: p.paso === 1 ? 'Corrección (creador)' : NOMBRE_PASO[p.paso],
+        nombre:
+          p.paso === 1
+            ? 'Corrección (creador)'
+            : p.paso === 9
+              ? 'Espera del solicitante'
+              : NOMBRE_PASO[p.paso],
         accion: p.accion,
         cantidad: Number(p.cantidad),
         promedioHoras: horas(p.promedio),
@@ -723,8 +960,13 @@ export class ReposicionesSeguimientoService {
         nombrePaso:
           pasoDeEnCurso(x) === 1
             ? 'Devuelta (corrección)'
-            : NOMBRE_PASO[pasoDeEnCurso(x)],
+            : pasoDeEnCurso(x) === 9
+              ? 'Por recoger'
+              : NOMBRE_PASO[pasoDeEnCurso(x)],
         horas: horas(x.segundos),
+        minutos: minutos(x.segundos),
+        corteEn: x.corte_en,
+        color: colorDe(x),
         creador: x.creador,
       })),
     };
@@ -739,7 +981,11 @@ export class ReposicionesSeguimientoService {
   ) {
     const TOPE = 20_000;
     const where = this.where(f, u, idEmpresa);
-    const modoSinValidacion = await this.sinValidacion(idEmpresa);
+    const [modoSinValidacion, cfg] = await Promise.all([
+      this.sinValidacion(idEmpresa),
+      this.config.semaforo(idEmpresa),
+    ]);
+    const ahora = new Date();
     const filas = await this.prisma.reposicion.findMany({
       where,
       include: INCLUDE_LISTADO,
@@ -749,7 +995,7 @@ export class ReposicionesSeguimientoService {
     const truncado = filas.length > TOPE;
     const mapeadas = filas
       .slice(0, TOPE)
-      .map((r) => this.mapear(r, u, modoSinValidacion));
+      .map((r) => this.mapear(r, u, modoSinValidacion, cfg, ahora));
     const buffer = await construirExcelSeguimiento({
       filas: mapeadas,
       truncado,
@@ -795,6 +1041,96 @@ export class ReposicionesSeguimientoService {
 function hoyGT() {
   return new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
 }
+
+interface FilaPorCorte {
+  corte_en: Date;
+  estado: string;
+  lista_en: Date | null;
+  despachada_en: Date | null;
+  validada_en: Date | null;
+  autorizada_en: Date | null;
+}
+
+const minEntre = (desde: Date, hasta: Date) =>
+  Math.max(0, (hasta.getTime() - desde.getTime()) / 60_000);
+
+const promedio = (xs: number[]) =>
+  xs.length
+    ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10
+    : null;
+
+/**
+ * Una fila por corte con cuántas salieron en verde, amarillo y rojo. El color de las
+ * que ya están listas es el de lo que tardaron (congelado); el de las que siguen
+ * corriendo, el de ahora. Lo que todavía espera su corte no se mide.
+ */
+function agruparPorCorte(
+  filas: FilaPorCorte[],
+  cfg: SemaforoConfig,
+  ahora: Date,
+) {
+  const grupos = new Map<number, FilaPorCorte[]>();
+  for (const f of filas) {
+    const k = f.corte_en.getTime();
+    grupos.set(k, [...(grupos.get(k) ?? []), f]);
+  }
+  return [...grupos.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .slice(0, 500)
+    .map(([k, fs]) => {
+      const corte = new Date(k);
+      const yaPaso = corte.getTime() <= ahora.getTime();
+      const cerradas = fs.filter((f) => f.lista_en);
+      const proceso = cerradas.map((f) => minEntre(corte, f.lista_en!));
+      // Las que siguen corriendo pasado su corte cuentan con el color de ahora.
+      const abiertas = yaPaso
+        ? fs.filter((f) => !f.lista_en).map(() => minEntre(corte, ahora))
+        : [];
+      const colores = [...proceso, ...abiertas].map((m) =>
+        colorDeMinutos(m, cfg),
+      );
+      const cuenta = (c: string) => colores.filter((x) => x === c).length;
+      const medidas = colores.length;
+      return {
+        corteEn: corte.toISOString(),
+        total: fs.length,
+        verdes: cuenta('verde'),
+        amarillas: cuenta('amarillo'),
+        rojas: cuenta('rojo'),
+        // Solo las que aún esperan su corte: las que bodega ya dejó lista antes de la
+        // hora (verdes, 0 min) no están en recolección.
+        enRecoleccion: yaPaso ? 0 : fs.filter((f) => !f.lista_en).length,
+        pctVerde: medidas
+          ? Math.round((cuenta('verde') / medidas) * 1000) / 10
+          : null,
+        procesoPromedioMin: promedio(proceso),
+        procesoMaximoMin: proceso.length
+          ? Math.round(Math.max(...proceso) * 10) / 10
+          : null,
+        // Llegaron al corte sin tener hechas las validaciones de los pasos 2 a 5.
+        sinValidarAlCorte: yaPaso
+          ? fs.filter((f) => !f.validada_en || f.validada_en > corte).length
+          : 0,
+        autorizacionPromedioMin: promedio(
+          fs
+            .filter((f) => f.autorizada_en)
+            .map((f) => minEntre(corte, f.autorizada_en!)),
+        ),
+        bodegaPromedioMin: promedio(
+          fs
+            .filter((f) => f.autorizada_en && f.lista_en)
+            .map((f) => minEntre(f.autorizada_en!, f.lista_en!)),
+        ),
+        solicitantePromedioMin: promedio(
+          fs
+            .filter((f) => f.lista_en && f.despachada_en)
+            .map((f) => minEntre(f.lista_en!, f.despachada_en!)),
+        ),
+      };
+    });
+}
+
+export type FilaPorCorteMetrica = ReturnType<typeof agruparPorCorte>[number];
 
 export type FilaSeguimiento = ReturnType<
   ReposicionesSeguimientoService['mapear']

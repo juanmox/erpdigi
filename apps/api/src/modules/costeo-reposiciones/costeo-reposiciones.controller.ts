@@ -7,6 +7,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   Res,
 } from '@nestjs/common';
@@ -17,17 +18,20 @@ import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import type { JwtPayload } from '../auth/types/jwt-payload.type';
 import { CosteoReposicionesService } from './costeo-reposiciones.service';
 import { AnularReposicionDto } from './dto/anular-reposicion.dto';
+import { GuardarCortesDto, SemaforoDto } from './dto/configuracion-cortes.dto';
 import { CrearReposicionDto } from './dto/crear-reposicion.dto';
 import {
   AutorizarDirectoDto,
   ConfigurarReposicionesDto,
   CorregirReposicionDto,
-  DespacharRequisicionesDto,
   DevolverReposicionesDto,
+  EntregarRequisicionesDto,
   ImprimirRequisicionesDto,
+  PrepararRequisicionesDto,
   ValidarReposicionesDto,
 } from './dto/flujo-reposicion.dto';
 import { PERMISO_IMPRIMIR, PERMISOS_COPIA_REQUISICION } from './flujo';
+import { ReposicionesConfigService } from './reposiciones-config.service';
 import { ReposicionesFlujoService } from './reposiciones-flujo.service';
 import {
   ESTADOS_FILTRO,
@@ -41,6 +45,7 @@ const entero = (v?: string) => {
   const n = Number(v);
   return v && Number.isInteger(n) && n > 0 ? n : undefined;
 };
+const HORA = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 const si = (v?: string) => v === 'true' || v === '1';
 
 /** Los filtros del seguimiento desde la query (mismo intérprete para listado y Excel). */
@@ -54,6 +59,12 @@ function filtros(q: Record<string, string | undefined>): FiltrosSeguimiento {
     paso: entero(q.paso),
     soloMias: si(q.soloMias),
     porValidar: si(q.porValidar),
+    corteDia: q.corteDia && DIA.test(q.corteDia) ? q.corteDia : undefined,
+    corteHora:
+      q.corteDia && q.corteHora && HORA.test(q.corteHora)
+        ? q.corteHora
+        : undefined,
+    ruta: q.ruta === 'con' || q.ruta === 'sin' ? q.ruta : undefined,
     codigoOp: q.codigoOp?.trim() || undefined,
     idCreador: entero(q.idCreador),
     idDefecto: entero(q.idDefecto),
@@ -86,6 +97,7 @@ export class CosteoReposicionesController {
     private readonly service: CosteoReposicionesService,
     private readonly flujo: ReposicionesFlujoService,
     private readonly seguimiento: ReposicionesSeguimientoService,
+    private readonly config: ReposicionesConfigService,
   ) {}
 
   @RequirePermissions('costeo.reposicion.ver')
@@ -213,6 +225,27 @@ export class CosteoReposicionesController {
     return this.service.configurar(dto.sinValidacion, usuario.sub, idEmpresa);
   }
 
+  // Cortes de requisiciones: se reemplaza el conjunto completo, no un delta.
+  @RequirePermissions('costeo.reposicion.configurar')
+  @Put('configuracion/cortes')
+  guardarCortes(
+    @Body() dto: GuardarCortesDto,
+    @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
+  ) {
+    return this.config.guardarCortes(dto.cortes, usuario.sub, idEmpresa);
+  }
+
+  @RequirePermissions('costeo.reposicion.configurar')
+  @Patch('configuracion/semaforo')
+  guardarSemaforo(
+    @Body() dto: SemaforoDto,
+    @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
+  ) {
+    return this.config.guardarSemaforo(dto, usuario.sub, idEmpresa);
+  }
+
   @RequirePermissions('costeo.reposicion.crear')
   @Post('autorizar-directo')
   autorizarDirecto(
@@ -264,14 +297,26 @@ export class CosteoReposicionesController {
     );
   }
 
+  // Bodega deja lista la requisición y avisa a quien la pidió (paso 8).
   @RequirePermissions('costeo.reposicion.despachar')
-  @Post('requisiciones/despachar')
-  despachar(
-    @Body() dto: DespacharRequisicionesDto,
+  @Post('requisiciones/preparar')
+  preparar(
+    @Body() dto: PrepararRequisicionesDto,
     @CurrentUser() usuario: JwtPayload,
     @EmpresaActual() idEmpresa: number,
   ) {
-    return this.flujo.despacharLote(dto, usuario.sub, idEmpresa);
+    return this.flujo.prepararLote(dto.ids, usuario.sub, idEmpresa);
+  }
+
+  // El solicitante recogió: bodega marca la entrega (paso 9).
+  @RequirePermissions('costeo.reposicion.despachar')
+  @Post('requisiciones/entregar')
+  entregar(
+    @Body() dto: EntregarRequisicionesDto,
+    @CurrentUser() usuario: JwtPayload,
+    @EmpresaActual() idEmpresa: number,
+  ) {
+    return this.flujo.entregarLote(dto, usuario.sub, idEmpresa);
   }
 
   @RequirePermissions('costeo.reposicion.ver')

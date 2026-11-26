@@ -12,8 +12,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { nombreParaHistorial } from '../costeo-materiales/materiales-historial';
 import {
-  DespacharRequisicionesDto,
   DevolverReposicionesDto,
+  EntregarRequisicionesDto,
   ValidarReposicionesDto,
 } from './dto/flujo-reposicion.dto';
 import {
@@ -23,8 +23,9 @@ import {
   motivoNoPuedeValidar,
   NOMBRE_PASO,
   PASO_AUTORIZACION,
-  PASO_DESPACHO,
+  PASO_ENTREGA,
   PASO_IMPRESION,
+  PASO_PREPARACION,
   permisoDelPaso,
 } from './flujo';
 import { espejarReposicionEnSheets } from './reposiciones-espejo';
@@ -737,10 +738,94 @@ export class ReposicionesFlujoService {
       }));
   }
 
-  // ── Despachar (paso 8) ───────────────────────────────────────────────
+  // ── Preparar en bodega (paso 8) y entregar al solicitante (paso 9) ──────
 
-  async despacharLote(
-    dto: DespacharRequisicionesDto,
+  /**
+   * Bodega deja lista la requisición y AVISA: quien la pidió y su encargado de área
+   * reciben el aviso (ver `avisos()` del seguimiento). Acá termina el reloj de bodega:
+   * de "lista" a la entrega la demora es del solicitante, no de bodega.
+   */
+  async prepararLote(ids: number[], idUsuario: number, idEmpresa: number) {
+    const usuarioNombre = await nombreParaHistorial(this.prisma, idUsuario);
+    const unicos = [...new Set(ids)];
+    const codigos = await this.codigos(unicos);
+    const hechas: number[] = [];
+    const fallidas: FallaLote[] = [];
+
+    for (const id of unicos) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          const r = await this.bloquear(tx, id, idEmpresa);
+          if (r.anuladoEn)
+            throw new ConflictException('La reposición está anulada.');
+          if (r.estado !== 'POR_DESPACHAR')
+            throw new ConflictException(
+              r.estado === 'POR_RECOGER' || r.estado === 'DESPACHADA'
+                ? 'Ya estaba lista para recoger.'
+                : 'Primero hay que imprimir su requisición.',
+            );
+          await this.dejarLista(tx, r, idUsuario, usuarioNombre, idEmpresa);
+        });
+        hechas.push(id);
+      } catch (e) {
+        fallidas.push({
+          idReposicion: id,
+          codigo: codigos.get(id) ?? null,
+          motivo: mensajeDe(e),
+        });
+      }
+    }
+
+    if (hechas.length > 0)
+      await this.auditoria.registrar({
+        idUsuario,
+        entidad: 'costeo.reposicion',
+        idEntidad: hechas.join(','),
+        accion: 'UPDATE',
+        datosNuevos: { listasParaRecoger: hechas.length },
+      });
+
+    return { hechas: hechas.length, idsHechas: hechas, fallidas };
+  }
+
+  /** POR_DESPACHAR → POR_RECOGER: fija quién y cuándo la dejó lista, y deja el evento. */
+  private async dejarLista(
+    tx: TxCliente,
+    r: { idReposicion: number; estadoDesde: Date | null; creadoEn: Date },
+    idUsuario: number,
+    usuarioNombre: string,
+    idEmpresa: number,
+    ahora = new Date(),
+  ) {
+    await tx.requisicionReposicion.update({
+      where: { idReposicion: r.idReposicion },
+      data: { listaEn: ahora, listaPor: idUsuario },
+    });
+    await tx.reposicion.update({
+      where: { idReposicion: r.idReposicion },
+      data: { estado: 'POR_RECOGER', estadoDesde: ahora },
+    });
+    await crearEventosReposicion(tx, [
+      {
+        idEmpresa,
+        idReposicion: r.idReposicion,
+        accion: 'PREPARAR',
+        paso: PASO_PREPARACION,
+        desde: r.estadoDesde ?? r.creadoEn,
+        ahora,
+        idUsuario,
+        usuarioNombre,
+      },
+    ]);
+  }
+
+  /**
+   * El solicitante llegó a recoger: bodega marca la entrega. Si la requisición
+   * todavía no estaba marcada "lista" (la persona ya estaba en bodega), se deja
+   * lista y entregada en el mismo instante: no hubo espera que medir.
+   */
+  async entregarLote(
+    dto: EntregarRequisicionesDto,
     idUsuario: number,
     idEmpresa: number,
   ) {
@@ -757,42 +842,64 @@ export class ReposicionesFlujoService {
           const r = await this.bloquear(tx, id, idEmpresa);
           if (r.anuladoEn)
             throw new ConflictException('La reposición está anulada.');
-          if (r.estado !== 'POR_DESPACHAR')
+          if (r.estado === 'DESPACHADA')
+            throw new ConflictException('Ya estaba entregada.');
+          if (r.estado !== 'POR_RECOGER' && r.estado !== 'POR_DESPACHAR')
             throw new ConflictException(
-              r.estado === 'DESPACHADA'
-                ? 'Ya estaba despachada.'
-                : 'Primero hay que imprimir su requisición.',
+              'Primero hay que imprimir su requisición.',
             );
+
           const ahora = new Date();
+          let desde = r.estadoDesde ?? r.creadoEn;
+          if (r.estado === 'POR_DESPACHAR') {
+            await this.dejarLista(
+              tx,
+              r,
+              idUsuario,
+              usuarioNombre,
+              idEmpresa,
+              ahora,
+            );
+            desde = ahora;
+          }
+          const talonario = item.numeroTalonario?.trim() || null;
+          const recibidoPor = item.recibidoPor?.trim() || null;
           await tx.requisicionReposicion.update({
             where: { idReposicion: id },
             data: {
               despachadaEn: ahora,
               despachadaPor: idUsuario,
-              numeroTalonario: item.numeroTalonario?.trim() || null,
+              numeroTalonario: talonario,
+              recibidoPor,
             },
           });
           await tx.reposicion.update({
             where: { idReposicion: id },
             data: { estado: 'DESPACHADA', estadoDesde: ahora },
           });
+          const cambios: CambioReposicion[] = [];
+          if (talonario)
+            cambios.push({
+              campo: 'Nº talonario',
+              antes: null,
+              despues: talonario,
+            });
+          if (recibidoPor)
+            cambios.push({
+              campo: 'Recibido por',
+              antes: null,
+              despues: recibidoPor,
+            });
           await crearEventosReposicion(tx, [
             {
               idEmpresa,
               idReposicion: id,
               accion: 'DESPACHAR',
-              paso: PASO_DESPACHO,
-              desde: r.estadoDesde ?? r.creadoEn,
+              paso: PASO_ENTREGA,
+              // Desde que quedó lista: lo que tardó el solicitante en recoger.
+              desde,
               ahora,
-              cambios: item.numeroTalonario?.trim()
-                ? [
-                    {
-                      campo: 'Nº talonario',
-                      antes: null,
-                      despues: item.numeroTalonario.trim(),
-                    },
-                  ]
-                : [],
+              cambios,
               idUsuario,
               usuarioNombre,
             },
@@ -814,7 +921,7 @@ export class ReposicionesFlujoService {
         entidad: 'costeo.reposicion',
         idEntidad: hechas.join(','),
         accion: 'UPDATE',
-        datosNuevos: { despachadas: hechas.length },
+        datosNuevos: { entregadas: hechas.length },
       });
 
     return { hechas: hechas.length, idsHechas: hechas, fallidas };

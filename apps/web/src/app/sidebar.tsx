@@ -98,7 +98,7 @@ function useItemsNav(): NavItemInfo[] {
     // El formulario es para quien registra; los validadores trabajan desde el
     // seguimiento (`SR`, libre: IN RC CR OP RE IO CE RS OF EM DB).
     ...(tienePermiso('costeo.reposicion.crear') ? [{ to: '/costeo/reposiciones', codigo: 'RE', etiqueta: 'Reposiciones', end: true, contador: avisosRepos?.devueltas.cantidad }] : []),
-    ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones/seguimiento', codigo: 'SR', etiqueta: 'Seguimiento de reposiciones', contador: avisosRepos?.total }] : []),
+    ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones/seguimiento', codigo: 'SR', etiqueta: 'Seguimiento de reposiciones', contador: avisosRepos ? avisosRepos.total + avisosRepos.porRecoger.cantidad : undefined }] : []),
     ...(tienePermiso('costeo.consumo.ver') ? [{ to: '/costeo/consumo', codigo: 'IO', etiqueta: 'Impresión de OPs' }] : []),
     ...(tienePermiso('costeo.estandar.ver') ? [{ to: '/costeo/estandar', codigo: 'CE', etiqueta: 'Consumo Estándar' }] : []),
     // "Reportes de Costeo" y no "Reportes" a secas: el mosaico de Inicio ya

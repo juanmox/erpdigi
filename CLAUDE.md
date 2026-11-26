@@ -1154,6 +1154,58 @@ reposiciones por día** en producción (las crean gabriela y marjorie), así que
     `HISTORICA` anterior al flujo porque esta tiene evento `CREAR`.
   - **Apagarlo** devuelve lo nuevo al flujo; lo ya autorizado queda como está.
 
+## Reposiciones: cortes, semáforo en minutos y entrega al solicitante (2026-11-25, SOLO LOCAL, sin commitear)
+La planta trabaja por **cortes** (07:00, 09:00, 11:00, 14:00, 16:30, lunes a viernes): entre un corte y el siguiente se
+recopila y se validan los pasos 2 a 5; a la hora del corte se autoriza, se imprime y bodega tiene ~30 min. Lo creado
+después del último corte (turno nocturno incluido) va al primero del siguiente día hábil. El semáforo fijo de 24/48 h
+medido "desde el último paso" no servía: con cortes cada 2 h una reposición "espera" casi 2 h **por diseño**.
+- **El reloj arranca en el corte, no en la creación.** `reposicion.corte_en` (congelado al crear: cambiar los horarios no
+  mueve lo ya creado, y corregir una devuelta conserva su corte). `siguienteCorte()` en `common/cortes-reposicion.ts` (con
+  spec, 20 casos): primer corte **estrictamente posterior** (a las 09:00:00 va al de las 11:00); la misma regla vive en SQL en
+  la migración para rellenar lo ya creado y las dos tienen que decir lo mismo.
+- **Un solo semáforo, tres fases** (`semaforoReposicion()`): *recolección* (creación → corte, sin color: esperar es lo
+  esperado) → *proceso del corte* (corte → bodega marca "lista", **verde < 45 min · amarillo < 60 · rojo desde ahí**, y se
+  congela al marcar lista) → *espera del solicitante* (lista → entrega; roja pasada la tolerancia de 15 min y **a cargo de
+  quien debe recoger, no de bodega**). El servidor calcula el color y la pantalla solo lo pinta: ya no hay números de
+  semáforo en el frontend (`HORAS_AMARILLO/ROJO` se eliminaron de los dos lados).
+- **Configurable por empresa** (`costeo.reposicion_corte`, `costeo.reposicion_configuracion`, permiso existente
+  `costeo.reposicion.configurar`): botón "Configurar cortes y semáforo" en Seguimiento. Cortes con hora y días de la semana, sin
+  límite; `PUT configuracion/cortes` recibe el **conjunto completo**, no un delta. Minutos con CHECK `0 < verde < amarillo ≤ 1440`.
+  Sin fila de configuración el código usa los mismos valores por defecto.
+- **Despacho en dos pasos**: paso 8 "Preparación en bodega" (`POST requisiciones/preparar`, estado nuevo **`POR_RECOGER`**,
+  evento `PREPARAR`) y paso 9 "Entrega al solicitante" (`POST requisiciones/entregar`, evento `DESPACHAR` ahora en el paso 9, con
+  "Recibido por" opcional). Entregar también vale desde `POR_DESPACHAR` (la persona ya está en bodega): deja lista y entregada en el
+  mismo instante, sin espera que medir. `POR_RECOGER` cuenta como autorizada en las vistas y en `ESTADOS_AUTORIZADOS`; sin eso
+  desaparecería del consumo. `POST requisiciones/despachar` ya no existe.
+- **Aviso al solicitante**: canal nuevo `porRecoger` en `GET seguimiento/avisos` para el creador **y quien validó el paso 2** (su
+  encargado de área). A bodega **no** le avisa lo que ella misma dejó lista. Misma mecánica de toast + contador + notificación de
+  Windows. El contador SR del menú suma esto.
+- **Métricas por corte**: tablas "Cumplimiento por corte" (verde/amarillo/rojo, % verde, corte→lista, y el reparto por responsable:
+  autorización desde la hora del corte, bodega, solicitante) y "Validaciones listas para el corte" (pasos 2-5: si estaban hechas
+  **para la hora del corte**, no cuánto tardaron en crudo, que castiga a quien recibe lo creado de noche). El paso 9 **no se
+  atribuye por usuario**: su tiempo es la espera del solicitante, no de quien marcó la entrega. Excel: hojas "Por corte" y
+  "Atraso al corte" más columnas Corte/Semáforo.
+- **Las dos rutas conviven**: permiso nuevo **`costeo.reposicion.sin_validacion`** (rol sembrado `REPOSICION_SIN_VALIDACION`, aditivo:
+  se le agrega a la persona junto a su rol de creación). Quien lo tiene registra y se autoriza en el acto (mismo camino del modo
+  transitorio: `HISTORICA`, evento `SIN_VALIDACION`, sin corte ni semáforo); el resto sigue el flujo. El interruptor de la empresa
+  sigue siendo un tope general. ⚠️ **El permiso NO está en `PERMISOS_COSTEO` a propósito**: ADMIN y ADMIN_IT_COSTEO lo recibirían y
+  sus reposiciones saltarían el flujo en silencio. Filtro "Ruta: con/sin validaciones" en el listado.
+- Migración `20261125120000_reposicion_cortes_semaforo` (+ rollback), **probada en una copia de la base local** con filas en el flujo
+  (bordes: 09:00:00 → 11:00; viernes 17:00 y sábado → lunes 07:00), aplicar, rollback y reaplicar. Los `DESPACHAR` de antes pasan al
+  paso 9 con 0 s y se les agrega su `PREPARAR` (paso 8) con el tiempo original: el tiempo de bodega no se pierde. Ninguna fila
+  HISTORICA se toca con UPDATE (el CHECK `NOT VALID` lo reevaluaría); el backfill de `corte_en` solo alcanza lo que está en el flujo.
+- **Verificado**: 77 comprobaciones por API con 9 usuarios desechables (orden del flujo, permisos, avisos a quién sí y a quién no,
+  configuración y sus rechazos, semáforo recalculado al cambiar minutos, ruta por persona, filtros, métricas, Excel leído de
+  vuelta) y 38 en navegador a 1500 y 390 px (sin desborde, consola limpia). Datos y usuarios de prueba borrados por id; el espejo
+  a Sheets de DIGITEXSA se apagó durante las pruebas y **se restauró a `true`**.
+- ⚠️ **Al desplegar**: respaldo de `costeo` y `core`; correr el seed (permiso y rol nuevos) y **todos vuelven a entrar** para que el
+  permiso llegue al token; antes, `SELECT` sobre producción de filas con `estado <> 'HISTORICA'` que violen `ck_reposicion_tipo_regla`
+  (el backfill de `corte_en` las actualiza y abortaría). **Mientras el modo transitorio siga prendido en producción nada de esto se
+  mide**: esas reposiciones nacen `HISTORICA`. Quien quiera la excepción por persona debe apagar el modo general.
+- **Pendiente / no incluido**: feriados (un feriado entre semana asigna lo creado a un corte que nadie atiende); aviso al solicitante
+  solo llega con el ERP abierto (no hay push al teléfono); un margen de "cierre X min antes del corte" (una reposición creada a las
+  8:58 casi no da tiempo a validar: el semáforo lo va a mostrar); que las reposiciones por excepción también pasen por bodega con corte.
+
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
 código en él.** Al empezar cualquier sesión de trabajo aquí:

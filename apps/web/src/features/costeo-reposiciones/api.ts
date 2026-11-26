@@ -3,6 +3,7 @@ import type {
   AvisosReposiciones,
   Calandra,
   ConfiguracionReposiciones,
+  CorteConfig,
   Defecto,
   Departamento,
   EventoReposicion,
@@ -15,6 +16,7 @@ import type {
   Reposicion,
   ReposicionParaImprimir,
   ResultadoLote,
+  SemaforoConfig,
   SiguienteNumero,
   TipoReposicion,
 } from './types'
@@ -111,10 +113,27 @@ export const costeoReposicionesApi = {
       '/costeo/reposiciones/requisiciones/imprimir',
       { method: 'POST', body: JSON.stringify({ ids }) },
     ),
-  despachar: (items: { idReposicion: number; numeroTalonario?: string }[]) =>
-    apiFetch<ResultadoLote>('/costeo/reposiciones/requisiciones/despachar', {
+  // Bodega: dejar lista la requisición (avisa a quien la pidió) y marcar la entrega.
+  preparar: (ids: number[]) =>
+    apiFetch<ResultadoLote>('/costeo/reposiciones/requisiciones/preparar', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
+  entregar: (items: { idReposicion: number; numeroTalonario?: string; recibidoPor?: string }[]) =>
+    apiFetch<ResultadoLote>('/costeo/reposiciones/requisiciones/entregar', {
       method: 'POST',
       body: JSON.stringify({ items }),
+    }),
+  // Cortes y semáforo (costeo.reposicion.configurar). Los cortes se mandan completos.
+  guardarCortes: (cortes: CorteConfig[]) =>
+    apiFetch<ConfiguracionReposiciones>('/costeo/reposiciones/configuracion/cortes', {
+      method: 'PUT',
+      body: JSON.stringify({ cortes }),
+    }),
+  guardarSemaforo: (semaforo: SemaforoConfig) =>
+    apiFetch<ConfiguracionReposiciones>('/costeo/reposiciones/configuracion/semaforo', {
+      method: 'PATCH',
+      body: JSON.stringify(semaforo),
     }),
   metricas: (desde?: string, hasta?: string) =>
     apiFetch<MetricasReposiciones>(`/costeo/reposiciones/metricas?${qs({ desde, hasta })}`),
@@ -127,6 +146,11 @@ export interface FiltrosSeguimiento {
   paso?: number
   soloMias?: boolean
   porValidar?: boolean
+  /** Corte asignado: día `aaaa-mm-dd` y, opcionalmente, su hora `HH:MM`. */
+  corteDia?: string
+  corteHora?: string
+  /** `con` = pasó por las validaciones; `sin` = se autorizó al registrarla. */
+  ruta?: 'con' | 'sin'
   codigoOp?: string
   idCreador?: number
   idDefecto?: number

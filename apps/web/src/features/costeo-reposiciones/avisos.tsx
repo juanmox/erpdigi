@@ -169,8 +169,22 @@ export function AvisosReposiciones() {
     ruta: `${RUTA}?tab=reposiciones&estado=devueltas`,
   })
 
+  // Bodega ya dejó lista una requisición que este usuario pidió (o de su área): a partir
+  // de acá el tiempo corre a su cargo, así que el aviso tiene que llegarle aunque no mire.
+  const porRecoger = data?.porRecoger.cantidad ?? 0
+  useCanal({
+    id: 'avisos-reposiciones-por-recoger',
+    cantidad: porRecoger,
+    masReciente: data?.porRecoger.masReciente ?? null,
+    titulo: `${plural(porRecoger, 'requisición lista', 'requisiciones listas')} para recoger en bodega`,
+    cuerpo: 'Pasá a recogerlas y a validar lo despachado. Mientras no lo hagas, el tiempo corre a tu cargo.',
+    texto: 'Pasá a recogerlas y a validar lo despachado. Mientras no lo hagas, el tiempo corre a tu cargo.',
+    etiquetaIr: 'Ver cuáles',
+    ruta: `${RUTA}?tab=reposiciones&estado=por_recoger`,
+  })
+
   // El número en la pestaña: se ve aunque el ERP esté detrás de otras pestañas.
-  const pendientes = total + devueltas
+  const pendientes = total + devueltas + porRecoger
   useEffect(() => {
     document.title = pendientes > 0 ? `(${pendientes}) ${TITULO_BASE}` : TITULO_BASE
     return () => {

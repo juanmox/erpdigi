@@ -13,7 +13,19 @@ import { useModoSinValidacion } from '../use-modo-sin-validacion'
 
 /** Aviso visible mientras el modo está prendido. */
 export function AvisoModoSinValidacion({ className }: { className?: string }) {
+  const { tienePermiso } = useAuth()
   const activo = useModoSinValidacion()
+  // La excepción por persona: la empresa sigue con validaciones, pero las reposiciones
+  // de esta persona se autorizan al registrarse.
+  if (!activo && tienePermiso('costeo.reposicion.sin_validacion'))
+    return (
+      <Alert className={`border-amber-500/50 bg-amber-500/10 ${className ?? ''}`}>
+        <AlertDescription className="text-amber-800 dark:text-amber-300">
+          <strong>Tus reposiciones se autorizan al registrarlas.</strong> Tenés habilitada la excepción de registrar sin validaciones:
+          descuentan el papel del rollo y se imprimen como antes. Esas reposiciones no tienen corte ni semáforo.
+        </AlertDescription>
+      </Alert>
+    )
   if (!activo) return null
   return (
     <Alert className={`border-amber-500/50 bg-amber-500/10 ${className ?? ''}`}>

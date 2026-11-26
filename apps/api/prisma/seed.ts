@@ -262,12 +262,23 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
     'Reposiciones — Administración (paso 5)',
     ['costeo.reposicion.ver', 'costeo.reposicion.validar_administracion'],
   ],
-  // Paso 8: bodega marca lo despachado. Rol aparte (y no dentro de BODEGUERO) porque en
-  // producción BODEGUERO fue personalizado desde /roles y el seed ya no le toca permisos.
+  // Pasos 8 y 9: bodega deja lista la requisición (y avisa) y marca la entrega. Rol aparte
+  // (y no dentro de BODEGUERO) porque en producción BODEGUERO fue personalizado desde
+  // /roles y el seed ya no le toca permisos.
   [
     'REPOSICION_DESPACHO',
-    'Reposiciones — Despacho en bodega (paso 8)',
+    'Reposiciones — Bodega: lista y entrega (pasos 8 y 9)',
     ['costeo.reposicion.ver', 'costeo.reposicion.despachar'],
+  ],
+  // Excepción POR PERSONA (2026-11-25): quien tenga este rol registra sus reposiciones y se
+  // autorizan en el acto, sin pasar por las validaciones. Es ADITIVO: se le agrega a la
+  // persona desde /usuarios junto a su rol de creación (los permisos son la unión de sus
+  // roles). ⚠️ El permiso NO está en PERMISOS_COSTEO a propósito: ADMIN y ADMIN_IT_COSTEO
+  // lo recibirían y sus reposiciones saltarían el flujo en silencio.
+  [
+    'REPOSICION_SIN_VALIDACION',
+    'Reposiciones — Registra sin validaciones (excepción)',
+    ['costeo.reposicion.sin_validacion'],
   ],
   [
     'REPOSICION_AUTORIZACION',
@@ -764,9 +775,13 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
     'Paso 6 del flujo: autorizar el despacho de bodega (aquí se descuenta el papel del rollo)',
   'costeo.reposicion.imprimir_requisicion':
     'Paso 7 del flujo: imprimir la requisición de bodega de lo autorizado (la primera impresión le asigna su número RQ). Por defecto lo tiene Auditoría de Reposiciones; se puede dar a otros con el rol REPOSICION_IMPRESION',
-  'costeo.reposicion.despachar': 'Paso 8 del flujo: marcar como despachados los materiales de la requisición',
+  'costeo.reposicion.despachar':
+    'Pasos 8 y 9 del flujo, en bodega: dejar lista la requisición (avisa a quien la pidió) y marcarla entregada cuando el solicitante la recoge',
+  'costeo.reposicion.sin_validacion':
+    'EXCEPCIÓN: registrar reposiciones que se autorizan en el acto, sin pasar por las validaciones. Esas reposiciones no tienen corte ni semáforo. Se asigna con el rol REPOSICION_SIN_VALIDACION',
   'costeo.reposicion.metricas': 'Ver las métricas de tiempo del flujo de reposiciones (por paso y por validador)',
-  'costeo.reposicion.configurar': 'Activar o desactivar el modo transitorio sin validaciones de las reposiciones',
+  'costeo.reposicion.configurar':
+    'Configurar el flujo de reposiciones: modo transitorio sin validaciones, horarios de corte y minutos del semáforo',
   'costeo.pieza.administrar':
     'Agregar, renombrar y retirar piezas del catálogo (cuello, manga, frontal…) que se eligen al registrar una reposición',
 

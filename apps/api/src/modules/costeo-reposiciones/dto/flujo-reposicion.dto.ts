@@ -85,7 +85,17 @@ export class ImprimirRequisicionesDto {
   ids!: number[];
 }
 
-export class DespachoItemDto {
+/** Bodega deja listas las requisiciones y avisa a quienes las pidieron (paso 8). */
+export class PrepararRequisicionesDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(TOPE_LOTE)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  ids!: number[];
+}
+
+export class EntregaItemDto {
   @Type(() => Number)
   @IsInt()
   idReposicion!: number;
@@ -95,15 +105,22 @@ export class DespachoItemDto {
   @IsString()
   @MaxLength(30)
   numeroTalonario?: string;
+
+  /** Quién recogió físicamente, opcional (texto libre). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  recibidoPor?: string;
 }
 
-export class DespacharRequisicionesDto {
+/** El solicitante recogió: bodega marca la entrega (paso 9). */
+export class EntregarRequisicionesDto {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(TOPE_LOTE)
   @ValidateNested({ each: true })
-  @Type(() => DespachoItemDto)
-  items!: DespachoItemDto[];
+  @Type(() => EntregaItemDto)
+  items!: EntregaItemDto[];
 }
 
 /** Autorizar de una vez lo que quedó esperando validación (modo sin validaciones). */

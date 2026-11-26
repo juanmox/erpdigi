@@ -87,7 +87,12 @@ export function TabPorValidar({ onVer }: { onVer: (f: FilaSeguimiento) => void }
         estado: 'en_validacion',
       })),
       ...(tienePermiso('costeo.reposicion.imprimir_requisicion') ? [{ clave: 'imp', texto: '7. Por imprimir', estado: 'por_imprimir' }] : []),
-      ...(tienePermiso('costeo.reposicion.despachar') ? [{ clave: 'desp', texto: '8. Por despachar', estado: 'por_despachar' }] : []),
+      ...(tienePermiso('costeo.reposicion.despachar')
+        ? [
+            { clave: 'desp', texto: '8. En bodega', estado: 'por_despachar' },
+            { clave: 'rec', texto: '9. Por recoger', estado: 'por_recoger' },
+          ]
+        : []),
     ],
     [tienePermiso],
   )
@@ -97,8 +102,9 @@ export function TabPorValidar({ onVer }: { onVer: (f: FilaSeguimiento) => void }
   const [fallidas, setFallidas] = useState<FallaLote[]>([])
   const [pendiente, setPendiente] = useState(false)
   const [devolviendo, setDevolviendo] = useState(false)
-  const [despachando, setDespachando] = useState(false)
+  const [entregando, setEntregando] = useState(false)
   const [talonarios, setTalonarios] = useState<Record<number, string>>({})
+  const [recibidos, setRecibidos] = useState<Record<number, string>>({})
 
   useEffect(() => {
     setSeleccion(new Set())
@@ -116,7 +122,13 @@ export function TabPorValidar({ onVer }: { onVer: (f: FilaSeguimiento) => void }
   // Solo lo que de verdad puede mover: las que creó él (o que ya validó en otro
   // paso) aparecen en la cola pero no se pueden marcar.
   const habilitada = (f: FilaSeguimiento) =>
-    cola?.estado === 'por_imprimir' ? f.acciones.imprimir : cola?.estado === 'por_despachar' ? f.acciones.despachar : f.acciones.validar
+    cola?.estado === 'por_imprimir'
+      ? f.acciones.imprimir
+      : cola?.estado === 'por_despachar'
+        ? f.acciones.preparar
+        : cola?.estado === 'por_recoger'
+          ? f.acciones.entregar
+          : f.acciones.validar
   const elegibles = filas.filter(habilitada)
   const bloqueadas = filas.filter((f) => !habilitada(f))
   const motivoBloqueo = (f: FilaSeguimiento) =>
@@ -126,7 +138,7 @@ export function TabPorValidar({ onVer }: { onVer: (f: FilaSeguimiento) => void }
     const r = data?.resumen
     if (!r) return null
     if (c.paso) return r.porPaso.find((p) => p.paso === c.paso)?.cantidad ?? 0
-    return c.estado === 'por_imprimir' ? r.porImprimir : r.porDespachar
+    return c.estado === 'por_imprimir' ? r.porImprimir : c.estado === 'por_despachar' ? r.porDespachar : r.porRecoger
   }
 
   function alternar(ids: number[], marcar: boolean) {
@@ -189,15 +201,32 @@ export function TabPorValidar({ onVer }: { onVer: (f: FilaSeguimiento) => void }
     }
   }
 
-  async function despachar() {
+  // Bodega deja listas las requisiciones: avisa a quien las pidió y a su encargado de área.
+  async function preparar() {
     setPendiente(true)
     try {
-      const items = [...seleccion].map((id) => ({ idReposicion: id, numeroTalonario: talonarios[id]?.trim() || undefined }))
-      terminar(await costeoReposicionesApi.despachar(items), 'marcada(s) como despachada(s)')
-      setDespachando(false)
-      setTalonarios({})
+      terminar(await costeoReposicionesApi.preparar([...seleccion]), 'lista(s) para recoger (ya se avisó a quien las pidió)')
     } catch (e) {
-      avisarError(e instanceof ApiError ? e.message : 'No se pudo despachar')
+      avisarError(e instanceof ApiError ? e.message : 'No se pudo dejar lista')
+    } finally {
+      setPendiente(false)
+    }
+  }
+
+  async function entregar() {
+    setPendiente(true)
+    try {
+      const items = [...seleccion].map((id) => ({
+        idReposicion: id,
+        numeroTalonario: talonarios[id]?.trim() || undefined,
+        recibidoPor: recibidos[id]?.trim() || undefined,
+      }))
+      terminar(await costeoReposicionesApi.entregar(items), 'entregada(s) al solicitante')
+      setEntregando(false)
+      setTalonarios({})
+      setRecibidos({})
+    } catch (e) {
+      avisarError(e instanceof ApiError ? e.message : 'No se pudo marcar la entrega')
     } finally {
       setPendiente(false)
     }
@@ -222,10 +251,12 @@ export function TabPorValidar({ onVer }: { onVer: (f: FilaSeguimiento) => void }
         {cola?.paso === 6
           ? 'Al autorizar se descuenta el papel del rollo montado AHORA en la impresora de cada reposición, y se escribe en los Google Sheets.'
           : cola?.estado === 'por_imprimir'
-            ? 'La primera impresión le asigna su número de requisición (RQ) y la deja por despachar. Volver a imprimirla sale como COPIA.'
+            ? 'La primera impresión le asigna su número de requisición (RQ) y la deja en bodega. Volver a imprimirla sale como COPIA.'
             : cola?.estado === 'por_despachar'
-              ? 'Marcá lo que ya salió de bodega. El número del talonario físico es opcional.'
-              : 'Lo más antiguo primero. Validá lo que corresponde o devolvelo a quien lo creó con el motivo.'}
+              ? 'Cuando la requisición esté lista, marcala y se le avisa a quien la pidió y a su encargado de área: desde ahí el tiempo corre a cargo de ellos. Si la persona ya está en bodega, entregala directo.'
+              : cola?.estado === 'por_recoger'
+                ? 'Ya se avisó. Marcá la entrega cuando el solicitante llegue a recoger; el tiempo que tardó queda a su nombre.'
+                : 'Ordenado por corte y, dentro de cada uno, lo más antiguo primero. Validá lo que corresponde o devolvelo a quien lo creó con el motivo.'}
         {bloqueadas.length > 0 && ` · ${bloqueadas.length} no las podés mover vos: aparecen deshabilitadas con el motivo (por ejemplo, las creaste vos).`}
         {isFetching && ' · actualizando…'}
       </p>
@@ -255,8 +286,18 @@ export function TabPorValidar({ onVer }: { onVer: (f: FilaSeguimiento) => void }
           </Button>
         )}
         {cola?.estado === 'por_despachar' && (
-          <Button size="sm" disabled={sel === 0 || pendiente} onClick={() => setDespachando(true)}>
-            Marcar despachadas ({sel})
+          <>
+            <Button size="sm" disabled={sel === 0 || pendiente} onClick={preparar}>
+              {pendiente ? 'Aplicando…' : `Dejar listas y avisar (${sel})`}
+            </Button>
+            <Button size="sm" variant="outline" disabled={sel === 0 || pendiente} onClick={() => setEntregando(true)}>
+              Entregar directo ({sel})
+            </Button>
+          </>
+        )}
+        {cola?.estado === 'por_recoger' && (
+          <Button size="sm" disabled={sel === 0 || pendiente} onClick={() => setEntregando(true)}>
+            Marcar entregadas ({sel})
           </Button>
         )}
         {sel > 0 && (
@@ -286,35 +327,46 @@ export function TabPorValidar({ onVer }: { onVer: (f: FilaSeguimiento) => void }
         onConfirmar={devolver}
       />
 
-      <Dialog open={despachando} onOpenChange={(v) => !v && !pendiente && setDespachando(false)}>
-        <DialogContent className="max-h-[85svh] max-w-md overflow-y-auto">
+      <Dialog open={entregando} onOpenChange={(v) => !v && !pendiente && setEntregando(false)}>
+        <DialogContent className="max-h-[85svh] max-w-lg overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Marcar {sel} como despachada(s)</DialogTitle>
-            <DialogDescription>Número del talonario físico, si lo usan (opcional).</DialogDescription>
+            <DialogTitle>Marcar {sel} como entregada(s)</DialogTitle>
+            <DialogDescription>
+              Quién recogió y el número del talonario físico, si lo usan (los dos son opcionales).
+              {cola?.estado === 'por_despachar' && ' Se dejan listas y entregadas en el mismo momento.'}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             {filas
               .filter((f) => seleccion.has(f.idReposicion))
               .map((f) => (
-                <div key={f.idReposicion} className="flex items-center gap-2">
-                  <span className="w-44 shrink-0 font-mono text-xs">
+                <div key={f.idReposicion} className="grid grid-cols-[7.5rem_1fr_7rem] items-center gap-2">
+                  <span className="truncate font-mono text-xs" title={f.codigo}>
                     {f.requisicion ? `RQ-${String(f.requisicion.numero).padStart(6, '0')}` : f.codigo}
                   </span>
+                  <Input
+                    value={recibidos[f.idReposicion] ?? ''}
+                    onChange={(e) => setRecibidos((t) => ({ ...t, [f.idReposicion]: e.target.value }))}
+                    placeholder="Recibió"
+                    maxLength={80}
+                    aria-label={`Quién recibió ${f.codigo}`}
+                  />
                   <Input
                     value={talonarios[f.idReposicion] ?? ''}
                     onChange={(e) => setTalonarios((t) => ({ ...t, [f.idReposicion]: e.target.value }))}
                     placeholder="Nº talonario"
                     maxLength={30}
+                    aria-label={`Talonario de ${f.codigo}`}
                   />
                 </div>
               ))}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDespachando(false)} disabled={pendiente}>
+            <Button variant="outline" onClick={() => setEntregando(false)} disabled={pendiente}>
               Cancelar
             </Button>
-            <Button onClick={despachar} disabled={pendiente}>
-              {pendiente ? 'Aplicando…' : 'Confirmar despacho'}
+            <Button onClick={entregar} disabled={pendiente}>
+              {pendiente ? 'Aplicando…' : 'Confirmar entrega'}
             </Button>
           </DialogFooter>
         </DialogContent>

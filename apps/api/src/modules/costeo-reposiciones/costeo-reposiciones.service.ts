@@ -14,11 +14,13 @@ import { nombreParaHistorial } from '../costeo-materiales/materiales-historial';
 import { AnularReposicionDto } from './dto/anular-reposicion.dto';
 import { CrearReposicionDto } from './dto/crear-reposicion.dto';
 import { CorregirReposicionDto } from './dto/flujo-reposicion.dto';
+import { ReposicionesConfigService } from './reposiciones-config.service';
 import { ReposicionesFlujoService } from './reposiciones-flujo.service';
 import {
   type CambioReposicion,
   crearEventosReposicion,
   pasoActual,
+  PERMISO_SIN_VALIDACION,
 } from './flujo';
 import { INCLUDE_REPOSICION } from './reposiciones-include';
 
@@ -101,6 +103,7 @@ export class CosteoReposicionesService {
     private readonly prisma: PrismaService,
     private readonly auditoria: AuditoriaService,
     private readonly flujo: ReposicionesFlujoService,
+    private readonly config: ReposicionesConfigService,
   ) {}
 
   listarDepartamentos() {
@@ -508,6 +511,15 @@ export class CosteoReposicionesService {
    * flujo: se descuenta el papel del rollo, queda `HISTORICA` (se imprime con el
    * formato de siempre) y se espeja a Sheets. Es un interruptor para la
    * capacitación de quienes validan, no un reemplazo del flujo.
+   *
+   * EXCEPCIÓN POR PERSONA (2026-11-25): quien tenga `costeo.reposicion.sin_validacion`
+   * sigue ese mismo camino aunque el interruptor de la empresa esté apagado. Las dos
+   * rutas conviven: la mayoría con validaciones, algunas personas solo con el
+   * formulario. Esas reposiciones nacen HISTORICA, o sea sin corte ni semáforo.
+   *
+   * Las que sí entran al flujo se asignan, ya mismo, a su CORTE (el primer horario
+   * configurado posterior a este instante). Queda congelado: cambiar los horarios
+   * después no mueve lo ya creado, y corregir una devuelta tampoco lo cambia.
    */
   async crear(
     dto: CrearReposicionDto,
@@ -515,7 +527,9 @@ export class CosteoReposicionesService {
     idEmpresa: number,
     permisos: string[] = [],
   ) {
-    const sinValidacion = await this.flujo.modoSinValidacion(idEmpresa);
+    const sinValidacion =
+      permisos.includes(PERMISO_SIN_VALIDACION) ||
+      (await this.flujo.modoSinValidacion(idEmpresa));
     const puedeSinRollo = permisos.includes(
       'costeo.reposicion.impresora_sin_rollo',
     );
@@ -543,6 +557,10 @@ export class CosteoReposicionesService {
       });
       const numeroRepo = (agg._max.numeroRepo ?? 0) + 1;
       const ahora = new Date();
+      // Sin validaciones nace HISTORICA: no pasa por cortes.
+      const corteEn = directa
+        ? null
+        : await this.config.corteParaCreacion(idEmpresa, ahora, tx);
 
       const reposicion = await tx.reposicion.create({
         data: {
@@ -554,6 +572,7 @@ export class CosteoReposicionesService {
           estado: 'EN_VALIDACION',
           pasoPendiente: 2,
           estadoDesde: ahora,
+          corteEn,
         },
       });
       await this.escribirLineas(tx, reposicion.idReposicion, v);
@@ -587,7 +606,9 @@ export class CosteoReposicionesService {
             paso: 6,
             desde: ahora,
             ahora,
-            motivo: 'Registrada sin validaciones (modo transitorio)',
+            motivo: permisos.includes(PERMISO_SIN_VALIDACION)
+              ? 'Registrada sin validaciones (excepción por persona)'
+              : 'Registrada sin validaciones (modo transitorio)',
             cambios: aut.cambios,
             idUsuario: idUsuarioActor,
             usuarioNombre,
@@ -627,9 +648,17 @@ export class CosteoReposicionesService {
     return this.obtener(idReposicion, idEmpresa);
   }
 
-  /** Estado del modo transitorio sin validaciones, para la pantalla. */
+  /**
+   * Lo configurable del flujo, para la pantalla: el modo transitorio sin validaciones,
+   * los cortes y los minutos del semáforo. Lo lee cualquiera con `ver` porque la
+   * pantalla pinta los colores con esos minutos; cambiarlo exige `configurar`.
+   */
   async obtenerConfiguracion(idEmpresa: number) {
-    return { sinValidacion: await this.flujo.modoSinValidacion(idEmpresa) };
+    const [sinValidacion, cortes] = await Promise.all([
+      this.flujo.modoSinValidacion(idEmpresa),
+      this.config.obtener(idEmpresa),
+    ]);
+    return { sinValidacion, ...cortes };
   }
 
   /**

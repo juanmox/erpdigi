@@ -11,9 +11,13 @@ import type { PrismaService } from '../../prisma/prisma.service';
  *   1 creación / corrección          (costeo.reposicion.crear)
  *   2..6 validaciones                (un permiso por paso)
  *   7 impresión de la requisición    (costeo.reposicion.imprimir_requisicion)
- *   8 despacho en bodega             (costeo.reposicion.despachar)
+ *   8 preparación en bodega: "lista" (costeo.reposicion.despachar)
+ *   9 entrega al solicitante         (costeo.reposicion.despachar)
  *
  * El papel se descuenta del rollo al validar el paso 6 (autorización), no al crear.
+ *
+ * El semáforo corre desde la hora del CORTE hasta el paso 8 ("lista"): de ahí a la
+ * entrega (paso 9) la demora es de quien debe recoger, no de bodega.
  */
 
 export const ESTADOS_REPOSICION = [
@@ -21,6 +25,7 @@ export const ESTADOS_REPOSICION = [
   'DEVUELTA',
   'POR_IMPRIMIR',
   'POR_DESPACHAR',
+  'POR_RECOGER',
   'DESPACHADA',
   'HISTORICA',
 ] as const;
@@ -33,6 +38,7 @@ export type EstadoReposicion = (typeof ESTADOS_REPOSICION)[number];
 export const ESTADOS_AUTORIZADOS: EstadoReposicion[] = [
   'POR_IMPRIMIR',
   'POR_DESPACHAR',
+  'POR_RECOGER',
   'DESPACHADA',
   'HISTORICA',
 ];
@@ -79,7 +85,10 @@ export const PASOS_VALIDACION: PasoValidacion[] = [
 
 export const PASO_AUTORIZACION = 6;
 export const PASO_IMPRESION = 7;
-export const PASO_DESPACHO = 8;
+/** Bodega deja lista la requisición y avisa (estado POR_RECOGER). */
+export const PASO_PREPARACION = 8;
+/** El solicitante recoge y bodega marca la entrega (estado DESPACHADA). */
+export const PASO_ENTREGA = 9;
 export const PERMISO_IMPRIMIR = 'costeo.reposicion.imprimir_requisicion';
 /** Quién puede sacar copias de una requisición ya numerada. */
 export const PERMISOS_COPIA_REQUISICION = [
@@ -88,12 +97,20 @@ export const PERMISOS_COPIA_REQUISICION = [
   'costeo.reposicion.validar_auditoria',
 ];
 export const PERMISO_DESPACHAR = 'costeo.reposicion.despachar';
+/**
+ * Permiso OPCIONAL: quien lo tiene registra sus reposiciones y se autorizan en el
+ * acto, sin pasar por las validaciones (la excepción por persona; la empresa
+ * tiene además el interruptor general). No va en `@RequirePermissions`, que exige
+ * TODOS los que lista: se resuelve en el controlador desde `usuario.permisos`.
+ */
+export const PERMISO_SIN_VALIDACION = 'costeo.reposicion.sin_validacion';
 
 export const NOMBRE_PASO: Record<number, string> = {
   1: 'Creación',
   ...Object.fromEntries(PASOS_VALIDACION.map((p) => [p.paso, p.nombre])),
   7: 'Impresión de requisición',
-  8: 'Despacho en bodega',
+  8: 'Preparación en bodega',
+  9: 'Entrega al solicitante',
 };
 
 export const permisoDelPaso = (paso: number) =>
@@ -114,9 +131,11 @@ export function pasoActual(estado: string, pasoPendiente: number | null) {
       return 1;
     case 'POR_IMPRIMIR':
       return PASO_IMPRESION;
+    case 'POR_DESPACHAR':
+      return PASO_PREPARACION;
     default:
-      // POR_DESPACHAR, DESPACHADA, HISTORICA
-      return PASO_DESPACHO;
+      // POR_RECOGER, DESPACHADA, HISTORICA
+      return PASO_ENTREGA;
   }
 }
 
@@ -127,6 +146,7 @@ export type AccionEvento =
   | 'CORREGIR'
   | 'IMPRIMIR'
   | 'REIMPRIMIR'
+  | 'PREPARAR'
   | 'DESPACHAR'
   | 'ANULAR'
   | 'SIN_VALIDACION';

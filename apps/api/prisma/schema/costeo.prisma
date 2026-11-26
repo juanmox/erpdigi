@@ -593,7 +593,8 @@ model Reposicion {
   anuladoPor        Int?      @map("anulado_por")
   motivoAnulacion   String?   @map("motivo_anulacion")
   /// Flujo de validaciones (migración 20261117120000): EN_VALIDACION · DEVUELTA ·
-  /// POR_IMPRIMIR · POR_DESPACHAR · DESPACHADA · HISTORICA. Las anteriores al flujo
+  /// POR_IMPRIMIR · POR_DESPACHAR (en bodega) · POR_RECOGER (bodega la dejó lista,
+  /// falta que el solicitante la recoja) · DESPACHADA · HISTORICA. Las anteriores al flujo
   /// son HISTORICA. La anulación sigue siendo `anuladoEn`, en cualquier estado.
   // + SQL: CHECK de estado, de paso_pendiente (2..6 solo en EN_VALIDACION) y de
   //   estado_desde (obligatorio salvo HISTORICA).
@@ -602,6 +603,11 @@ model Reposicion {
   pasoPendiente     Int?      @map("paso_pendiente") @db.SmallInt
   /// Desde cuándo está en el estado/paso actual: base del "esperando hace X".
   estadoDesde       DateTime? @map("estado_desde") @db.Timestamptz(3)
+  /// Corte (07:00, 09:00…) al que quedó asignada al crearse: el primer corte
+  /// configurado POSTERIOR a `creadoEn`. Queda CONGELADO: cambiar los horarios después
+  /// no mueve las ya creadas. NULL en las HISTORICA y en lo creado sin cortes
+  /// configurados. Desde acá corre el semáforo.
+  corteEn           DateTime? @map("corte_en") @db.Timestamptz(3)
 
   ordenProduccion OrdenProduccion @relation(fields: [idOrdenProduccion], references: [idOrdenProduccion])
   eventos         ReposicionEvento[]
@@ -636,9 +642,10 @@ model ReposicionEvento {
   idEvento      Int      @id @default(autoincrement()) @map("id_evento")
   idEmpresa     Int      @map("id_empresa")
   idReposicion  Int      @map("id_reposicion")
-  /// CREAR · VALIDAR · DEVOLVER · CORREGIR · IMPRIMIR · REIMPRIMIR · DESPACHAR · ANULAR · SIN_VALIDACION
+  /// CREAR · VALIDAR · DEVOLVER · CORREGIR · IMPRIMIR · REIMPRIMIR · PREPARAR · DESPACHAR · ANULAR · SIN_VALIDACION
   accion        String   @db.VarChar(20)
-  /// 1 creación/corrección · 2..6 validaciones · 7 impresión · 8 despacho
+  /// 1 creación/corrección · 2..6 validaciones · 7 impresión · 8 preparación en
+  /// bodega (PREPARAR) · 9 entrega al solicitante (DESPACHAR)
   paso          Int      @db.SmallInt
   /// Cuándo quedó pendiente ese paso.
   desde         DateTime @db.Timestamptz(3)
@@ -674,13 +681,49 @@ model RequisicionReposicion {
   ultimaImpresionEn DateTime  @default(now()) @map("ultima_impresion_en") @db.Timestamptz(3)
   /// Número del talonario físico, opcional: por ahora conviven los dos.
   numeroTalonario   String?   @map("numero_talonario") @db.VarChar(30)
+  /// Bodega la dejó lista y avisó (paso 8). El reloj de bodega termina acá.
+  listaEn           DateTime? @map("lista_en") @db.Timestamptz(3)
+  listaPor          Int?      @map("lista_por")
+  /// Entrega al solicitante (paso 9): lo que pasa entre `listaEn` y esto se le
+  /// atribuye al solicitante, no a bodega.
   despachadaEn      DateTime? @map("despachada_en") @db.Timestamptz(3)
   despachadaPor     Int?      @map("despachada_por")
+  /// Quién recogió físicamente (texto libre, opcional).
+  recibidoPor       String?   @map("recibido_por") @db.VarChar(80)
 
   reposicion Reposicion @relation(fields: [idReposicion], references: [idReposicion], onDelete: Restrict, onUpdate: Cascade)
 
   @@unique([idEmpresa, numero], map: "uq_requisicion_reposicion_numero")
   @@map("requisicion_reposicion")
+  @@schema("costeo")
+}
+
+/// Horario de corte de requisiciones, por empresa (hora de Guatemala).
+/// `dias` usa ISO: 1 = lunes … 7 = domingo.
+/// + SQL: CHECK de formato HH:MM y de dias (no vacío, entre 1 y 7).
+model ReposicionCorte {
+  idCorte    Int     @id @default(autoincrement()) @map("id_corte")
+  idEmpresa  Int     @map("id_empresa")
+  hora       String  @db.VarChar(5)
+  dias       Int[]   @db.SmallInt
+
+  @@unique([idEmpresa, hora], map: "uq_reposicion_corte_hora")
+  @@map("reposicion_corte")
+  @@schema("costeo")
+}
+
+/// Minutos del semáforo del proceso y tolerancia para recoger, una fila por empresa.
+/// Sin fila el código usa los mismos valores por defecto.
+/// + SQL: CHECK (0 < verde < amarillo <= 1440) y (1 <= recoger <= 1440).
+model ReposicionConfiguracion {
+  idEmpresa       Int      @id @map("id_empresa")
+  minutosVerde    Int      @default(45) @map("minutos_verde")
+  minutosAmarillo Int      @default(60) @map("minutos_amarillo")
+  minutosRecoger  Int      @default(15) @map("minutos_recoger")
+  actualizadoEn   DateTime @default(now()) @map("actualizado_en") @db.Timestamptz(3)
+  actualizadoPor  Int?     @map("actualizado_por")
+
+  @@map("reposicion_configuracion")
   @@schema("costeo")
 }
 

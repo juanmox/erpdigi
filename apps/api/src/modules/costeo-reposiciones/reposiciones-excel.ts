@@ -57,9 +57,17 @@ const ETIQUETA_ESTADO: Record<string, string> = {
   EN_VALIDACION: 'En validación',
   DEVUELTA: 'Devuelta',
   POR_IMPRIMIR: 'Por imprimir',
-  POR_DESPACHAR: 'Por despachar',
-  DESPACHADA: 'Despachada',
+  POR_DESPACHAR: 'En bodega',
+  POR_RECOGER: 'Por recoger',
+  DESPACHADA: 'Entregada',
   HISTORICA: 'Histórica',
+};
+
+const ETIQUETA_COLOR: Record<string, string> = {
+  verde: 'Verde',
+  amarillo: 'Amarillo',
+  rojo: 'Rojo',
+  neutro: 'En recolección',
 };
 
 export const etiquetaEstado = (
@@ -78,7 +86,9 @@ const ETIQUETA_ACCION: Record<string, string> = {
   CORREGIR: 'Corrigió',
   IMPRIMIR: 'Imprimió requisición',
   REIMPRIMIR: 'Reimprimió (copia)',
-  DESPACHAR: 'Despachó',
+  PREPARAR: 'Dejó lista (avisó)',
+  DESPACHAR: 'Entregó al solicitante',
+  SIN_VALIDACION: 'Registró sin validaciones',
   ANULAR: 'Anuló',
 };
 
@@ -135,6 +145,10 @@ export async function construirExcelSeguimiento(d: {
       { h: 'Tipo', w: 12 },
       { h: 'Estado', w: 26 },
       { h: 'Esperando (h)', w: 12, fmt: '0.00' },
+      { h: 'Corte', w: 16, fmt: FMT_FECHA },
+      { h: 'Semáforo', w: 15 },
+      { h: 'Minutos del corte a "lista"', w: 14, fmt: '0' },
+      { h: 'Minutos espera del solicitante', w: 14, fmt: '0' },
       { h: 'Departamento', w: 16 },
       { h: 'Defecto', w: 22 },
       { h: 'Responsable', w: 18 },
@@ -149,7 +163,9 @@ export async function construirExcelSeguimiento(d: {
       { h: 'Devuelta (motivo)', w: 40 },
       { h: 'Nº requisición', w: 12 },
       { h: 'Nº talonario', w: 12 },
-      { h: 'Despachada', w: 16, fmt: FMT_FECHA },
+      { h: 'Lista en bodega', w: 16, fmt: FMT_FECHA },
+      { h: 'Entregada', w: 16, fmt: FMT_FECHA },
+      { h: 'Recibido por', w: 20 },
       { h: 'Comentario', w: 40 },
       { h: 'Motivo de anulación', w: 30 },
     ],
@@ -163,6 +179,10 @@ export async function construirExcelSeguimiento(d: {
       f.tipo === 'MATERIALES' ? 'Materiales' : 'Reimpresión',
       etiquetaEstado(f),
       horasEsperando(f),
+      gt(f.corteEn),
+      f.semaforo ? ETIQUETA_COLOR[f.semaforo.color] : null,
+      f.semaforo?.procesoMin ?? null,
+      f.semaforo?.esperaMin ?? null,
       f.departamento,
       f.defecto,
       f.responsable,
@@ -183,7 +203,9 @@ export async function construirExcelSeguimiento(d: {
         : null,
       f.requisicion?.numero ?? null,
       f.requisicion?.numeroTalonario ?? null,
+      gt(f.requisicion?.listaEn ?? null),
       gt(f.requisicion?.despachadaEn ?? null),
+      f.requisicion?.recibidoPor ?? null,
       f.comentario,
       f.motivoAnulacion,
     ]),
@@ -212,6 +234,66 @@ export async function construirExcelMetricas(d: {
   wb.created = d.generadoEn;
   const H = '0.00';
 
+  // El proceso del corte: lo que el semáforo mide. Una fila por corte.
+  hoja(
+    wb,
+    'Por corte',
+    [
+      { h: 'Corte', w: 16, fmt: FMT_FECHA },
+      { h: 'Reposiciones', w: 13 },
+      { h: 'Verdes', w: 9 },
+      { h: 'Amarillas', w: 10 },
+      { h: 'Rojas', w: 8 },
+      { h: 'En recolección', w: 13 },
+      { h: '% verde', w: 9, fmt: '0.0' },
+      { h: 'Promedio corte → lista (min)', w: 16, fmt: '0.0' },
+      { h: 'Máximo corte → lista (min)', w: 16, fmt: '0.0' },
+      { h: 'Sin validar al corte', w: 13 },
+      { h: 'Autorización: corte → paso 6 (min)', w: 18, fmt: '0.0' },
+      { h: 'Bodega: autorización → lista (min)', w: 18, fmt: '0.0' },
+      { h: 'Solicitante: lista → entrega (min)', w: 18, fmt: '0.0' },
+    ],
+    m.porCorte.map((c) => [
+      gt(c.corteEn),
+      c.total,
+      c.verdes,
+      c.amarillas,
+      c.rojas,
+      c.enRecoleccion,
+      c.pctVerde,
+      c.procesoPromedioMin,
+      c.procesoMaximoMin,
+      c.sinValidarAlCorte,
+      c.autorizacionPromedioMin,
+      c.bodegaPromedioMin,
+      c.solicitantePromedioMin,
+    ]),
+  );
+  // Pasos 2 a 5: si la validación estaba lista PARA EL CORTE, que es lo que importa.
+  hoja(
+    wb,
+    'Atraso al corte',
+    [
+      { h: 'Paso', w: 6 },
+      { h: 'Nombre del paso', w: 26 },
+      { h: 'Usuario', w: 22 },
+      { h: 'Validaciones', w: 12 },
+      { h: 'Después del corte', w: 14 },
+      { h: '% tardías', w: 10, fmt: '0.0' },
+      { h: 'Atraso promedio (min)', w: 16, fmt: '0.0' },
+      { h: 'Atraso máximo (min)', w: 16, fmt: '0.0' },
+    ],
+    m.atrasoAlCorte.map((a) => [
+      a.paso,
+      a.nombrePaso,
+      a.usuario,
+      a.total,
+      a.tardias,
+      a.pctTardias,
+      a.atrasoPromedioMin,
+      a.atrasoMaximoMin,
+    ]),
+  );
   hoja(
     wb,
     'Tiempos por paso',
@@ -296,10 +378,19 @@ export async function construirExcelMetricas(d: {
     [
       { h: 'Reposición', w: 18 },
       { h: 'Esperando en', w: 26 },
-      { h: 'Horas', w: 10, fmt: H },
+      { h: 'Horas en este paso', w: 12, fmt: H },
+      { h: 'Corte', w: 16, fmt: FMT_FECHA },
+      { h: 'Semáforo', w: 15 },
       { h: 'Creador', w: 20 },
     ],
-    m.enCurso.map((x) => [x.codigo, x.nombrePaso, x.horas, x.creador]),
+    m.enCurso.map((x) => [
+      x.codigo,
+      x.nombrePaso,
+      x.horas,
+      gt(x.corteEn),
+      ETIQUETA_COLOR[x.color],
+      x.creador,
+    ]),
   );
   hoja(
     wb,

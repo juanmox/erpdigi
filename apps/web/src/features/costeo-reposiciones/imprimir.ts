@@ -109,7 +109,9 @@ function hoja(r: Reposicion | ReposicionParaImprimir, nombreSolicitante: string,
     </div>
 
     <div class="campo fila"><span><b>Fecha:</b> ${fechaFmt}</span><span class="cli"><b>Cliente:</b> ${esc(r.ordenProduccion.cliente?.nombre ?? '—')}</span></div>
-    <div class="campo"><b>OP-REPO:</b> ${esc(r.ordenProduccion.codigo)}-${esc(r.codigoRepo)}</div>
+    <div class="campo"><b>OP-REPO:</b> ${esc(r.ordenProduccion.codigo)}-${esc(r.codigoRepo)}${
+      conFlujo && r.corteEn ? ` &nbsp;·&nbsp; <b>Corte:</b> ${esc(fechaHoraGT(r.corteEn))}` : ''
+    }</div>
     ${prendasTexto ? `<div class="campo"><b>Prendas:</b> ${esc(prendasTexto)}</div>` : ''}
 
     <table>

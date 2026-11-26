@@ -9,6 +9,7 @@ import { ApiError } from '@/lib/api'
 import { avisarError, avisarExito } from '@/lib/avisos'
 import { costeoReposicionesApi } from '../api'
 import { ModalAnular } from '../components/modal-anular'
+import { ConfigurarCortes } from '../components/configurar-cortes'
 import { AvisoModoSinValidacion, InterruptorModoSinValidacion } from '../components/modo-sin-validacion'
 import { PERMISO_PASO } from '../flujo'
 import { imprimirReposicion, imprimirRequisiciones } from '../imprimir'
@@ -100,11 +101,12 @@ export function SeguimientoReposicionesPage() {
       <h1 className="mb-1 text-xl font-semibold text-ink">Seguimiento de reposiciones</h1>
       <p className="mb-4 text-sm text-ink-faint">
         Lo registrado y dónde está en el flujo: responsable del área → calidad → auditoría → administración → autorización →
-        requisición → despacho.
+        requisición → bodega la deja lista → el solicitante la recoge.
       </p>
 
       <AvisoModoSinValidacion className="mb-3" />
       <InterruptorModoSinValidacion />
+      <ConfigurarCortes />
 
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
         <TabsList>

@@ -3,8 +3,16 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { costeoReposicionesApi } from '../api'
-import { claseSemaforo, duracion, fechaHoraGT, tiempoTotal } from '../flujo'
-import type { FilaSeguimiento } from '../types'
+import {
+  claseSemaforo,
+  clasePuntoSemaforo,
+  duracion,
+  etiquetaCorte,
+  fechaHoraGT,
+  minutosTexto,
+  tiempoTotal,
+} from '../flujo'
+import type { ColorSemaforo, FilaSeguimiento } from '../types'
 import { PasosMini } from './pasos-mini'
 import { ChipEstado } from './tabla-seguimiento'
 
@@ -15,7 +23,8 @@ const ACCION: Record<string, { texto: string; clase: string }> = {
   CORREGIR: { texto: 'Corrigió y reenvió', clase: 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400' },
   IMPRIMIR: { texto: 'Imprimió requisición', clase: 'border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-400' },
   REIMPRIMIR: { texto: 'Reimprimió (copia)', clase: 'border-border' },
-  DESPACHAR: { texto: 'Despachó', clase: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' },
+  PREPARAR: { texto: 'Dejó lista (avisó)', clase: 'border-teal-500/40 bg-teal-500/10 text-teal-700 dark:text-teal-400' },
+  DESPACHAR: { texto: 'Entregó al solicitante', clase: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' },
   ANULAR: { texto: 'Anuló', clase: 'border-destructive/40 bg-destructive/10 text-destructive' },
   SIN_VALIDACION: { texto: 'Autorizó sin validaciones', clase: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400' },
 }
@@ -30,24 +39,86 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: React.ReactNode })
 }
 
 const TEXTO_CIERRE = {
-  despachada: 'desde el registro hasta el despacho',
+  despachada: 'desde el registro hasta la entrega',
   anulada: 'desde el registro hasta la anulación',
   en_curso: 'desde el registro, sigue corriendo',
 } as const
 
-/** El parámetro de medición inmediato: cuánto lleva (o llevó) la reposición entera. */
+function Tramo({
+  titulo,
+  ayuda,
+  minutos,
+  color,
+  corriendo,
+}: {
+  titulo: string
+  ayuda: string
+  minutos: number | null
+  color?: ColorSemaforo | null
+  corriendo?: boolean
+}) {
+  return (
+    <div className="rounded-md border px-3 py-2">
+      <div className="text-[11px] text-ink-faint">{titulo}</div>
+      <div className={cn('flex items-center gap-1.5 text-base font-bold tabular-nums', color ? claseSemaforo(color) : 'text-ink')}>
+        {color && color !== 'neutro' && <span className={cn('inline-block size-2.5 rounded-full', clasePuntoSemaforo(color))} />}
+        {minutos == null ? '—' : minutosTexto(minutos)}
+        {corriendo && <span className="text-[11px] font-normal text-ink-faint">corriendo</span>}
+      </div>
+      <div className="text-[11px] text-ink-faint">{ayuda}</div>
+    </div>
+  )
+}
+
+/**
+ * El parámetro de medición inmediato: cuánto lleva (o llevó) la reposición entera,
+ * partido en las tres partes que importan. Solo el tramo del corte lleva color: esperar
+ * el corte es lo esperado, y la espera de quien debe recoger no es de bodega.
+ */
 function TiempoTotal({ fila }: { fila: FilaSeguimiento }) {
   const t = tiempoTotal(fila)
   if (!t) return null
+  const s = fila.semaforo
+  const recoleccion =
+    s && fila.corteEn
+      ? Math.max(0, (new Date(fila.corteEn).getTime() - new Date(fila.creadoEn).getTime()) / 60000)
+      : null
   return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md border bg-muted/40 px-3 py-2">
-      <span className="text-xs font-medium text-ink-muted">Tiempo total</span>
-      <span
-        className={cn('text-lg font-bold tabular-nums', t.cierre === 'en_curso' ? claseSemaforo(t.segundos / 3600) : 'text-ink')}
-      >
-        {duracion(t.segundos)}
-      </span>
-      <span className="text-xs text-ink-faint">{TEXTO_CIERRE[t.cierre]}</span>
+    <div className="space-y-2 rounded-md border bg-muted/40 px-3 py-2">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        <span className="text-xs font-medium text-ink-muted">Tiempo total</span>
+        <span className="text-lg font-bold tabular-nums text-ink">{duracion(t.segundos)}</span>
+        <span className="text-xs text-ink-faint">{TEXTO_CIERRE[t.cierre]}</span>
+      </div>
+      {s && (
+        <>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Tramo
+              titulo="Recolección"
+              ayuda={`creación → ${etiquetaCorte(s.corteEn)?.toLowerCase()}`}
+              minutos={s.fase === 'RECOLECCION' ? null : recoleccion}
+              corriendo={s.fase === 'RECOLECCION'}
+            />
+            <Tramo
+              titulo="Proceso del corte"
+              ayuda="hora del corte → bodega la deja lista"
+              minutos={s.procesoMin}
+              color={s.procesoColor}
+              corriendo={s.fase === 'PROCESO'}
+            />
+            <Tramo
+              titulo="Espera del solicitante"
+              ayuda="lista → recogida (le toca a quien la pidió)"
+              minutos={s.esperaMin}
+              color={s.esperaColor}
+              corriendo={s.fase === 'POR_RECOGER'}
+            />
+          </div>
+          {s.fase === 'RECOLECCION' && (
+            <div className="text-xs text-ink-faint">Falta {minutosTexto(s.faltanMin ?? 0)} para el corte: todavía no corre el semáforo.</div>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -104,7 +175,9 @@ export function ModalDetalleReposicion({ fila, onCerrar }: { fila: FilaSeguimien
                   <Dato etiqueta="Tela" valor={fila.tela ? `${fila.yardasTela} yd · ${fila.tela.codigo} ${fila.tela.descripcion}` : null} />
                 </>
               )}
+              {fila.corteEn && <Dato etiqueta="Corte" valor={fechaHoraGT(fila.corteEn)} />}
               {fila.requisicion?.numeroTalonario && <Dato etiqueta="Nº talonario" valor={fila.requisicion.numeroTalonario} />}
+              {fila.requisicion?.recibidoPor && <Dato etiqueta="Recibido por" valor={fila.requisicion.recibidoPor} />}
             </div>
 
             {fila.prendas.length > 0 && (
@@ -163,7 +236,13 @@ export function ModalDetalleReposicion({ fila, onCerrar }: { fila: FilaSeguimien
                           <span className="text-xs text-ink-faint">{fechaHoraGT(e.fecha)}</span>
                           {mostrarTiempo && (
                             <span className="text-xs text-ink-faint">
-                              · {e.accion === 'CORREGIR' ? 'tardó en corregir' : 'tardó'} {duracion(e.segundos)}
+                              ·{' '}
+                              {e.accion === 'CORREGIR'
+                                ? 'tardó en corregir'
+                                : e.accion === 'DESPACHAR'
+                                  ? 'esperó el solicitante'
+                                  : 'tardó'}{' '}
+                              {duracion(e.segundos)}
                             </span>
                           )}
                         </div>

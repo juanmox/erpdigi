@@ -5,6 +5,7 @@ import { CosteoReposicionesController } from './costeo-reposiciones.controller';
 import { CosteoReposicionesService } from './costeo-reposiciones.service';
 import { PiezasController } from './piezas.controller';
 import { PiezasService } from './piezas.service';
+import { ReposicionesConfigService } from './reposiciones-config.service';
 import { ReposicionesFlujoService } from './reposiciones-flujo.service';
 import { ReposicionesSeguimientoService } from './reposiciones-seguimiento.service';
 
@@ -14,6 +15,7 @@ import { ReposicionesSeguimientoService } from './reposiciones-seguimiento.servi
   providers: [
     CosteoReposicionesService,
     PiezasService,
+    ReposicionesConfigService,
     ReposicionesFlujoService,
     ReposicionesSeguimientoService,
   ],

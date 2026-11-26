@@ -124,6 +124,8 @@ export interface Reposicion {
   estado: EstadoReposicion
   pasoPendiente: number | null
   estadoDesde: string | null
+  /** Corte al que quedó asignada (NULL en las históricas). */
+  corteEn: string | null
   idOrdenProduccion: number
   requisicion: Requisicion | null
 }
@@ -133,6 +135,7 @@ export type EstadoReposicion =
   | 'DEVUELTA'
   | 'POR_IMPRIMIR'
   | 'POR_DESPACHAR'
+  | 'POR_RECOGER'
   | 'DESPACHADA'
   | 'HISTORICA'
 
@@ -140,7 +143,31 @@ export interface Requisicion {
   numero: number
   impresiones: number
   numeroTalonario: string | null
+  /** Bodega la dejó lista y avisó (paso 8). */
+  listaEn: string | null
+  /** El solicitante recogió (paso 9). */
   despachadaEn: string | null
+  recibidoPor: string | null
+}
+
+export type ColorSemaforo = 'verde' | 'amarillo' | 'rojo' | 'neutro'
+export type FaseSemaforo = 'RECOLECCION' | 'PROCESO' | 'POR_RECOGER' | 'ENTREGADA'
+
+/** El semáforo del corte, calculado por el servidor (`common/cortes-reposicion.ts`). */
+export interface SemaforoReposicion {
+  corteEn: string
+  fase: FaseSemaforo
+  /** Minutos que faltan para el corte (solo en RECOLECCION). */
+  faltanMin: number | null
+  /** Minutos del corte a "lista" (o hasta ahora, si todavía corre). */
+  procesoMin: number | null
+  procesoColor: ColorSemaforo | null
+  procesoCerrado: boolean
+  /** Minutos de "lista" a "entregada": le toca al solicitante. */
+  esperaMin: number | null
+  esperaColor: ColorSemaforo | null
+  /** El color que resume la fila hoy. */
+  color: ColorSemaforo
 }
 
 export interface ValidacionHecha {
@@ -168,6 +195,9 @@ export interface FilaSeguimiento {
   estado: EstadoReposicion
   pasoPendiente: number | null
   estadoDesde: string | null
+  /** Corte al que quedó asignada (congelado al crear). NULL en las históricas. */
+  corteEn: string | null
+  semaforo: SemaforoReposicion | null
   anuladoEn: string | null
   motivoAnulacion: string | null
   departamento: string
@@ -196,16 +226,37 @@ export interface FilaSeguimiento {
     motivoNoValidar: string | null
     corregir: boolean
     imprimir: boolean
-    despachar: boolean
+    /** Bodega: dejar lista la requisición (y avisar a quien la pidió). */
+    preparar: boolean
+    /** Bodega: el solicitante recogió. Vale también desde "en bodega". */
+    entregar: boolean
     /** Modo sin validaciones prendido y la reposición sigue esperando validación. */
     autorizarDirecto: boolean
     anular: boolean
   }
 }
 
+export interface CorteConfig {
+  /** `HH:MM`, hora de Guatemala. */
+  hora: string
+  /** ISO: 1 = lunes … 7 = domingo. */
+  dias: number[]
+}
+
+export interface SemaforoConfig {
+  /** Verde mientras el proceso lleve menos de estos minutos. */
+  minutosVerde: number
+  /** Amarillo hasta estos minutos; de ahí, rojo. */
+  minutosAmarillo: number
+  /** Tolerancia para que el solicitante recoja lo que bodega dejó listo. */
+  minutosRecoger: number
+}
+
 export interface ConfiguracionReposiciones {
   /** true = modo transitorio: las reposiciones se autorizan al registrarse. */
   sinValidacion: boolean
+  cortes: CorteConfig[]
+  semaforo: SemaforoConfig
 }
 
 export interface ResumenSeguimiento {
@@ -213,6 +264,7 @@ export interface ResumenSeguimiento {
   devueltas: number
   porImprimir: number
   porDespachar: number
+  porRecoger: number
   despachadas: number
   porValidar: number
   devueltasMias: number
@@ -231,6 +283,8 @@ export interface AvisosReposiciones {
   grupos: { clave: string; etiqueta: string; cantidad: number }[]
   /** Las que creó este usuario y le devolvieron para corregir. */
   devueltas: { cantidad: number; masReciente: string | null }
+  /** Las que pidió (o cuyo encargado de área es) este usuario y bodega ya dejó listas. */
+  porRecoger: { cantidad: number; masReciente: string | null }
 }
 
 export interface PaginaSeguimiento {
@@ -238,6 +292,8 @@ export interface PaginaSeguimiento {
   pagina: number
   porPagina: number
   paginas: number
+  /** Instante en que el servidor calculó los semáforos. */
+  generadoEn: string
   filas: FilaSeguimiento[]
   resumen: ResumenSeguimiento
 }
@@ -271,8 +327,33 @@ export interface ResultadoLote {
 export interface MetricasReposiciones {
   desde: string | null
   hasta: string | null
-  horasAmarillo: number
-  horasRojo: number
+  /** Los minutos que pintan los colores: la pantalla no tiene números propios. */
+  semaforo: SemaforoConfig
+  porCorte: {
+    corteEn: string
+    total: number
+    verdes: number
+    amarillas: number
+    rojas: number
+    enRecoleccion: number
+    pctVerde: number | null
+    procesoPromedioMin: number | null
+    procesoMaximoMin: number | null
+    sinValidarAlCorte: number
+    autorizacionPromedioMin: number | null
+    bodegaPromedioMin: number | null
+    solicitantePromedioMin: number | null
+  }[]
+  atrasoAlCorte: {
+    paso: number
+    nombrePaso: string
+    usuario: string
+    total: number
+    tardias: number
+    pctTardias: number
+    atrasoPromedioMin: number | null
+    atrasoMaximoMin: number | null
+  }[]
   porPaso: {
     paso: number
     nombre: string
@@ -309,8 +390,21 @@ export interface MetricasReposiciones {
     nombre: string
     cantidad: number
     masAntiguaHoras: number | null
-    mas24: number
-    mas48: number
+    verdes: number
+    amarillas: number
+    rojas: number
+    /** Todavía esperan su corte: aún no tienen color. */
+    enRecoleccion: number
   }[]
-  enCurso: { idReposicion: number; codigo: string; paso: number; nombrePaso: string; horas: number | null; creador: string | null }[]
+  enCurso: {
+    idReposicion: number
+    codigo: string
+    paso: number
+    nombrePaso: string
+    horas: number | null
+    minutos: number | null
+    corteEn: string | null
+    color: ColorSemaforo
+    creador: string | null
+  }[]
 }
