@@ -1206,6 +1206,53 @@ medido "desde el último paso" no servía: con cortes cada 2 h una reposición "
   solo llega con el ERP abierto (no hay push al teléfono); un margen de "cierre X min antes del corte" (una reposición creada a las
   8:58 casi no da tiempo a validar: el semáforo lo va a mostrar); que las reposiciones por excepción también pasen por bodega con corte.
 
+## Insumos pasan a Inventario, con el costo aparte (2026-11-26, SOLO LOCAL, sin commitear)
+Un bodeguero quería dar de alta 4 insumos y para eso había que darle acceso a Recetas, donde hay costos y
+recetas confidenciales. El catálogo de insumos salió de "Gestión de datos" y vive en el módulo **Inventario**
+(`/inventario/insumos`, sidebar `IV`); el **costo** quedó separado con permisos propios.
+- **No se movió la tabla**: `recetas.insumos` (y `categorias_insumo`, `unidades_medida`) siguen en su schema; tienen
+  FKs desde costeo, vistas y datasets de Superset. Cuando exista el kardex se pasa con
+  `ALTER TABLE ... SET SCHEMA inventario`, que conserva FKs y vistas. Lo que cambió es módulo, rutas, pantalla y permisos.
+- **Backend**: `modules/recetas-insumos` → `modules/inventario-insumos` (rutas `inventario/insumos`, más `/categorias`
+  y `/unidades`, que salieron de `recetas-referencias`). Las rutas `/recetas/insumos*`, `/recetas/categorias-insumo` y
+  `/recetas/unidades-medida` **ya no existen** (404). La auditoría conserva la entidad `'insumos'` (el narrador de la
+  bitácora la reconoce por ese nombre: no renombrarla).
+- **Permisos** (`inventario.*`): `insumo.ver | crear | editar | desactivar | importar` y `costo.ver | editar`. Retirados
+  del catálogo: `recetas.insumos.crear|editar|desactivar`. `recetas.importar` sigue para productos y desarrollos.
+- ⚠️ **El costo no viaja sin `inventario.costo.ver`**: el campo `costoPromedio` NO está en la respuesta (no va en null).
+  Antes `GET /recetas/insumos` lo entregaba a cualquiera con `recetas.catalogo.ver` (incluido el Operador Reposiciones,
+  que ese permiso lo tenía solo para el selector de tela): la pantalla lo ocultaba pero la respuesta lo traía. Sin
+  `inventario.costo.editar`, un costo que llegue en `crear`/`altas` **se descarta** (el insumo nace en 0 = "sin costo") y la
+  plantilla de altas ni trae la columna. Son permisos opcionales resueltos en el controlador (`usuario.permisos`), no
+  en `@RequirePermissions` (que exige TODOS).
+- **Roles**: BODEGUERO = `insumo.ver/crear/importar` (no edita, no desactiva, no ve costos); OPERADOR_TRANSFERENCIA cambia
+  `recetas.catalogo.ver` por `insumo.ver` (el selector de tela; ya no le abre productos/clientes/tallas); ANALISTA_COSTOS =
+  `insumo.ver` + `costo.ver/editar` (dueño de los costos: lo que bodega da de alta le queda en "Sin costo"); GERENCIA =
+  `insumo.ver` + `costo.ver`; EDITOR/ADMIN todo. Códigos de insumo: son los del SAC, no se inventan.
+- ⚠️ **Herencia de una sola vez en el seed, solo hacia roles `personalizado`** (`heredarPermisosInventario`): el seed no les
+  toca los permisos y varios lo están en producción, así que sin esto perderían insumos en silencio. Solo corre para los
+  permisos `inventario.*` que ESA corrida acaba de crear (si no, un permiso que un admin quitó a propósito volvería en cada
+  despliegue). `recetas.catalogo.ver` hereda solo `insumo.ver`, **nunca** `costo.ver` (esa es la fuga). Probado en local con
+  un rol personalizado simulado. Después retira los 3 permisos viejos.
+- **Frontend**: `features/inventario/` (página con pestañas Insumos y Costos; Costos solo con `costo.ver`, con filtro
+  "Sin costo (N)"). "Gestión de datos" quedó con Desarrollos y Productos. El editor de receta y el selector de tela de
+  Reposiciones usan la ruta nueva; el editor muestra el costo solo si llega. El mosaico de Inicio ahora **respeta
+  permisos** (`ModuloInfo.permiso`): antes ofrecía todo módulo activo a todos, Recetas incluido.
+- **Verificado en local** con usuarios desechables por rol (Bodeguero, Operador Reposiciones, Analista, Editor): el
+  bodeguero lista y crea pero la respuesta no trae costo, un POST con costo crea en 0, editar/desactivar/precios dan 403,
+  las rutas viejas 404, `/catalogo` lo redirige; el analista ve y fija el costo; el selector de Reposiciones y el editor de
+  receta funcionan. Navegador a 1500/820/390 px sin desborde y consola limpia. Datos y usuarios de prueba borrados por id.
+- **Costos para quien tiene las facturas (pedido del usuario, 2026-11-26)**: rol sembrado y ADITIVO `INVENTARIO_COSTOS` (`insumo.ver` + `costo.ver/editar`), que se agrega por persona desde /usuarios junto a su rol de bodega. Aparte de BODEGUERO a propósito: el costo lo ve solo quien lo maneja, y en producción BODEGUERO es personalizado. Si se quiere para todos los bodegueros, son dos casillas en /roles. Pendiente de confirmar: el campo es costo PROMEDIO, no el precio de la última factura.
+- **Observación abierta**: el Operador Reposiciones ahora ve el ítem "Inventario" (solo lectura, sin costos) porque
+  `insumo.ver` también alimenta su selector. Si molesta, se parte en un permiso aparte solo para selectores.
+- ⚠️ **Al desplegar**: respaldo de `core` y `recetas`; `deploy.sh`; el seed por separado; todos cierran sesión y vuelven a
+  entrar (los permisos viajan en el JWT). **Revisar en /roles el Bodeguero real** (personalizado, con permisos que se le
+  dieron a mano en Recetas): quitarle `recetas.catalogo.ver`/`cotizaciones.ver` si los tenía. Sin migración de schema:
+  el rollback es un `git revert` más el seed.
+- **Fuera de este cambio**: `recetas.catalogo.ver` sigue abriendo productos y desarrollos con sus costos (mismo problema,
+  más grande; merece su propio plan); rollos de papel y Explosión de materiales también serían Inventario, pero hoy
+  funcionan en Costeo.
+
 ## Indexación con codebase-memory MCP
 **Este repo debe estar indexado con las herramientas de `codebase-memory-mcp` antes de explorar
 código en él.** Al empezar cualquier sesión de trabajo aquí:

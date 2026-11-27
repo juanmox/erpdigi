@@ -62,7 +62,25 @@ export class InsumosService {
     private readonly auditoria: AuditoriaService,
   ) {}
 
-  async listar(estado: 'activos' | 'inactivos' | 'todos' = 'activos') {
+  categorias() {
+    return this.prisma.categoriaInsumo.findMany({
+      orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
+    });
+  }
+
+  unidades() {
+    return this.prisma.unidadMedida.findMany({ orderBy: { nombre: 'asc' } });
+  }
+
+  /**
+   * `verCosto` falso: el campo `costoPromedio` NO existe en la respuesta (no
+   * va en null). Ocultarlo en la pantalla no alcanza — el navegador lo recibe
+   * igual y cualquiera lo ve en la pestaña de red.
+   */
+  async listar(
+    estado: 'activos' | 'inactivos' | 'todos' = 'activos',
+    verCosto = false,
+  ) {
     const where: Prisma.InsumoWhereInput =
       estado === 'activos'
         ? { activo: true }
@@ -81,7 +99,7 @@ export class InsumosService {
       activo: i.activo,
       idCategoria: i.idCategoria,
       idUnidad: i.idUnidad,
-      costoPromedio: i.costoPromedio.toNumber(),
+      ...(verCosto ? { costoPromedio: i.costoPromedio.toNumber() } : {}),
       categoria: i.categoria.nombre,
       ordenCategoria: i.categoria.orden,
       unidad: i.unidad.nombre,
@@ -289,7 +307,13 @@ export class InsumosService {
     return wb.xlsx.writeBuffer();
   }
 
-  async crear(dto: CrearInsumoDto, idUsuarioActor: number) {
+  /** `puedeFijarCosto` falso: un costo que llegue en el cuerpo se descarta y el
+   *  insumo nace en 0 ("sin costo"), que luego fija quien lleva los costos. */
+  async crear(
+    dto: CrearInsumoDto,
+    idUsuarioActor: number,
+    puedeFijarCosto = false,
+  ) {
     try {
       const insumo = await this.prisma.insumo.create({
         data: {
@@ -297,7 +321,7 @@ export class InsumosService {
           descripcion: dto.descripcion.trim(),
           idCategoria: dto.idCategoria,
           idUnidad: dto.idUnidad,
-          costoPromedio: dto.costoPromedio ?? 0,
+          costoPromedio: puedeFijarCosto ? (dto.costoPromedio ?? 0) : 0,
         },
       });
       await this.auditoria.registrar({
@@ -389,6 +413,7 @@ export class InsumosService {
 
   async previewImportarAltas(
     buffer: Buffer,
+    puedeFijarCosto = false,
   ): Promise<{ filas: FilaPreviewAlta[] }> {
     if (!buffer || buffer.length === 0)
       throw new BadRequestException('Archivo vacío o no recibido');
@@ -432,8 +457,12 @@ export class InsumosService {
 
     const vistos = new Set<string>();
     const filas: FilaPreviewAlta[] = crudo.map((r) => {
+      // Sin permiso de costos la columna se ignora, aunque el archivo la traiga.
       const costo =
-        r.costoCell === null || r.costoCell === undefined || r.costoCell === ''
+        !puedeFijarCosto ||
+        r.costoCell === null ||
+        r.costoCell === undefined ||
+        r.costoCell === ''
           ? 0
           : Number(r.costoCell);
       let error: string | null = null;
@@ -475,6 +504,7 @@ export class InsumosService {
       costoPromedio?: number;
     }[],
     idUsuarioActor: number,
+    puedeFijarCosto = false,
   ) {
     if (!altas || altas.length === 0)
       throw new BadRequestException('No hay altas para guardar');
@@ -490,7 +520,9 @@ export class InsumosService {
               descripcion: a.descripcion,
               idCategoria: a.idCategoria,
               idUnidad: a.idUnidad,
-              costoPromedio: a.costoPromedio ?? 0,
+              // El preview corre en el servidor pero su salida pasa por el
+              // navegador y vuelve: el costo se decide acá, no se confía en él.
+              costoPromedio: puedeFijarCosto ? (a.costoPromedio ?? 0) : 0,
             },
           });
           creados++;
@@ -520,7 +552,7 @@ export class InsumosService {
     });
   }
 
-  async plantillaAlta(): Promise<ExcelJS.Buffer> {
+  async plantillaAlta(conCosto = false): Promise<ExcelJS.Buffer> {
     const [categorias, unidades] = await Promise.all([
       this.prisma.categoriaInsumo.findMany({
         orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
@@ -533,7 +565,8 @@ export class InsumosService {
     wb.created = new Date();
 
     const ws = wb.addWorksheet('Altas de insumos');
-    ws.mergeCells('A1:E1');
+    const ultima = conCosto ? 'E' : 'D';
+    ws.mergeCells(`A1:${ultima}1`);
     ws.getCell('A1').value =
       'Digital Textil, S.A. (Digitexsa) — Alta masiva de insumos';
     ws.getCell('A1').font = {
@@ -541,10 +574,11 @@ export class InsumosService {
       size: 14,
       color: { argb: AZUL_DIGITEXSA },
     };
-    ws.mergeCells('A2:E2');
+    ws.mergeCells(`A2:${ultima}2`);
     ws.getCell('A2').value =
-      'Completar una fila por insumo nuevo. Categoría y Unidad deben coincidir ' +
-      'exactamente con los nombres de la hoja "Categorías y unidades válidas".';
+      'Completar una fila por insumo nuevo. El código es el del SAC, tal cual. ' +
+      'Categoría y Unidad deben coincidir exactamente con los nombres de la ' +
+      'hoja "Categorías y unidades válidas".';
     ws.getCell('A2').font = { size: 9, color: { argb: 'FF888888' } };
     const headerRow = ws.getRow(4);
     headerRow.values = [
@@ -552,15 +586,17 @@ export class InsumosService {
       'Descripción',
       'Categoría',
       'Unidad',
-      'Costo inicial',
+      ...(conCosto ? ['Costo inicial'] : []),
     ];
     headerRow.eachCell(estiloEncabezado);
     ws.getColumn(1).width = 16;
     ws.getColumn(2).width = 48;
     ws.getColumn(3).width = 18;
     ws.getColumn(4).width = 14;
-    ws.getColumn(5).width = 14;
-    ws.getColumn(5).numFmt = '#,##0.0000';
+    if (conCosto) {
+      ws.getColumn(5).width = 14;
+      ws.getColumn(5).numFmt = '#,##0.0000';
+    }
     ws.views = [{ state: 'frozen', ySplit: 4 }];
 
     const wsRef = wb.addWorksheet('Categorías y unidades válidas');

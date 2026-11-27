@@ -1,23 +1,18 @@
 import { apiFetch, descargarArchivo } from '@/lib/api'
 import type {
   AreaUso,
-  CategoriaInsumo,
   Cliente,
   Deporte,
   Desarrollo,
   DesarrolloDetalle,
-  FilaPreviewAltaInsumo,
   FilaPreviewAltaProducto,
   FilaPreviewDesarrollo,
   FilaPreviewInsumoDesarrollo,
-  FilaPreviewPrecio,
-  InsumoCatalogo,
   LineaReceta,
   ProductoCatalogo,
   Subcliente,
   Talla,
   TipoCatalogoProducto,
-  UnidadMedida,
   ValorCatalogoProducto,
 } from './types'
 
@@ -86,8 +81,6 @@ function queryDesarrollos(p: FiltrosDesarrollos): string {
 
 export const catalogoApi = {
   // referencias
-  categoriasInsumo: () => apiFetch<CategoriaInsumo[]>('/recetas/categorias-insumo'),
-  unidadesMedida: () => apiFetch<UnidadMedida[]>('/recetas/unidades-medida'),
   areasUso: () => apiFetch<AreaUso[]>('/recetas/areas-uso'),
   clientes: () => apiFetch<Cliente[]>('/recetas/clientes'),
   subclientes: () => apiFetch<Subcliente[]>('/recetas/subclientes'),
@@ -112,23 +105,6 @@ export const catalogoApi = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
-
-  // insumos
-  listarInsumos: (estado: Estado = 'activos') => apiFetch<InsumoCatalogo[]>(`/recetas/insumos?estado=${estado}`),
-  crearInsumo: (body: { codigo: string; descripcion: string; idCategoria: number; idUnidad: number; costoPromedio?: number }) =>
-    apiFetch<{ idInsumo: number }>('/recetas/insumos', { method: 'POST', body: JSON.stringify(body) }),
-  editarInsumo: (id: number, body: { descripcion: string; idCategoria: number; idUnidad: number }) =>
-    apiFetch(`/recetas/insumos/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  cambiarActivoInsumo: (id: number, activo: boolean) =>
-    apiFetch(`/recetas/insumos/${id}/activo`, { method: 'PATCH', body: JSON.stringify({ activo }) }),
-  guardarPrecios: (cambios: { idInsumo: number; costoPromedio: number }[]) =>
-    apiFetch<{ actualizados: number }>('/recetas/insumos/precios', { method: 'POST', body: JSON.stringify({ cambios }) }),
-  previewImportarPrecios: (archivo: File) =>
-    subirArchivo<{ filas: FilaPreviewPrecio[] }>('/recetas/insumos/importar/preview', archivo),
-  previewImportarAltasInsumos: (archivo: File) =>
-    subirArchivo<{ filas: FilaPreviewAltaInsumo[] }>('/recetas/insumos/importar-altas/preview', archivo),
-  altasInsumos: (altas: { codigo: string; descripcion: string; idCategoria: number; idUnidad: number; costoPromedio: number }[]) =>
-    apiFetch<{ creados: number }>('/recetas/insumos/altas', { method: 'POST', body: JSON.stringify({ altas }) }),
 
   // productos
   listarProductos: (estado: Estado = 'activos') =>
@@ -193,9 +169,6 @@ export const catalogoApi = {
     ),
 
   // descargas protegidas (requieren Bearer token, se resuelven con fetch+blob)
-  exportarInsumos: () => descargarArchivo('/recetas/insumos/export', `insumos_${new Date().toISOString().slice(0, 10)}.xlsx`),
-  plantillaAltaInsumos: () => descargarArchivo('/recetas/insumos/plantilla-alta', 'plantilla_alta_insumos.xlsx'),
-  plantillaPrecios: () => descargarArchivo('/recetas/insumos/plantilla-precios', 'plantilla_precios_insumos.xlsx'),
   exportarProductos: () => descargarArchivo('/recetas/productos/export', `productos_${new Date().toISOString().slice(0, 10)}.xlsx`),
   plantillaAltaProductos: () => descargarArchivo('/recetas/productos/plantilla-alta', 'plantilla_alta_productos.xlsx'),
   plantillaDesarrollos: () =>

@@ -12,7 +12,9 @@ import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
 import { formatGTQ } from '@digitexsa-erp/shared-utils'
 import { catalogoApi } from '../api'
-import type { Desarrollo, InsumoCatalogo, LineaReceta } from '../types'
+import { inventarioApi } from '@/features/inventario/api'
+import type { InsumoCatalogo } from '@/features/inventario/types'
+import type { Desarrollo, LineaReceta } from '../types'
 
 const SIN_AREA = '__sin_area__'
 const TODAS = '__todas__'
@@ -38,8 +40,8 @@ export function ModalRecetaDesarrollo({ desarrollo, open, onOpenChange, soloLect
     enabled: open && !!desarrollo,
   })
   const { data: insumos } = useQuery({
-    queryKey: ['catalogo', 'insumos', 'activos'],
-    queryFn: () => catalogoApi.listarInsumos('activos'),
+    queryKey: ['inventario', 'insumos', 'activos'],
+    queryFn: () => inventarioApi.listarInsumos('activos'),
     enabled: open,
   })
   const { data: areas } = useQuery({
@@ -367,7 +369,9 @@ export function ModalRecetaDesarrollo({ desarrollo, open, onOpenChange, soloLect
                       <span className="text-primary font-semibold">{i.codigo}</span> — {i.descripcion}
                     </span>
                     <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                      {formatGTQ(i.costoPromedio)} / {i.unidad}
+                      {/* Sin `inventario.costo.ver` el servidor no manda el costo. */}
+                      {i.costoPromedio != null ? `${formatGTQ(i.costoPromedio)} / ` : ''}
+                      {i.unidad}
                     </span>
                   </div>
                 )}

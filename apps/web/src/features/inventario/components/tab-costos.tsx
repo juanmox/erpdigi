@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useMemo, useState } from 'react'
 import { ImportPreviewDialog } from '@/components/shared/import-preview-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -9,33 +10,35 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useAuth } from '@/features/auth/auth-context'
 import { ApiError } from '@/lib/api'
 import { formatGTQ } from '@digitexsa-erp/shared-utils'
-import { catalogoApi } from '../api'
+import { inventarioApi } from '../api'
 import type { FilaPreviewPrecio, InsumoCatalogo } from '../types'
 
 const SIN_FILTRO = '__todos__'
 
-export function TabPrecios() {
+export function TabCostos() {
   const { tienePermiso } = useAuth()
-  const puedeEditar = tienePermiso('recetas.insumos.editar')
-  const puedeImportar = tienePermiso('recetas.importar')
+  const puedeEditar = tienePermiso('inventario.costo.editar')
+  const puedeImportar = puedeEditar
   const queryClient = useQueryClient()
 
   const { data: insumos, isLoading } = useQuery({
-    queryKey: ['catalogo', 'insumos', 'activos'],
-    queryFn: () => catalogoApi.listarInsumos('activos'),
+    queryKey: ['inventario', 'insumos', 'activos'],
+    queryFn: () => inventarioApi.listarInsumos('activos'),
   })
   const { data: categorias } = useQuery({
-    queryKey: ['catalogo', 'categorias-insumo'],
-    queryFn: () => catalogoApi.categoriasInsumo(),
+    queryKey: ['inventario', 'categorias'],
+    queryFn: () => inventarioApi.categorias(),
   })
   const { data: unidades } = useQuery({
-    queryKey: ['catalogo', 'unidades-medida'],
-    queryFn: () => catalogoApi.unidadesMedida(),
+    queryKey: ['inventario', 'unidades'],
+    queryFn: () => inventarioApi.unidades(),
   })
 
   const [busqueda, setBusqueda] = useState('')
   const [idCategoria, setIdCategoria] = useState(SIN_FILTRO)
   const [idUnidad, setIdUnidad] = useState(SIN_FILTRO)
+  // Los insumos que da de alta bodega nacen sin costo: esta es su cola de trabajo.
+  const [soloSinCosto, setSoloSinCosto] = useState(false)
   const [cambios, setCambios] = useState<Map<number, number>>(new Map())
   const [guardando, setGuardando] = useState(false)
   const [mensaje, setMensaje] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
@@ -47,9 +50,12 @@ export function TabPrecios() {
       if (texto && !i.codigo.toLowerCase().includes(texto) && !i.descripcion.toLowerCase().includes(texto)) return false
       if (idCategoria !== SIN_FILTRO && String(i.idCategoria) !== idCategoria) return false
       if (idUnidad !== SIN_FILTRO && String(i.idUnidad) !== idUnidad) return false
+      if (soloSinCosto && i.costoPromedio) return false
       return true
     })
-  }, [insumos, busqueda, idCategoria, idUnidad])
+  }, [insumos, busqueda, idCategoria, idUnidad, soloSinCosto])
+
+  const sinCosto = useMemo(() => (insumos ?? []).filter((i) => !i.costoPromedio).length, [insumos])
 
   const grupos = useMemo(() => {
     const g: Record<string, InsumoCatalogo[]> = {}
@@ -71,12 +77,12 @@ export function TabPrecios() {
     setGuardando(true)
     setMensaje(null)
     try {
-      const resultado = await catalogoApi.guardarPrecios(
+      const resultado = await inventarioApi.guardarPrecios(
         Array.from(cambios.entries()).map(([idInsumo, costoPromedio]) => ({ idInsumo, costoPromedio })),
       )
       setMensaje({ tipo: 'ok', texto: `${resultado.actualizados} precio(s) actualizado(s)` })
       setCambios(new Map())
-      queryClient.invalidateQueries({ queryKey: ['catalogo', 'insumos'] })
+      queryClient.invalidateQueries({ queryKey: ['inventario', 'insumos'] })
     } catch (err) {
       setMensaje({ tipo: 'error', texto: err instanceof ApiError ? err.message : 'Error al guardar precios' })
     } finally {
@@ -92,7 +98,7 @@ export function TabPrecios() {
           {cambios.size > 0 && <span> · {cambios.size} cambio(s) sin guardar</span>}
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => catalogoApi.exportarInsumos()}>
+          <Button variant="outline" size="sm" onClick={() => inventarioApi.exportarInsumos()}>
             Exportar Excel
           </Button>
           {puedeImportar && (
@@ -141,6 +147,14 @@ export function TabPrecios() {
             ))}
           </SelectContent>
         </Select>
+        <Button
+          variant={soloSinCosto ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setSoloSinCosto((v) => !v)}
+          disabled={sinCosto === 0 && !soloSinCosto}
+        >
+          Sin costo ({sinCosto})
+        </Button>
       </div>
 
       {mensaje && (
@@ -180,7 +194,7 @@ export function TabPrecios() {
                     <TableCell className="font-medium">{i.codigo}</TableCell>
                     <TableCell className="max-w-xs whitespace-normal">{i.descripcion}</TableCell>
                     <TableCell>{i.unidad}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatGTQ(i.costoPromedio)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{(i.costoPromedio ? formatGTQ(i.costoPromedio) : <Badge variant="outline">Sin costo</Badge>)}</TableCell>
                     <TableCell className="text-right">
                       <Input
                         type="number"
@@ -188,7 +202,7 @@ export function TabPrecios() {
                         min={0}
                         disabled={!puedeEditar}
                         className="ml-auto h-8 w-28 text-right"
-                        placeholder={i.costoPromedio.toFixed(4)}
+                        placeholder={(i.costoPromedio ?? 0).toFixed(4)}
                         value={cambios.has(i.idInsumo) ? String(cambios.get(i.idInsumo)) : ''}
                         onChange={(e) => onCambiarPrecio(i.idInsumo, e.target.value)}
                       />
@@ -205,12 +219,12 @@ export function TabPrecios() {
         open={dialogoAbierto}
         onOpenChange={(v) => {
           setDialogoAbierto(v)
-          if (!v) queryClient.invalidateQueries({ queryKey: ['catalogo', 'insumos'] })
+          if (!v) queryClient.invalidateQueries({ queryKey: ['inventario', 'insumos'] })
         }}
         titulo="Importar precios desde Excel"
         getError={(f) => f.error}
         getKey={(f) => f.fila}
-        onDescargarPlantilla={() => catalogoApi.plantillaPrecios()}
+        onDescargarPlantilla={() => inventarioApi.plantillaPrecios()}
         columnas={[
           { key: 'codigo', header: 'Código', render: (f) => f.codigo },
           { key: 'descripcion', header: 'Descripción', className: 'max-w-xs whitespace-normal', render: (f) => f.descripcion ?? '—' },
@@ -232,9 +246,9 @@ export function TabPrecios() {
             render: (f) => f.error ?? (f.encontrado ? 'OK' : '—'),
           },
         ]}
-        onArchivoElegido={async (archivo) => (await catalogoApi.previewImportarPrecios(archivo)).filas}
+        onArchivoElegido={async (archivo) => (await inventarioApi.previewImportarPrecios(archivo)).filas}
         onAplicar={async (filas) => {
-          const resultado = await catalogoApi.guardarPrecios(
+          const resultado = await inventarioApi.guardarPrecios(
             filas.map((f) => ({ idInsumo: f.idInsumo as number, costoPromedio: f.costoNuevo as number })),
           )
           return `${resultado.actualizados} precio(s) actualizado(s)`

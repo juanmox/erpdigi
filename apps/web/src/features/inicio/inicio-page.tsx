@@ -53,6 +53,10 @@ export function InicioPage() {
 
   const tc = tipoCambioQuery.data
 
+  // Un módulo activo solo se ofrece a quien tiene su permiso: el mosaico enlazaba
+  // todo módulo activo sin mirar permisos, y quien no lo tenía caía en un redirect.
+  const modulos = MODULOS.filter((m) => !m.activo || !m.permiso || tienePermiso(m.permiso))
+
   return (
     <div className="mx-auto max-w-[1180px] px-6 py-7 lg:px-9">
       <div className="mb-6 flex items-start justify-between gap-6">
@@ -86,13 +90,13 @@ export function InicioPage() {
       <div className="mb-3 flex items-baseline justify-between">
         <h2 className="text-[14.5px] font-bold text-ink">Módulos</h2>
         <span className="text-xs text-ink-faint">
-          {MODULOS.filter((m) => m.activo).length} activo{MODULOS.filter((m) => m.activo).length === 1 ? '' : 's'} ·{' '}
-          {MODULOS.filter((m) => !m.activo).length} en construcción
+          {modulos.filter((m) => m.activo).length} activo{modulos.filter((m) => m.activo).length === 1 ? '' : 's'} ·{' '}
+          {modulos.filter((m) => !m.activo).length} en construcción
         </span>
       </div>
 
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
-        {MODULOS.map((modulo) =>
+        {modulos.map((modulo) =>
           modulo.activo ? (
             <Link
               key={modulo.codigo}
@@ -108,7 +112,7 @@ export function InicioPage() {
               </div>
               <div className="mt-auto flex items-center justify-between border-t border-border/70 pt-2.5 text-xs">
                 <span className="text-ink-muted">
-                  {puedeVerCotizaciones ? (
+                  {modulo.codigo === 'RC' && puedeVerCotizaciones ? (
                     <>
                       <span className="font-mono font-semibold text-ink">{cotizacionesDelMes.length}</span> cotizaciones
                     </>

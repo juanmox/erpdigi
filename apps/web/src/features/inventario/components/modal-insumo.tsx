@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiError } from '@/lib/api'
-import { catalogoApi } from '../api'
+import { useAuth } from '@/features/auth/auth-context'
+import { inventarioApi } from '../api'
 import type { InsumoCatalogo } from '../types'
 
 interface ModalInsumoProps {
@@ -19,14 +20,17 @@ interface ModalInsumoProps {
 
 export function ModalInsumo({ insumo, open, onOpenChange, onGuardado }: ModalInsumoProps) {
   const esEdicion = !!insumo
+  // Un costo inicial solo lo fija quien lleva los costos; el servidor lo descarta si no.
+  const { tienePermiso } = useAuth()
+  const fijarCosto = tienePermiso('inventario.costo.editar')
 
   const { data: categorias } = useQuery({
-    queryKey: ['catalogo', 'categorias-insumo'],
-    queryFn: () => catalogoApi.categoriasInsumo(),
+    queryKey: ['inventario', 'categorias'],
+    queryFn: () => inventarioApi.categorias(),
   })
   const { data: unidades } = useQuery({
-    queryKey: ['catalogo', 'unidades-medida'],
-    queryFn: () => catalogoApi.unidadesMedida(),
+    queryKey: ['inventario', 'unidades'],
+    queryFn: () => inventarioApi.unidades(),
   })
 
   const [codigo, setCodigo] = useState('')
@@ -43,7 +47,7 @@ export function ModalInsumo({ insumo, open, onOpenChange, onGuardado }: ModalIns
       setDescripcion(insumo?.descripcion ?? '')
       setIdCategoria(insumo ? String(insumo.idCategoria) : '')
       setIdUnidad(insumo ? String(insumo.idUnidad) : '')
-      setCostoPromedio(insumo ? String(insumo.costoPromedio) : '0')
+      setCostoPromedio(insumo ? String(insumo.costoPromedio ?? 0) : '0')
       setError(null)
     }
   }, [open, insumo])
@@ -57,18 +61,18 @@ export function ModalInsumo({ insumo, open, onOpenChange, onGuardado }: ModalIns
     setError(null)
     try {
       if (esEdicion) {
-        await catalogoApi.editarInsumo(insumo!.idInsumo, {
+        await inventarioApi.editarInsumo(insumo!.idInsumo, {
           descripcion: descripcion.trim(),
           idCategoria: Number(idCategoria),
           idUnidad: Number(idUnidad),
         })
       } else {
-        await catalogoApi.crearInsumo({
+        await inventarioApi.crearInsumo({
           codigo: codigo.trim(),
           descripcion: descripcion.trim(),
           idCategoria: Number(idCategoria),
           idUnidad: Number(idUnidad),
-          costoPromedio: Number(costoPromedio) || 0,
+          ...(fijarCosto ? { costoPromedio: Number(costoPromedio) || 0 } : {}),
         })
       }
       onGuardado()
@@ -95,7 +99,7 @@ export function ModalInsumo({ insumo, open, onOpenChange, onGuardado }: ModalIns
 
         <div className="space-y-3">
           <div>
-            <Label className="mb-1 block text-xs">Código</Label>
+            <Label className="mb-1 block text-xs">Código (el del SAC)</Label>
             <Input value={codigo} disabled={esEdicion} onChange={(e) => setCodigo(e.target.value)} />
           </div>
           <div>
@@ -132,7 +136,7 @@ export function ModalInsumo({ insumo, open, onOpenChange, onGuardado }: ModalIns
               </SelectContent>
             </Select>
           </div>
-          {!esEdicion && (
+          {!esEdicion && fijarCosto && (
             <div>
               <Label className="mb-1 block text-xs">Costo promedio inicial (Q)</Label>
               <Input type="number" step="0.000001" min={0} value={costoPromedio} onChange={(e) => setCostoPromedio(e.target.value)} />

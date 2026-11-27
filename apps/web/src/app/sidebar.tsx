@@ -83,6 +83,7 @@ function useItemsNav(): NavItemInfo[] {
   const { data: tablerosBi } = useTablerosBi()
   const { data: avisosRepos } = useAvisosReposiciones()
   const moduloRecetas = MODULOS.find((m) => m.codigo === 'RC')!
+  const moduloInventario = MODULOS.find((m) => m.codigo === 'IV')!
 
   return [
     { to: '/', codigo: 'IN', etiqueta: 'Inicio', end: true },
@@ -93,10 +94,13 @@ function useItemsNav(): NavItemInfo[] {
     ...(tienePermiso('recetas.cotizaciones.ver')
       ? [{ to: moduloRecetas.ruta!, codigo: moduloRecetas.codigo, etiqueta: moduloRecetas.nombre }]
       : []),
+    // Inventario: hoy solo el catálogo de insumos. `IV` es el código del módulo en
+    // `app/modulos.ts` y no choca con ninguno de los demás.
+    ...(tienePermiso('inventario.insumo.ver') ? [{ to: moduloInventario.ruta!, codigo: moduloInventario.codigo, etiqueta: moduloInventario.nombre }] : []),
     ...(tienePermiso('costeo.rollo.ver') ? [{ to: '/costeo/rollos', codigo: 'CR', etiqueta: 'Gestión de Rollos' }] : []),
     ...(tienePermiso('costeo.orden.ver') ? [{ to: '/costeo/ordenes', codigo: 'OP', etiqueta: 'Órdenes de Producción' }] : []),
     // El formulario es para quien registra; los validadores trabajan desde el
-    // seguimiento (`SR`, libre: IN RC CR OP RE IO CE RS OF EM DB).
+    // seguimiento (`SR`, libre: IN RC IV CR OP RE IO CE RS OF EM DB).
     ...(tienePermiso('costeo.reposicion.crear') ? [{ to: '/costeo/reposiciones', codigo: 'RE', etiqueta: 'Reposiciones', end: true, contador: avisosRepos?.devueltas.cantidad }] : []),
     ...(tienePermiso('costeo.reposicion.ver') ? [{ to: '/costeo/reposiciones/seguimiento', codigo: 'SR', etiqueta: 'Seguimiento de reposiciones', contador: avisosRepos ? avisosRepos.total + avisosRepos.porRecoger.cantidad : undefined }] : []),
     ...(tienePermiso('costeo.consumo.ver') ? [{ to: '/costeo/consumo', codigo: 'IO', etiqueta: 'Impresión de OPs' }] : []),

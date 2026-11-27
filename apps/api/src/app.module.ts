@@ -21,7 +21,7 @@ import { EmpresasModule } from './modules/empresas/empresas.module';
 import { MonedasModule } from './modules/monedas/monedas.module';
 import { CotizacionesModule } from './modules/recetas-cotizaciones/cotizaciones.module';
 import { DesarrollosModule } from './modules/recetas-desarrollos/desarrollos.module';
-import { InsumosModule } from './modules/recetas-insumos/insumos.module';
+import { InsumosModule } from './modules/inventario-insumos/insumos.module';
 import { ProductosModule } from './modules/recetas-productos/productos.module';
 import { ReferenciasModule } from './modules/recetas-referencias/referencias.module';
 import { TipoCambioModule } from './modules/recetas-tipo-cambio/tipo-cambio.module';

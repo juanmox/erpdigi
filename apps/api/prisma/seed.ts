@@ -6,6 +6,14 @@ import bcrypt from 'bcryptjs'
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL })
 const prisma = new PrismaClient({ adapter })
 
+// Permisos del módulo Inventario (2026-11-26). El catálogo de insumos salió de
+// Recetas: son cosas que entran y salen de bodega, y en Recetas el bodeguero
+// quedaba a un clic de costos y recetas confidenciales. El COSTO es aparte del
+// insumo: quien da de alta lo que llega a bodega no necesita (ni debe) verlo.
+function permisosInventario(acciones: string[]) {
+  return acciones.map((a) => `inventario.${a}`)
+}
+
 // Permisos del rol Cotizador: solo ver catálogo y generar cotizaciones.
 const PERMISOS_COTIZADOR = [
   'recetas.catalogo.ver',
@@ -15,9 +23,10 @@ const PERMISOS_COTIZADOR = [
 
 // Permisos adicionales del rol Editor: gestión completa del catálogo de recetas.
 const PERMISOS_EDITOR_ADICIONALES = [
-  'recetas.insumos.crear',
-  'recetas.insumos.editar',
-  'recetas.insumos.desactivar',
+  // Los insumos pasaron a Inventario (2026-11-26): ver, crear, editar,
+  // desactivar e importar el catálogo, más el costo — el Editor cotiza y arma
+  // recetas, así que necesita verlo y fijarlo.
+  ...permisosInventario(['insumo.ver', 'insumo.crear', 'insumo.editar', 'insumo.desactivar', 'insumo.importar', 'costo.ver', 'costo.editar']),
   'recetas.productos.crear',
   'recetas.productos.editar',
   'recetas.productos.desactivar',
@@ -216,6 +225,10 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
     [
       'costeo.rollo.ver',
       'costeo.rollo.ingresar',
+      // Da de alta los insumos que llegan a bodega (códigos del SAC), uno por uno
+      // o por plantilla. NO edita ni retira los existentes (un cambio de
+      // descripción repercute en recetas y reportes) y NO ve ni fija costos.
+      ...permisosInventario(['insumo.ver', 'insumo.crear', 'insumo.importar']),
       // Ve la explosión de materiales y registra las salidas (la entrega).
       'costeo.material.ver',
       'costeo.material.entregar',
@@ -225,6 +238,16 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.reposicion.ver',
       'costeo.reposicion.despachar',
     ],
+  ],
+  // Costos de insumos para quien tiene las facturas en la mano (2026-11-26). ADITIVO: se le
+  // agrega a la persona desde /usuarios junto a su rol de bodega (los permisos son la unión de
+  // sus roles). Es un rol aparte y no parte de BODEGUERO porque en producción BODEGUERO fue
+  // personalizado desde /roles (el seed no le toca permisos) y porque así el costo lo ve solo
+  // quien lo maneja, no todo el que da de alta insumos.
+  [
+    'INVENTARIO_COSTOS',
+    'Inventario — Costos de insumos',
+    permisosInventario(['insumo.ver', 'costo.ver', 'costo.editar']),
   ],
   // Un rol por paso del flujo de validaciones de reposiciones. Cada uno ve el
   // seguimiento y valida (o devuelve) SOLO su paso.
@@ -318,7 +341,10 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.orden.ver',
       'costeo.reposicion.ver',
       'costeo.reposicion.crear',
-      'recetas.catalogo.ver',
+      // Solo para el selector de "Insumo de tela". Antes era `recetas.catalogo.ver`,
+      // que además le abría productos, clientes y tallas, y le entregaba el costo de
+      // cada insumo en la respuesta. Ahora ve el catálogo SIN costos.
+      'inventario.insumo.ver',
     ],
   ],
   [
@@ -332,6 +358,9 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.of.editar',
       'costeo.insumo.ver',
       'costeo.insumo.editar_costo',
+      // Dueño de los costos: ve el catálogo y fija el precio de cada insumo (los
+      // que da de alta bodega nacen sin costo y le quedan pendientes).
+      ...permisosInventario(['insumo.ver', 'costo.ver', 'costo.editar']),
       'costeo.estandar.ver',
       'costeo.estandar.administrar',
       'costeo.pieza.administrar',
@@ -392,6 +421,7 @@ const ROLES_GRANULARES_COSTEO: Array<[codigo: string, nombre: string, permisos: 
       'costeo.insumo.ver',
       'costeo.insumo.administrar',
       'costeo.insumo.editar_costo',
+      ...permisosInventario(['insumo.ver', 'costo.ver']),
       'costeo.estandar.ver',
       'costeo.estandar.administrar',
       'recetas.catalogo.ver',
@@ -726,20 +756,29 @@ const DESCRIPCIONES_PERMISOS: Record<string, string> = {
 
   // ── Recetas ──
   'recetas.catalogo.ver':
-    'Leer el catálogo de insumos, productos y tallas (lo necesitan algunos selectores de Costeo)',
+    'Leer productos, desarrollos (con sus costos), clientes y tallas (lo necesitan algunos selectores de Costeo). Los insumos ya no van acá: son de Inventario',
   'recetas.cotizaciones.ver': 'Entrar al módulo Recetas y ver el historial de cotizaciones',
   'recetas.cotizaciones.crear': 'Guardar cotizaciones nuevas',
-  'recetas.insumos.crear': 'Dar de alta insumos',
-  'recetas.insumos.editar': 'Editar insumos y actualizar sus precios',
-  'recetas.insumos.desactivar': 'Retirar insumos del catálogo',
   'recetas.productos.crear': 'Dar de alta productos',
   'recetas.productos.editar': 'Editar productos',
   'recetas.productos.desactivar': 'Retirar productos del catálogo',
   'recetas.desarrollos.crear': 'Crear desarrollos (el prototipo dueño de la receta)',
   'recetas.desarrollos.editar': 'Editar un desarrollo y las líneas de insumo de su receta',
   'recetas.desarrollos.aprobar': 'Aprobar un desarrollo, o reabrirlo a borrador',
-  'recetas.recetas.editar': 'Editar las líneas de receta de un desarrollo',
-  'recetas.importar': 'Usar los imports masivos de Excel de Gestión de datos',
+  'recetas.recetas.editar': 'Editar las líneas de receta de un desarrollo (para elegir insumos necesita además Inventario: ver insumos)',
+  'recetas.importar': 'Usar los imports masivos de Excel de productos y desarrollos',
+
+  // ── Inventario ──
+  'inventario.insumo.ver':
+    'Entrar a Inventario y ver el catálogo de insumos (sin costos). También alimenta el selector de insumos de otras pantallas',
+  'inventario.insumo.crear': 'Dar de alta insumos, uno por uno (el código es el del SAC)',
+  'inventario.insumo.editar': 'Cambiar la descripción, categoría y unidad de un insumo ya existente',
+  'inventario.insumo.desactivar': 'Retirar insumos del catálogo, o reactivarlos',
+  'inventario.insumo.importar': 'Dar de alta insumos por plantilla de Excel',
+  'inventario.costo.ver':
+    'Ver el costo promedio de los insumos (pestaña Costos). Es información confidencial: sin este permiso el costo ni viaja en la respuesta',
+  'inventario.costo.editar':
+    'Fijar el costo de los insumos, uno por uno o por plantilla, y poner costo inicial al darlos de alta',
 
   // ── Costeo: rollos ──
   'costeo.rollo.ver': 'Ver el panel de estado de las impresoras y sus rollos',
@@ -944,7 +983,71 @@ async function seedCosteo() {
   return { departamentos, defectos, tiposPapel, impresoras, calandras, tiposServicio }
 }
 
+// Quién heredaba qué cuando los insumos eran de Recetas (2026-11-26): permiso
+// viejo → permisos nuevos de Inventario. Existe por los roles PERSONALIZADOS
+// (en producción lo están varios): el seed no les toca los permisos, así que sin
+// esto perderían el acceso a insumos en silencio al desplegar.
+//
+// `recetas.catalogo.ver` hereda SOLO `insumo.ver`, NUNCA `costo.ver`: que ese
+// permiso entregara el costo en cada respuesta es justo la fuga que se cierra.
+const HERENCIA_INVENTARIO: Array<[viejo: string, nuevos: string[]]> = [
+  ['recetas.catalogo.ver', ['inventario.insumo.ver']],
+  ['recetas.insumos.crear', ['inventario.insumo.ver', 'inventario.insumo.crear']],
+  [
+    'recetas.insumos.editar',
+    ['inventario.insumo.ver', 'inventario.insumo.editar', 'inventario.costo.ver', 'inventario.costo.editar'],
+  ],
+  ['recetas.insumos.desactivar', ['inventario.insumo.ver', 'inventario.insumo.desactivar']],
+  ['recetas.importar', ['inventario.insumo.ver', 'inventario.insumo.importar']],
+  // El editor de receta lista los insumos y muestra su costo promedio.
+  ['recetas.recetas.editar', ['inventario.insumo.ver', 'inventario.costo.ver']],
+]
+
+// Permisos que se retiran del catálogo: ya nada los exige.
+const PERMISOS_RETIRADOS = ['recetas.insumos.crear', 'recetas.insumos.editar', 'recetas.insumos.desactivar']
+
+/**
+ * Herencia de UNA SOLA VEZ (y solo hacia roles personalizados): solo para los permisos `inventario.*` que esta
+ * corrida del seed acaba de crear. Si no, un rol personalizado al que un
+ * administrador le quitó a propósito un permiso desde /roles lo recuperaría en
+ * cada despliegue.
+ */
+async function heredarPermisosInventario(creadosEnEstaCorrida: Set<string>) {
+  if (creadosEnEstaCorrida.size === 0) return 0
+  let asignados = 0
+  for (const [viejo, nuevos] of HERENCIA_INVENTARIO) {
+    const aDar = nuevos.filter((n) => creadosEnEstaCorrida.has(n))
+    if (aDar.length === 0) continue
+    const roles = await prisma.rolPermiso.findMany({
+      // Solo roles personalizados: los demás ya reciben lo suyo de las listas de
+      // arriba, y heredar ahí le daría (por ejemplo) insumos al Cotizador.
+      where: { permiso: { codigo: viejo }, rol: { personalizado: true } },
+      select: { idRol: true },
+    })
+    for (const codigo of aDar) {
+      const permiso = await prisma.permiso.findUnique({ where: { codigo } })
+      if (!permiso) continue
+      for (const { idRol } of roles) {
+        const r = await prisma.rolPermiso.upsert({
+          where: { idRol_idPermiso: { idRol, idPermiso: permiso.idPermiso } },
+          update: {},
+          create: { idRol, idPermiso: permiso.idPermiso },
+        })
+        if (r) asignados++
+      }
+    }
+  }
+  return asignados
+}
+
 async function main() {
+  // Se toma ANTES de sembrar los roles: ahí es donde se crean los permisos.
+  const inventarioExistente = new Set(
+    (await prisma.permiso.findMany({ where: { codigo: { startsWith: 'inventario.' } }, select: { codigo: true } })).map(
+      (p) => p.codigo,
+    ),
+  )
+
   const gtq = await prisma.moneda.upsert({
     where: { codigoIso: 'GTQ' },
     update: {},
@@ -983,6 +1086,22 @@ async function main() {
   const rolesGranularesCosteo = await Promise.all(
     ROLES_GRANULARES_COSTEO.map(([codigo, nombre, permisos]) => upsertRolConPermisos(codigo, nombre, permisos)),
   )
+
+  const inventarioNuevo = new Set(
+    (await prisma.permiso.findMany({ where: { codigo: { startsWith: 'inventario.' } }, select: { codigo: true } }))
+      .map((p) => p.codigo)
+      .filter((c) => !inventarioExistente.has(c)),
+  )
+  const heredados = await heredarPermisosInventario(inventarioNuevo)
+
+  // Con la herencia ya hecha, los permisos viejos de insumos se retiran del
+  // catálogo (ya nada los exige y seguirían apareciendo en /roles como letra muerta).
+  const retirados = await prisma.permiso.findMany({ where: { codigo: { in: PERMISOS_RETIRADOS } } })
+  if (retirados.length > 0) {
+    const ids = retirados.map((p) => p.idPermiso)
+    await prisma.rolPermiso.deleteMany({ where: { idPermiso: { in: ids } } })
+    await prisma.permiso.deleteMany({ where: { idPermiso: { in: ids } } })
+  }
 
   const costeo = await seedCosteo()
 
@@ -1027,6 +1146,11 @@ async function main() {
       `${costeo.calandras.length} calandras, ${costeo.tiposServicio.length} tipos de servicio`,
   )
   console.log(`Roles granulares Costeo: ${rolesGranularesCosteo.map((r) => r.codigo).join(', ')}`)
+  if (inventarioNuevo.size > 0)
+    console.log(
+      `Inventario: ${inventarioNuevo.size} permisos nuevos, ${heredados} asignaciones heredadas de los permisos viejos de insumos` +
+        (retirados.length > 0 ? `; ${retirados.length} permisos viejos retirados` : ''),
+    )
   // Se avisa fuerte: un rol personalizado NO recibe los permisos nuevos de esta
   // release. Si hace falta, se agregan a mano desde la pantalla de Roles.
   if (rolesPersonalizadosOmitidos.length > 0)

@@ -12,6 +12,7 @@ import { ReposicionesPage } from '@/features/costeo-reposiciones/reposiciones-pa
 import { SeguimientoReposicionesPage } from '@/features/costeo-reposiciones/seguimiento/seguimiento-page'
 import { RollosPage } from '@/features/costeo-rollos/rollos-page'
 import { InicioPage } from '@/features/inicio/inicio-page'
+import { InventarioPage } from '@/features/inventario/inventario-page'
 import { CotizacionPage } from '@/features/recetas/cotizacion-page'
 import { OrdenesFacturacionPage } from '@/features/costeo-facturacion/ordenes-facturacion-page'
 import { MaterialesPage } from '@/features/costeo-materiales/materiales-page'
@@ -95,7 +96,6 @@ function App() {
               element={
                 <RutaConPermiso
                   permisos={[
-                    'recetas.insumos.editar',
                     'recetas.productos.editar',
                     // Un rol que solo pudiera diseñar desarrollos llegaba a la
                     // API pero nunca a la pantalla que la usa.
@@ -105,6 +105,14 @@ function App() {
                   ]}
                 >
                   <CatalogoPage />
+                </RutaConPermiso>
+              }
+            />
+            <Route
+              path="inventario/insumos"
+              element={
+                <RutaConPermiso permisos={['inventario.insumo.ver']}>
+                  <InventarioPage />
                 </RutaConPermiso>
               }
             />

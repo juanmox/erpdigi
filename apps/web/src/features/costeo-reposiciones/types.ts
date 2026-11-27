@@ -29,7 +29,7 @@ export interface InsumoTela {
   /** Nombre de la categoría. Se usa para quedarse solo con las telas. */
   categoria?: string
   /**
-   * Nombre de la unidad. Ojo: el catálogo (`/recetas/insumos`) la devuelve
+   * Nombre de la unidad. Ojo: el catálogo (`/inventario/insumos`) la devuelve
    * como texto plano, mientras que la línea ya guardada
    * (`ReposicionInsumo.insumo.unidad`) la trae como `{ nombre }` — son dos
    * formas distintas del mismo dato, no un descuido.

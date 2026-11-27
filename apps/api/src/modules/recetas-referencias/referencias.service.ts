@@ -49,16 +49,6 @@ export class ReferenciasService {
     return this.prisma.areaUso.findMany({ orderBy: { nombre: 'asc' } });
   }
 
-  categoriasInsumo() {
-    return this.prisma.categoriaInsumo.findMany({
-      orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
-    });
-  }
-
-  unidadesMedida() {
-    return this.prisma.unidadMedida.findMany({ orderBy: { nombre: 'asc' } });
-  }
-
   async deporteEsValido(deporte?: string | null): Promise<boolean> {
     if (!deporte || !deporte.trim()) return true;
     const existe = await this.prisma.deporte.findFirst({

@@ -1,30 +1,6 @@
-export interface CategoriaInsumo {
-  idCategoria: number
-  nombre: string
-  orden: number
-}
-
-export interface UnidadMedida {
-  idUnidad: number
-  nombre: string
-}
-
 export interface AreaUso {
   idArea: number
   nombre: string
-}
-
-export interface InsumoCatalogo {
-  idInsumo: number
-  codigo: string
-  descripcion: string
-  activo: boolean
-  idCategoria: number
-  idUnidad: number
-  costoPromedio: number
-  categoria: string
-  ordenCategoria: number
-  unidad: string
 }
 
 export interface Cliente {
@@ -145,30 +121,6 @@ export interface ManoObraDesarrollo {
 export interface DesarrolloDetalle extends Desarrollo {
   insumos: LineaReceta[]
   manoObra: ManoObraDesarrollo | null
-}
-
-export interface FilaPreviewPrecio {
-  fila: number
-  codigo: string
-  encontrado: boolean
-  idInsumo: number | null
-  descripcion: string | null
-  costoActual: number | null
-  costoNuevo: number | null
-  delta: number | null
-  error: string | null
-}
-
-export interface FilaPreviewAltaInsumo {
-  fila: number
-  codigo: string
-  descripcion: string
-  categoria: string
-  unidad: string
-  idCategoria: number | null
-  idUnidad: number | null
-  costoInicial: number | null
-  error: string | null
 }
 
 export interface FilaPreviewAltaProducto {

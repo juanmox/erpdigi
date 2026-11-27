@@ -152,7 +152,7 @@ export function ReposicionesPage() {
   const { data: calandras } = useQuery({ queryKey: ['costeo-reposiciones', 'calandras'], queryFn: () => costeoReposicionesApi.calandras() })
   const { data: todosLosInsumos } = useQuery({ queryKey: ['costeo-reposiciones', 'insumos'], queryFn: () => costeoReposicionesApi.insumos() })
 
-  // `/recetas/insumos` devuelve el catálogo completo, así que el selector
+  // `/inventario/insumos` devuelve el catálogo completo, así que el selector
   // ofrecía también hilos, elásticos, etiquetas y herrajes — reportado por el
   // usuario. El campo es "Insumo de tela", así que solo van las telas.
   //

@@ -181,10 +181,10 @@ export function CotizacionPage() {
   const puedeVerCotizaciones = tienePermiso('recetas.cotizaciones.ver')
   const puedeCrearCotizaciones = tienePermiso('recetas.cotizaciones.crear')
   // Antes vivía en el sidebar principal, mezclado con módulos de negocio —
-  // Gestión de datos es en realidad parte del flujo de Recetas (catálogo de
-  // insumos/productos que alimenta la cotización), así que se movió acá.
+  // Gestión de datos es en realidad parte del flujo de Recetas (desarrollos y
+  // productos que alimentan la cotización), así que se movió acá. Los insumos
+  // ya no están: son de Inventario.
   const puedeGestionarDatos =
-    tienePermiso('recetas.insumos.editar') ||
     tienePermiso('recetas.productos.editar') ||
     tienePermiso('recetas.desarrollos.editar') ||
     tienePermiso('recetas.recetas.editar') ||

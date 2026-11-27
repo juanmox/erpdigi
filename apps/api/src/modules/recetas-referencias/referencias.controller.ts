@@ -31,14 +31,7 @@ export class ReferenciasController {
   areasUso() {
     return this.referenciasService.areasUso();
   }
-
-  @Get('recetas/categorias-insumo')
-  categoriasInsumo() {
-    return this.referenciasService.categoriasInsumo();
-  }
-
-  @Get('recetas/unidades-medida')
-  unidadesMedida() {
-    return this.referenciasService.unidadesMedida();
-  }
+  // Categorías de insumo y unidades de medida ya no están acá: son del
+  // catálogo de insumos de Inventario (`inventario/insumos/categorias` y
+  // `/unidades`, bajo `inventario.insumo.ver`).
 }

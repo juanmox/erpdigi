@@ -10,6 +10,8 @@ export interface ModuloInfo {
   descripcion: string
   /** Presente solo en módulos activos. */
   ruta?: string
+  /** Permiso que da acceso al módulo. Sin él, el mosaico de Inicio no lo ofrece. */
+  permiso?: string
   activo: boolean
 }
 
@@ -19,13 +21,16 @@ export const MODULOS: ModuloInfo[] = [
     nombre: 'Recetas',
     descripcion: 'Cotización, catálogo de insumos y productos, costeo por receta.',
     ruta: '/recetas',
+    permiso: 'recetas.cotizaciones.ver',
     activo: true,
   },
   {
     codigo: 'IV',
     nombre: 'Inventario',
-    descripcion: 'Rollos de tela, insumos y ubicaciones de almacén.',
-    activo: false,
+    descripcion: 'Catálogo de insumos y sus costos. Rollos y almacenes, próximamente.',
+    ruta: '/inventario/insumos',
+    permiso: 'inventario.insumo.ver',
+    activo: true,
   },
   {
     codigo: 'CO',
