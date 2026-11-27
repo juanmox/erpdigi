@@ -40,7 +40,7 @@ export function EstandarPage() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader seccion>
           <CardTitle className="text-base">Consumos registrados</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">

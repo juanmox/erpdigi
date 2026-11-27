@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { TituloSeccion } from '@/components/shared/titulo-seccion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -170,7 +171,7 @@ export function TablaOrdenes({ onAbrirOrden }: { onAbrirOrden: (codigo: string) 
     <div className="space-y-3">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold text-ink">Órdenes cargadas</h2>
+          <TituloSeccion>Órdenes cargadas</TituloSeccion>
           <p className="text-muted-foreground text-sm">
             {isLoading
               ? 'Cargando…'

@@ -75,7 +75,7 @@ export function OrdenesPage() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader seccion>
           <CardTitle className="text-base">Buscar OP</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">

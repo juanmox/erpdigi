@@ -80,7 +80,7 @@ export function TabTiempos() {
       {m && (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader seccion>
               <CardTitle className="text-base">Esperando ahora</CardTitle>
             </CardHeader>
             <CardContent>
@@ -116,7 +116,7 @@ export function TabTiempos() {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader seccion>
               <CardTitle className="text-base">Cumplimiento por corte</CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -182,7 +182,7 @@ export function TabTiempos() {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader seccion>
               <CardTitle className="text-base">Validaciones listas para el corte (pasos 2 a 5)</CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -229,7 +229,7 @@ export function TabTiempos() {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader seccion>
               <CardTitle className="text-base">Cuánto tarda cada paso</CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -273,7 +273,7 @@ export function TabTiempos() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
-              <CardHeader>
+              <CardHeader seccion>
                 <CardTitle className="text-base">Por validador</CardTitle>
               </CardHeader>
               <CardContent className="overflow-x-auto">
@@ -304,7 +304,7 @@ export function TabTiempos() {
               </CardContent>
             </Card>
             <Card>
-              <CardHeader>
+              <CardHeader seccion>
                 <CardTitle className="text-base">Devoluciones por creador</CardTitle>
               </CardHeader>
               <CardContent className="overflow-x-auto">
@@ -331,7 +331,7 @@ export function TabTiempos() {
           </div>
 
           <Card>
-            <CardHeader>
+            <CardHeader seccion>
               <CardTitle className="text-base">Últimas devoluciones</CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-auto">

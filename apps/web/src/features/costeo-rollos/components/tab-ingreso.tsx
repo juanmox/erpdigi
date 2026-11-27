@@ -94,7 +94,7 @@ export function TabIngreso() {
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+        <CardHeader seccion className="flex flex-row items-center justify-between gap-2 space-y-0">
           <CardTitle className="text-base">Ingreso a bodega</CardTitle>
           {/* Cargar factura por factura es razonable para una compra suelta,
               pero no para poner al día la bodega. */}
@@ -201,7 +201,7 @@ export function TabIngreso() {
 
       {resultado && (
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">
               Factura {resultado.numeroFactura} · {resultado.tipoPapel.nombre} — {resultado.rollos.length} rollos creados
             </CardTitle>

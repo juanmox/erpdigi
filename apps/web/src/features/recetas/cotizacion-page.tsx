@@ -192,7 +192,7 @@ export function CotizacionPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-semibold">Cotización de recetas</h1>
           {tipoCambio && (
@@ -201,7 +201,7 @@ export function CotizacionPage() {
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex overflow-hidden rounded-md border">
             <Button
               variant={moneda === 'USD' ? 'default' : 'ghost'}
@@ -236,7 +236,7 @@ export function CotizacionPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
         <div className="space-y-4 lg:col-span-3">
           <Card className="overflow-visible">
-            <CardHeader>
+            <CardHeader seccion>
               <CardTitle className="text-base">Buscar producto</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -373,7 +373,7 @@ export function CotizacionPage() {
 
         <div className="lg:col-span-2">
           <Card>
-            <CardHeader>
+            <CardHeader seccion>
               <CardTitle className="text-base">Productos acumulados</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">

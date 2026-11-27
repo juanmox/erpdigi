@@ -522,7 +522,7 @@ export function ReposicionesPage() {
           `overflow-x-auto`. Mismo defecto ya visto en ImportPreviewDialog. */}
       <div className="min-w-0 space-y-4">
       <Card>
-        <CardHeader>
+        <CardHeader seccion>
           <CardTitle className="text-base">1. Orden de Producción</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -568,7 +568,7 @@ export function ReposicionesPage() {
 
       {opBuscada && (
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">2. Datos de la reposición</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -867,7 +867,7 @@ export function ReposicionesPage() {
 
       {opBuscada && reposiciones && reposiciones.length > 0 && (
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">Reposiciones de esta OP</CardTitle>
           </CardHeader>
           <CardContent>

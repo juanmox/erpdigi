@@ -350,7 +350,7 @@ export function ReportesPage() {
             </TituloSeccion>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[1000px]">
-                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
+                <TableHeader>
                   <TableRow>
                     <TableHead>OP</TableHead>
                     <TableHead>Cliente</TableHead>
@@ -424,7 +424,7 @@ export function ReportesPage() {
             </TituloSeccion>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[760px]">
-                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
+                <TableHeader>
                   <TableRow>
                     <TableHead>OF</TableHead>
                     <TableHead>Fecha OF</TableHead>
@@ -461,7 +461,7 @@ export function ReportesPage() {
             </TituloSeccion>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[1000px]">
-                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
+                <TableHeader>
                   <TableRow>
                     <TableHead>Fecha</TableHead>
                     <TableHead>OP</TableHead>
@@ -506,7 +506,7 @@ export function ReportesPage() {
             </TituloSeccion>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[1100px]">
-                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
+                <TableHeader>
                   <TableRow>
                     <TableHead>Fecha</TableHead>
                     <TableHead>OP</TableHead>
@@ -562,7 +562,7 @@ export function ReportesPage() {
             </p>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[1000px]">
-                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
+                <TableHeader>
                   <TableRow>
                     <TableHead>OP</TableHead>
                     <TableHead>Orden plan.</TableHead>

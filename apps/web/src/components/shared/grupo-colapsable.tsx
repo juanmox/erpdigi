@@ -30,7 +30,7 @@ export function GrupoColapsable({ titulo, defaultAbierto = true, children }: Gru
       <button
         type="button"
         onClick={() => setAbierto((v) => !v)}
-        className="flex w-full items-center gap-1.5 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-ink-muted"
+        className="flex w-full items-center gap-1.5 rounded-md border-l-4 border-l-accent-brand bg-accent-brand-soft px-2 py-1.5 text-left text-xs font-bold uppercase tracking-wide text-accent-brand-strong"
       >
         <ChevronDownIcon className={cn('size-3.5 transition-transform', !abierto && '-rotate-90')} />
         {titulo}

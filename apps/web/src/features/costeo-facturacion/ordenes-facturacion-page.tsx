@@ -95,7 +95,7 @@ export function OrdenesFacturacionPage() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader seccion>
           <CardTitle className="text-base">Filtros</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -165,7 +165,7 @@ export function OrdenesFacturacionPage() {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader seccion>
           <CardTitle className="text-base">
             {ofs ? `${ofs.length} orden(es) de facturación` : 'Resultados'}
           </CardTitle>

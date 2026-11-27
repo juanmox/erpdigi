@@ -114,7 +114,7 @@ export function HistorialIngresos() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader seccion>
         <CardTitle className="text-base">Lo que se ha cargado a bodega</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">

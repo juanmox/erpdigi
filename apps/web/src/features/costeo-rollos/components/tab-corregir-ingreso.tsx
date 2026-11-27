@@ -203,7 +203,7 @@ export function TabCorregirIngreso() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <Card>
-        <CardHeader>
+        <CardHeader seccion>
           <CardTitle className="text-base">Buscar factura de papel</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -229,7 +229,7 @@ export function TabCorregirIngreso() {
 
       {candidatas.length > 1 && (
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">
               Esta factura trae {candidatas.length} artículos — elegí cuál corregir
             </CardTitle>
@@ -270,7 +270,7 @@ export function TabCorregirIngreso() {
           agotado. */}
       {factura && (
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">Asignar ubicación</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -338,7 +338,7 @@ export function TabCorregirIngreso() {
           los que tengan historial de montaje. */}
       {factura && puedeMarcarFuera && (
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">Sacar rollos de circulación</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -421,7 +421,7 @@ export function TabCorregirIngreso() {
 
       {factura && factura.editable && (
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">
               Corregir ingreso — {factura.tipoPapel.nombre}, {factura.rollos.length} rollos
             </CardTitle>

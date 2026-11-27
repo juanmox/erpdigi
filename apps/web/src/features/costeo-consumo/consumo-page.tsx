@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { TituloSeccion } from '@/components/shared/titulo-seccion'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -480,7 +481,7 @@ export function ConsumoPage() {
       {panelAbierto && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-semibold text-ink">Trabajo pendiente</h2>
+            <TituloSeccion>Trabajo pendiente</TituloSeccion>
             {totalSeleccionado > 0 && (
               <span className="text-ink-faint text-xs">
                 {ordenesTocadas.size} orden(es) · {totalSeleccionado} línea(s) por enviar

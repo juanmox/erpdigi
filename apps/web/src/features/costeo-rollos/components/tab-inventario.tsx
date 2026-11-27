@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { useMarcaEmpresa } from '@/app/marca-empresa'
+import { TituloSeccion } from '@/components/shared/titulo-seccion'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -105,7 +106,7 @@ export function TabInventario() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-ink text-sm font-semibold">Inventario de rollos</h2>
+          <TituloSeccion>Inventario de rollos</TituloSeccion>
           <p className="text-ink-faint text-xs">
             Para el conteo físico de bodega y para revisar que lo registrado cuadre con lo real.
           </p>
@@ -169,7 +170,7 @@ export function TabInventario() {
       {/* El balance es lo que vuelve auditable al resto: lo comprado tiene que
           repartirse entre lo consumido y lo que todavía existe. */}
       <Card>
-        <CardHeader>
+        <CardHeader seccion>
           <CardTitle className="text-base">Balance de papel</CardTitle>
         </CardHeader>
         <CardContent>
@@ -208,7 +209,7 @@ export function TabInventario() {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader seccion>
           <CardTitle className="text-base">Por ubicación</CardTitle>
         </CardHeader>
         <CardContent>
@@ -244,7 +245,7 @@ export function TabInventario() {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader seccion>
           <CardTitle className="text-base">Por tipo de papel</CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -281,7 +282,7 @@ export function TabInventario() {
       {/* Señales: lo que conviene revisar, no errores. */}
       <div className="grid gap-3 lg:grid-cols-2">
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">
               Rollos empezados en bodega ({s.parciales.length})
             </CardTitle>
@@ -313,7 +314,7 @@ export function TabInventario() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">
               Papel usado que nadie registró ({s.agotadosConSaldo.length})
             </CardTitle>
@@ -346,7 +347,7 @@ export function TabInventario() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">Antigüedad del papel en bodega</CardTitle>
           </CardHeader>
           <CardContent>
@@ -365,7 +366,7 @@ export function TabInventario() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader seccion>
             <CardTitle className="text-base">
               Montajes abiertos hace mucho ({s.montajesLargos.length})
             </CardTitle>
@@ -406,7 +407,7 @@ export function TabInventario() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-2 space-y-0">
+        <CardHeader seccion className="flex flex-row flex-wrap items-end justify-between gap-2 space-y-0">
           <CardTitle className="text-base">Rollos en bodega ({enBodegaFiltrado.length})</CardTitle>
           <div>
             <Label className="mb-1 block text-xs">Buscar rollo, factura o tipo</Label>

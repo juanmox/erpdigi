@@ -21,7 +21,7 @@ export function CardReceta({ receta, moneda, tasa }: CardRecetaProps) {
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between">
+      <CardHeader seccion className="flex-row items-center justify-between">
         <div>
           <p className="font-semibold">
             {producto.codigo} · {producto.descripcion}

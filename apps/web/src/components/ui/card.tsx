@@ -20,12 +20,27 @@ function Card({
   )
 }
 
-function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
+/**
+ * `seccion`: el encabezado pasa a una banda con el tinte y el filo del azul de marca,
+ * pegada al borde de la tarjeta (el margen negativo cancela el padding superior de
+ * `Card`). Es la misma señal de `FilaCategoria` y `TituloSeccion`: en pantallas con
+ * muchas tarjetas apiladas, el título gris sobre blanco no separaba una de otra.
+ * ⚠️ El `[.border-b]:pb-1.5` es necesario: `border-b` activa la regla base `[.border-b]:pb-(--card-spacing)`
+ * (16 px abajo) y pisaba el relleno de la banda, que quedaba descentrada (más aire abajo que arriba).
+ * Opt-in a propósito: el login y otras tarjetas sueltas siguen con el encabezado liso.
+ */
+function CardHeader({
+  className,
+  seccion,
+  ...props
+}: React.ComponentProps<"div"> & { seccion?: boolean }) {
   return (
     <div
       data-slot="card-header"
       className={cn(
         "group/card-header @container/card-header grid auto-rows-min items-start gap-1 rounded-t-xl px-(--card-spacing) has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-description]:grid-rows-[auto_auto] [.border-b]:pb-(--card-spacing)",
+        seccion &&
+          "-mt-(--card-spacing) border-b border-l-4 border-b-accent-brand/20 border-l-accent-brand bg-accent-brand-soft pt-1.5 pb-1.5 [.border-b]:pb-1.5 [&_[data-slot=card-title]]:text-[15px] [&_[data-slot=card-title]]:font-bold [&_[data-slot=card-title]]:text-accent-brand-strong",
         className
       )}
       {...props}

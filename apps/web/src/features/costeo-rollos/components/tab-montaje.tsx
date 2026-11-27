@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { TituloSeccion } from '@/components/shared/titulo-seccion'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -122,7 +123,7 @@ export function TabMontaje() {
   if (!impresora) {
     return (
       <div className="space-y-3">
-        <h2 className="text-sm font-medium text-ink-muted">1. Elegí la impresora</h2>
+        <TituloSeccion>1. Elegí la impresora</TituloSeccion>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {impresoras?.map((i) => {
             // Desde el 2026-10-09 el servidor RECHAZA montar sobre una
@@ -174,9 +175,9 @@ export function TabMontaje() {
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-ink-muted">
-            2. Elegí el rollo para <span className="font-mono font-semibold text-ink">{impresora.codigo}</span>
-          </h2>
+          <TituloSeccion className="flex-1">
+            2. Elegí el rollo para <span className="font-mono">{impresora.codigo}</span>
+          </TituloSeccion>
           <Button variant="outline" size="sm" onClick={volver}>
             Cambiar impresora
           </Button>
@@ -259,7 +260,7 @@ export function TabMontaje() {
 
   return (
     <div className="mx-auto max-w-md space-y-4 py-8 text-center">
-      <h2 className="text-sm font-medium text-ink-muted">3. Confirmar</h2>
+      <TituloSeccion>3. Confirmar</TituloSeccion>
       <div className="rounded-xl border border-border bg-card p-6">
         <div className="text-sm text-ink-muted">Impresora</div>
         <div className="mb-3 font-mono text-xl font-bold text-ink">{impresora.codigo}</div>
