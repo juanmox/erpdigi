@@ -1,4 +1,5 @@
 import { Fragment } from 'react'
+import { FilaCategoria } from '@/components/shared/fila-categoria'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatMonto, formatPrecioVenta, textoPctCostoMargen, type CodigoMoneda } from '@digitexsa-erp/shared-utils'
@@ -81,11 +82,7 @@ export function CardReceta({ receta, moneda, tasa }: CardRecetaProps) {
             <TableBody>
               {Object.entries(grupos).map(([categoria, filas]) => (
                 <Fragment key={categoria}>
-                  <TableRow className="bg-muted">
-                    <TableCell colSpan={5} className="text-xs font-bold tracking-wide uppercase">
-                      {categoria}
-                    </TableCell>
-                  </TableRow>
+                  <FilaCategoria colSpan={5} titulo={categoria} cantidad={filas.length} />
                   {filas.map((i) => (
                     <TableRow key={`${i.codigo}-${i.area}`}>
                       <TableCell className="whitespace-normal">
@@ -101,11 +98,7 @@ export function CardReceta({ receta, moneda, tasa }: CardRecetaProps) {
                   ))}
                 </Fragment>
               ))}
-              <TableRow className="bg-muted">
-                <TableCell colSpan={5} className="text-xs font-bold tracking-wide uppercase">
-                  {manoObra.categoria}
-                </TableCell>
-              </TableRow>
+              <FilaCategoria colSpan={5} titulo={manoObra.categoria} />
               <TableRow>
                 <TableCell className="whitespace-normal">{manoObra.descripcion}</TableCell>
                 <TableCell>

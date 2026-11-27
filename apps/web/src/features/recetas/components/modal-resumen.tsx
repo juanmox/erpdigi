@@ -1,4 +1,5 @@
 import { Fragment } from 'react'
+import { FilaCategoria } from '@/components/shared/fila-categoria'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -69,11 +70,7 @@ export function ModalResumen({ resumen, onClose }: ModalResumenProps) {
             <TableBody>
               {Object.entries(grupos).map(([categoria, filas]) => (
                 <Fragment key={categoria}>
-                  <TableRow className="bg-muted">
-                    <TableCell colSpan={3} className="text-xs font-bold uppercase">
-                      {categoria}
-                    </TableCell>
-                  </TableRow>
+                  <FilaCategoria colSpan={3} titulo={categoria} cantidad={filas.length} />
                   {filas.map((i) => (
                     <TableRow key={i.codigo}>
                       <TableCell className="whitespace-normal">
@@ -87,11 +84,7 @@ export function ModalResumen({ resumen, onClose }: ModalResumenProps) {
                   ))}
                 </Fragment>
               ))}
-              <TableRow className="bg-muted">
-                <TableCell colSpan={3} className="text-xs font-bold uppercase">
-                  Mano de obra
-                </TableCell>
-              </TableRow>
+              <FilaCategoria colSpan={3} titulo="Mano de obra" />
               <TableRow>
                 <TableCell>Mano de obra</TableCell>
                 <TableCell className="text-right tabular-nums">

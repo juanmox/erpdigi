@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TituloSeccion } from '@/components/shared/titulo-seccion'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { resumirMateriales } from '@/lib/materiales'
 import { resumirPrendas } from '@/lib/prendas'
@@ -37,7 +38,7 @@ const TOPE_FILAS = 200
 /** "(N registro(s))", y si se topó, cuántos se ven y dónde están todos. */
 function ConteoFilas({ total }: { total: number }) {
   return (
-    <span className="text-muted-foreground text-sm font-normal">
+    <span className="text-ink-muted text-sm font-medium">
       ({total.toLocaleString('es-GT')} registro(s)
       {total > TOPE_FILAS && (
         <> · se muestran los primeros {TOPE_FILAS}; el Excel los trae todos</>
@@ -344,12 +345,12 @@ export function ReportesPage() {
       {hayDatos && data && (
         <>
           <section className="space-y-2">
-            <h2 className="text-base font-semibold text-ink">
+            <TituloSeccion>
               Resumen por orden <ConteoFilas total={data.resumen.length} />
-            </h2>
+            </TituloSeccion>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[1000px]">
-                <TableHeader>
+                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
                   <TableRow>
                     <TableHead>OP</TableHead>
                     <TableHead>Cliente</TableHead>
@@ -392,7 +393,7 @@ export function ReportesPage() {
                       )}
                     </TableRow>
                   ))}
-                  <TableRow className="bg-black/[0.04] dark:bg-white/[0.05]">
+                  <TableRow className="border-t-2 border-t-accent-brand bg-accent-brand-soft hover:bg-accent-brand-soft">
                     <TableCell colSpan={4} className="font-semibold">TOTAL</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.impresionYd)}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">{yd(data.totales.enguiamientoYd)}</TableCell>
@@ -418,12 +419,12 @@ export function ReportesPage() {
           </section>
 
           <section className="space-y-2">
-            <h2 className="text-base font-semibold text-ink">
+            <TituloSeccion>
               Resumen por OF <ConteoFilas total={data.resumenPorOf.length} />
-            </h2>
+            </TituloSeccion>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[760px]">
-                <TableHeader>
+                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
                   <TableRow>
                     <TableHead>OF</TableHead>
                     <TableHead>Fecha OF</TableHead>
@@ -454,13 +455,13 @@ export function ReportesPage() {
           </section>
 
           <section className="space-y-2">
-            <h2 className="text-base font-semibold text-ink">
+            <TituloSeccion>
               Detalle de impresión{' '}
               <ConteoFilas total={data.detalleImpresion.length} />
-            </h2>
+            </TituloSeccion>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[1000px]">
-                <TableHeader>
+                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
                   <TableRow>
                     <TableHead>Fecha</TableHead>
                     <TableHead>OP</TableHead>
@@ -499,13 +500,13 @@ export function ReportesPage() {
           </section>
 
           <section className="space-y-2">
-            <h2 className="text-base font-semibold text-ink">
+            <TituloSeccion>
               Detalle de reposiciones{' '}
               <ConteoFilas total={data.detalleReposiciones.length} />
-            </h2>
+            </TituloSeccion>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[1100px]">
-                <TableHeader>
+                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
                   <TableRow>
                     <TableHead>Fecha</TableHead>
                     <TableHead>OP</TableHead>
@@ -552,16 +553,16 @@ export function ReportesPage() {
           </section>
 
           <section className="space-y-2">
-            <h2 className="text-base font-semibold text-ink">
+            <TituloSeccion>
               Materiales de las órdenes <ConteoFilas total={data.detalleMateriales.length} />
-            </h2>
+            </TituloSeccion>
             <p className="text-muted-foreground text-xs">
               Lo que el planificador pidió a bodega para estas órdenes (explosión de materiales). Las cantidades no se
               suman entre insumos: cada uno trae su unidad.
             </p>
             <div className="overflow-x-auto rounded-md border border-border">
               <Table className="min-w-[1000px]">
-                <TableHeader>
+                <TableHeader className="bg-accent-brand-soft/60 [&_th]:font-bold [&_th]:text-accent-brand-strong">
                   <TableRow>
                     <TableHead>OP</TableHead>
                     <TableHead>Orden plan.</TableHead>

@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useMemo, useState } from 'react'
+import { FilaCategoria } from '@/components/shared/fila-categoria'
 import { ImportPreviewDialog } from '@/components/shared/import-preview-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -192,11 +193,7 @@ export function TabInsumos() {
             )}
             {Object.entries(grupos).map(([categoria, filas]) => (
               <Fragment key={categoria}>
-                <TableRow className="bg-muted">
-                  <TableCell colSpan={verCosto ? 6 : 5} className="text-xs font-bold tracking-wide uppercase">
-                    {categoria}
-                  </TableCell>
-                </TableRow>
+                <FilaCategoria colSpan={verCosto ? 6 : 5} titulo={categoria} cantidad={filas.length} />
                 {filas.map((i) => (
                   <TableRow key={i.idInsumo}>
                     <TableCell className="font-medium">{i.codigo}</TableCell>

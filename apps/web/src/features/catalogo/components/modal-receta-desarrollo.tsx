@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Fragment, useMemo, useState } from 'react'
+import { FilaCategoria } from '@/components/shared/fila-categoria'
 import { AutocompleteBuscador } from '@/components/shared/autocomplete-buscador'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -200,12 +201,7 @@ export function ModalRecetaDesarrollo({ desarrollo, open, onOpenChange, soloLect
                 const subtotal = filas.reduce((acc, f) => acc + f.costoTotal, 0)
                 return (
                   <Fragment key={categoria}>
-                    <TableRow className="bg-muted">
-                      <TableCell colSpan={nCols - 1} className="text-xs font-bold tracking-wide uppercase">
-                        {categoria}
-                      </TableCell>
-                      <TableCell className="text-right text-xs font-bold tabular-nums">{formatGTQ(subtotal)}</TableCell>
-                    </TableRow>
+                    <FilaCategoria colSpan={nCols - 1} titulo={categoria} cantidad={filas.length} extra={formatGTQ(subtotal)} />
                     {filas.map((l) => {
                       const editando = idEditando === l.idDesarrolloInsumo
                       return (
@@ -280,14 +276,7 @@ export function ModalRecetaDesarrollo({ desarrollo, open, onOpenChange, soloLect
 
               {detalle?.manoObra && (
                 <Fragment>
-                  <TableRow className="bg-muted">
-                    <TableCell colSpan={nCols - 1} className="text-xs font-bold tracking-wide uppercase">
-                      Mano de obra
-                    </TableCell>
-                    <TableCell className="text-right text-xs font-bold tabular-nums">
-                      {formatGTQ(detalle.manoObra.costoTotal)}
-                    </TableCell>
-                  </TableRow>
+                  <FilaCategoria colSpan={nCols - 1} titulo="Mano de obra" extra={formatGTQ(detalle.manoObra.costoTotal)} />
                   <TableRow>
                     <TableCell>Mano de obra</TableCell>
                     <TableCell>{detalle.manoObra.consumo} Minutos</TableCell>
